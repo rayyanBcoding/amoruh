@@ -1,0 +1,24 @@
+{
+  "currentProductId": "p1",
+  "queueIds": [
+    "p6"
+  ],
+  "recentSales": [
+    {
+      "id": "sale_1786151624071_hs0nqt",
+      "productId": "p1",
+      "sku": "LD000101",
+      "brand": "Dior",
+      "name": "Sauvage EDT",
+      "image": "/images/products/dior-sauvage.svg",
+      "color": "#8fa3c9",
+      "price": 54,
+      "soldAt": "2026-08-08T01:13:44.071Z"
+    }
+  ],
+  "flashDeal": {
+    "active": false,
+    "discountPercent": 20,
+    "startedAt": null
+  }
+}

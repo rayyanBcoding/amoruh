@@ -1,0 +1,224 @@
+[
+  {
+    "id": "p1",
+    "sku": "LD000101",
+    "barcode": "LD000101",
+    "brand": "Dior",
+    "name": "Sauvage EDT",
+    "size": "100ml / 3.4oz",
+    "image": "/images/products/dior-sauvage.svg",
+    "color": "#8fa3c9",
+    "retailPrice": 105,
+    "marketPrice": 82,
+    "lootPrice": 54,
+    "topNotes": [
+      "Calabrian Bergamot",
+      "Pepper"
+    ],
+    "middleNotes": [
+      "Sichuan Pepper",
+      "Lavender",
+      "Pink Pepper",
+      "Vetiver",
+      "Patchouli",
+      "Geranium",
+      "Elemi"
+    ],
+    "baseNotes": [
+      "Ambroxan",
+      "Cedar",
+      "Labdanum"
+    ],
+    "projection": "Strong",
+    "longevity": "8-10 hours",
+    "shelf": "A1-03",
+    "inventory": 13,
+    "authentic": true,
+    "tiktokListing": "Dior Sauvage EDT 3.4oz — Authentic Guaranteed",
+    "status": "active",
+    "notes": "Best seller, keep well stocked before every live."
+  },
+  {
+    "id": "p2",
+    "sku": "LD000102",
+    "barcode": "LD000102",
+    "brand": "Chanel",
+    "name": "Bleu de Chanel EDP",
+    "size": "100ml / 3.4oz",
+    "image": "/images/products/bleu-de-chanel.svg",
+    "color": "#3b4a6b",
+    "retailPrice": 168,
+    "marketPrice": 128,
+    "lootPrice": 89,
+    "topNotes": [
+      "Grapefruit",
+      "Lemon",
+      "Mint",
+      "Pink Pepper"
+    ],
+    "middleNotes": [
+      "Ginger",
+      "Nutmeg",
+      "Jasmine",
+      "Melon"
+    ],
+    "baseNotes": [
+      "Incense",
+      "Vetiver",
+      "Cedar",
+      "Sandalwood",
+      "Patchouli"
+    ],
+    "projection": "Moderate-Strong",
+    "longevity": "6-8 hours",
+    "shelf": "A1-07",
+    "inventory": 9,
+    "authentic": true,
+    "tiktokListing": "Chanel Bleu de Chanel EDP 3.4oz — Sealed",
+    "status": "active"
+  },
+  {
+    "id": "p3",
+    "sku": "LD000103",
+    "barcode": "LD000103",
+    "brand": "Versace",
+    "name": "Eros EDT",
+    "size": "100ml / 3.4oz",
+    "image": "/images/products/versace-eros.svg",
+    "color": "#2fb3a0",
+    "retailPrice": 92,
+    "marketPrice": 68,
+    "lootPrice": 39,
+    "topNotes": [
+      "Mint",
+      "Green Apple",
+      "Lemon"
+    ],
+    "middleNotes": [
+      "Tonka Bean",
+      "Ambroxan",
+      "Geranium"
+    ],
+    "baseNotes": [
+      "Vanilla",
+      "Vetiver",
+      "Oakmoss",
+      "Cedar"
+    ],
+    "projection": "Strong",
+    "longevity": "7-9 hours",
+    "shelf": "A2-01",
+    "inventory": 21,
+    "authentic": true,
+    "tiktokListing": "Versace Eros EDT 3.4oz — Fresh Batch",
+    "status": "active"
+  },
+  {
+    "id": "p4",
+    "sku": "LD000104",
+    "barcode": "LD000104",
+    "brand": "Viktor & Rolf",
+    "name": "Spicebomb Extreme",
+    "size": "90ml / 3.04oz",
+    "image": "/images/products/spicebomb-extreme.svg",
+    "color": "#7a1f1f",
+    "retailPrice": 135,
+    "marketPrice": 99,
+    "lootPrice": 62,
+    "topNotes": [
+      "Cinnamon",
+      "Bergamot",
+      "Pink Pepper"
+    ],
+    "middleNotes": [
+      "Tobacco",
+      "Cumin",
+      "Vanilla"
+    ],
+    "baseNotes": [
+      "Leather",
+      "Amberwood",
+      "Woody Notes"
+    ],
+    "projection": "Very Strong",
+    "longevity": "10+ hours",
+    "shelf": "A2-05",
+    "inventory": 6,
+    "authentic": true,
+    "tiktokListing": "Spicebomb Extreme 3oz — Low Stock",
+    "status": "active"
+  },
+  {
+    "id": "p5",
+    "sku": "LD000105",
+    "barcode": "LD000105",
+    "brand": "Creed",
+    "name": "Aventus",
+    "size": "100ml / 3.4oz",
+    "image": "/images/products/creed-aventus.svg",
+    "color": "#2e5339",
+    "retailPrice": 435,
+    "marketPrice": 340,
+    "lootPrice": 229,
+    "topNotes": [
+      "Pineapple",
+      "Blackcurrant",
+      "Apple",
+      "Bergamot"
+    ],
+    "middleNotes": [
+      "Birch",
+      "Patchouli",
+      "Jasmine",
+      "Rose"
+    ],
+    "baseNotes": [
+      "Musk",
+      "Oak Moss",
+      "Ambergris",
+      "Vanilla"
+    ],
+    "projection": "Strong",
+    "longevity": "8-10 hours",
+    "shelf": "VAULT-01",
+    "inventory": 3,
+    "authentic": true,
+    "tiktokListing": "Creed Aventus 3.4oz — Authenticated & Batch Coded",
+    "status": "active",
+    "notes": "High value — verify batch code on camera before selling."
+  },
+  {
+    "id": "p6",
+    "sku": "LD000106",
+    "barcode": "LD000106",
+    "brand": "Jean Paul Gaultier",
+    "name": "Le Male Le Parfum",
+    "size": "125ml / 4.2oz",
+    "image": "/images/products/le-male-le-parfum.svg",
+    "color": "#1c4fa0",
+    "retailPrice": 128,
+    "marketPrice": 96,
+    "lootPrice": 58,
+    "topNotes": [
+      "Lavender",
+      "Vanilla",
+      "Cardamom"
+    ],
+    "middleNotes": [
+      "Iris",
+      "Cocoa"
+    ],
+    "baseNotes": [
+      "Vanilla Bourbon",
+      "Tonka Bean",
+      "Woody Amber"
+    ],
+    "projection": "Very Strong",
+    "longevity": "10+ hours",
+    "shelf": "A2-09",
+    "inventory": 11,
+    "authentic": true,
+    "tiktokListing": "JPG Le Male Le Parfum 4.2oz — Intense",
+    "status": "active"
+  }
+]

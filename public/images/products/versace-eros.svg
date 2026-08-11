@@ -1,0 +1,32 @@
+<svg viewBox="0 0 300 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2fb3a0" stop-opacity="0.95"/>
+      <stop offset="55%" stop-color="#2fb3a0" stop-opacity="0.65"/>
+      <stop offset="100%" stop-color="#2fb3a0" stop-opacity="0.9"/>
+    </linearGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e8c766"/>
+      <stop offset="100%" stop-color="#2fb3a0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#e8c766" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#e8c766" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="150" cy="240" rx="150" ry="240" fill="url(#glow)"/>
+  <!-- cap -->
+  <rect x="118" y="30" width="64" height="70" rx="10" fill="url(#cap)" stroke="#e8c766" stroke-width="1.5"/>
+  <rect x="132" y="10" width="36" height="26" rx="6" fill="#e8c766"/>
+  <!-- neck -->
+  <rect x="136" y="96" width="28" height="34" fill="#2fb3a0" opacity="0.85"/>
+  <!-- body -->
+  <path d="M90 130 h120 a14 14 0 0 1 14 14 v270 a26 26 0 0 1 -26 26 H102 a26 26 0 0 1 -26 -26 V144 a14 14 0 0 1 14 -14 Z"
+        fill="url(#glass)" stroke="#e8c766" stroke-opacity="0.6" stroke-width="2"/>
+  <!-- shine -->
+  <path d="M104 150 q-10 140 4 270" stroke="white" stroke-opacity="0.35" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <!-- label plate -->
+  <rect x="86" y="270" width="128" height="86" rx="6" fill="rgba(10,10,12,0.55)" stroke="#e8c766" stroke-opacity="0.7" stroke-width="1"/>
+  <text x="150" y="308" text-anchor="middle" font-family="Georgia, serif" font-size="19" letter-spacing="2" fill="#e8c766">LOOT</text>
+  <text x="150" y="332" text-anchor="middle" font-family="Georgia, serif" font-size="13" letter-spacing="3" fill="white" opacity="0.9">EROS</text>
+</svg>

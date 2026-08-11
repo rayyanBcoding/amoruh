@@ -1,0 +1,58 @@
+"use client";
+
+import clsx from "clsx";
+import { ButtonHTMLAttributes, ReactNode } from "react";
+
+type Variant = "primary" | "cyan" | "danger" | "ghost" | "outline";
+type Size = "md" | "lg" | "xl";
+
+const VARIANT_STYLES: Record<Variant, string> = {
+  primary:
+    "bg-gradient-to-r from-ld-purple to-ld-purple-dim text-white shadow-lg shadow-ld-purple/25 hover:brightness-110 active:brightness-95",
+  cyan: "bg-gradient-to-r from-ld-cyan to-ld-cyan-dim text-ld-bg shadow-lg shadow-ld-cyan/25 hover:brightness-110 active:brightness-95",
+  danger:
+    "bg-ld-red/15 text-ld-red ring-1 ring-inset ring-ld-red/40 hover:bg-ld-red/25",
+  ghost: "bg-white/5 text-white hover:bg-white/10 ring-1 ring-inset ring-white/10",
+  outline: "bg-transparent text-white ring-1 ring-inset ring-ld-border hover:bg-white/5",
+};
+
+const SIZE_STYLES: Record<Size, string> = {
+  md: "px-4 py-2.5 text-sm rounded-lg gap-2",
+  lg: "px-6 py-4 text-base rounded-xl gap-2.5",
+  xl: "px-8 py-5 text-lg rounded-2xl gap-3",
+};
+
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: Variant;
+  size?: Size;
+  icon?: ReactNode;
+  fullWidth?: boolean;
+}
+
+export function Button({
+  variant = "primary",
+  size = "md",
+  icon,
+  fullWidth,
+  className,
+  children,
+  disabled,
+  ...props
+}: ButtonProps) {
+  return (
+    <button
+      className={clsx(
+        "inline-flex items-center justify-center font-bold tracking-tight transition-all duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100",
+        VARIANT_STYLES[variant],
+        SIZE_STYLES[size],
+        fullWidth && "w-full",
+        className
+      )}
+      disabled={disabled}
+      {...props}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
