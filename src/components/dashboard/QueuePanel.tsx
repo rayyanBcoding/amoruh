@@ -11,13 +11,13 @@ function QueueRow({ product, rank }: { product: Product; rank: number }) {
   const [busy, setBusy] = useState<"go" | "remove" | null>(null);
 
   return (
-    <div className="group flex items-center gap-3 rounded-xl border border-ld-border bg-black/20 p-3 transition-colors hover:border-ld-purple/40">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/5 text-xs font-bold text-ld-muted">
+    <div className="group flex items-center gap-3 rounded-xl border border-ld-border bg-ld-bg-elevated p-3 transition-colors hover:border-ld-purple/50">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ld-border/40 text-xs font-bold text-ld-muted">
         {rank}
       </span>
       <BottleImage src={product.image} alt={product.name} color={product.color} glow={false} className="h-12 w-12 shrink-0" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-white">{product.name}</p>
+        <p className="truncate text-sm font-semibold text-ld-white">{product.name}</p>
         <p className="truncate text-xs text-ld-muted">
           {product.brand} · {formatCurrency(product.lootPrice)}
         </p>
@@ -41,7 +41,7 @@ function QueueRow({ product, rank }: { product: Product; rank: number }) {
             await removeFromQueue(product.id);
             setBusy(null);
           }}
-          className="rounded-lg bg-white/5 px-2.5 py-1.5 text-xs font-bold text-ld-muted hover:bg-white/10 hover:text-white"
+          className="rounded-lg bg-ld-border/40 px-2.5 py-1.5 text-xs font-bold text-ld-muted hover:bg-ld-border/70 hover:text-ld-white"
         >
           Remove
         </button>
@@ -60,10 +60,10 @@ export function QueuePanel({ queue }: { queue: Product[] }) {
       </h3>
 
       {onDeck ? (
-        <div className="mb-4 flex items-center gap-4 rounded-xl border border-ld-cyan/30 bg-ld-cyan/5 p-4">
+        <div className="mb-4 flex items-center gap-4 rounded-xl border border-ld-purple/30 bg-ld-purple/5 p-4">
           <BottleImage src={onDeck.image} alt={onDeck.name} color={onDeck.color} className="h-16 w-16 shrink-0" />
           <div className="min-w-0 flex-1">
-            <p className="truncate font-display text-lg font-bold text-white">{onDeck.name}</p>
+            <p className="truncate font-display text-lg font-bold text-ld-white">{onDeck.name}</p>
             <p className="text-sm text-ld-muted">
               {onDeck.brand} · {formatCurrency(onDeck.lootPrice)} · Shelf {onDeck.shelf}
             </p>

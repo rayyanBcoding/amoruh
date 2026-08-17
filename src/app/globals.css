@@ -1,19 +1,38 @@
 @import "tailwindcss";
 
+/*
+ * AMORUH Live OS palette.
+ *
+ * Token *names* are kept as `--ld-*` on purpose — they're an internal
+ * implementation detail (Tailwind reads them to generate utilities like
+ * `bg-ld-bg-card`, `text-ld-purple`) used across ~18 component files.
+ * Renaming them would mean touching every one of those files for a
+ * change nobody using the app would ever see. Only the *values* change
+ * here, from the old Loot Depot dark/neon set to the AMORUH warm palette.
+ *
+ * Role mapping, old -> new:
+ *   ld-bg / ld-bg-card / ld-border   near-black panel stack -> Ivory / Beige / Sand
+ *   ld-purple                        neon purple accent     -> Champagne Gold (primary accent, used sparingly)
+ *   ld-cyan                          neon cyan accent        -> Deep Olive (secondary/ink accent)
+ *   ld-white                         literal white text      -> Deep Olive (primary text color, on a light bg now)
+ *   ld-muted                         cool gray                -> warm taupe
+ *   ld-green / ld-red / ld-amber     status colors            -> kept functional (deepened for contrast on a light bg)
+ */
+
 :root {
-  --ld-bg: #111111;
-  --ld-bg-elevated: #17171a;
-  --ld-bg-card: #1c1c20;
-  --ld-border: #2a2a30;
-  --ld-purple: #a855f7;
-  --ld-purple-dim: #7e22ce;
-  --ld-cyan: #22d3ee;
-  --ld-cyan-dim: #0e7490;
-  --ld-white: #ffffff;
-  --ld-muted: #9a9aa4;
-  --ld-green: #34d399;
-  --ld-red: #f87171;
-  --ld-amber: #fbbf24;
+  --ld-bg: #f4efe6; /* Warm Ivory */
+  --ld-bg-elevated: #faf7f0; /* inputs / surfaces sitting on a beige card */
+  --ld-bg-card: #e7dbc4; /* Soft Beige */
+  --ld-border: #d6c3a1; /* Sand */
+  --ld-purple: #b89a5c; /* Champagne Gold — primary accent, used sparingly */
+  --ld-purple-dim: #93793e; /* deeper gold, for gradients/hover */
+  --ld-cyan: #2f2e22; /* Deep Olive — secondary accent / ink */
+  --ld-cyan-dim: #55523f; /* lighter olive, for hover states */
+  --ld-white: #2f2e22; /* Deep Olive — primary text color (bg is light now) */
+  --ld-muted: #857c5f; /* warm muted taupe — secondary text */
+  --ld-green: #1e7a4c;
+  --ld-red: #b3261e;
+  --ld-amber: #a15c07;
 }
 
 @theme inline {
@@ -36,17 +55,13 @@
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
   background: var(--ld-bg);
   color: var(--ld-white);
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  background-image:
-    radial-gradient(ellipse 80% 50% at 15% -10%, rgba(168, 85, 247, 0.16), transparent),
-    radial-gradient(ellipse 80% 50% at 100% 0%, rgba(34, 211, 238, 0.12), transparent);
-  background-attachment: fixed;
 }
 
 ::selection {
@@ -68,31 +83,23 @@ body {
   border-radius: 8px;
 }
 
+/* Reserved for the single strongest number on screen — the live price. */
 .text-gradient-brand {
-  background: linear-gradient(90deg, var(--ld-purple), var(--ld-cyan));
+  background: linear-gradient(90deg, var(--ld-purple-dim), var(--ld-purple));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
 .glass-panel {
-  background: color-mix(in srgb, var(--ld-bg-card) 92%, transparent);
+  background: var(--ld-bg-card);
   border: 1px solid var(--ld-border);
-  backdrop-filter: blur(12px);
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.45); }
-  50% { box-shadow: 0 0 0 10px rgba(168, 85, 247, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(184, 154, 92, 0.45); }
+  50% { box-shadow: 0 0 0 10px rgba(184, 154, 92, 0); }
 }
 .animate-pulse-glow {
   animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-@keyframes scan-line {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100%); }
-}
-.animate-scan-line {
-  animation: scan-line 2.2s linear infinite;
 }

@@ -15,8 +15,8 @@ const sora = Sora({
 });
 
 export const metadata: Metadata = {
-  title: "Loot Depot OS",
-  description: "The internal operating system for Loot Depot's TikTok Live selling business.",
+  title: "AMORUH Live OS",
+  description: "The internal operating system for AMORUH's TikTok Live selling business.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -27,11 +27,11 @@ export function RecentSales({ sales }: { sales: Sale[] }) {
           {sales.map((sale) => (
             <div
               key={sale.id}
-              className="flex items-center gap-3 rounded-xl border border-ld-border bg-black/20 p-2.5"
+              className="flex items-center gap-3 rounded-xl border border-ld-border bg-ld-bg-elevated p-2.5"
             >
               <BottleImage src={sale.image} alt={sale.name} color={sale.color} glow={false} className="h-10 w-10 shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-white">{sale.name}</p>
+                <p className="truncate text-sm font-semibold text-ld-white">{sale.name}</p>
                 <p className="truncate text-xs text-ld-muted">
                   {sale.brand} · {sale.sku}
                 </p>

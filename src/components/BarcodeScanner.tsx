@@ -86,7 +86,7 @@ export function BarcodeScanner() {
   return (
     <div className="space-y-2">
       <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-ld-muted">
-        <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-ld-cyan">
+        <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-ld-purple">
           <path
             d="M3 5v14M7 5v14M10 5v14M13 5v14h2V5M18 5v14M21 5v14"
             stroke="currentColor"
@@ -109,7 +109,7 @@ export function BarcodeScanner() {
           placeholder="Scan SKU barcode… (e.g. LD000101)"
           autoComplete="off"
           spellCheck={false}
-          className="w-full rounded-xl border-2 border-ld-purple/50 bg-ld-bg-elevated px-5 py-4 font-mono text-lg tracking-wider text-white placeholder:text-ld-muted/60 outline-none transition-colors focus:border-ld-cyan focus:ring-4 focus:ring-ld-cyan/20"
+          className="w-full rounded-xl border-2 border-ld-border bg-ld-bg-elevated px-5 py-4 font-mono text-lg tracking-wider text-ld-white placeholder:text-ld-muted/60 outline-none transition-colors focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/15"
         />
       </form>
       {feedback && (

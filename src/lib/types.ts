@@ -1,4 +1,4 @@
-// Core domain types for Loot Depot OS.
+// Core domain types for AMORUH Live OS.
 //
 // Kept intentionally flat and serializable (JSON-file backed for V1) so the
 // same shapes can later be swapped onto a real database or TikTok Shop sync

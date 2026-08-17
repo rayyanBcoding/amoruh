@@ -5,7 +5,7 @@ const STATUS_STYLES: Record<ProductStatus, string> = {
   active: "bg-ld-green/15 text-ld-green ring-ld-green/40",
   draft: "bg-ld-amber/15 text-ld-amber ring-ld-amber/40",
   sold_out: "bg-ld-red/15 text-ld-red ring-ld-red/40",
-  archived: "bg-white/10 text-ld-muted ring-white/20",
+  archived: "bg-ld-border/40 text-ld-muted ring-ld-border",
 };
 
 const STATUS_LABELS: Record<ProductStatus, string> = {

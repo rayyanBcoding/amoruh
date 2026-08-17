@@ -12,7 +12,7 @@ export default function TVDisplayPage() {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-ld-bg">
         <p className="animate-pulse font-display text-3xl font-bold text-ld-muted">
-          Loot Depot OS
+          AMORUH Live OS
         </p>
       </div>
     );

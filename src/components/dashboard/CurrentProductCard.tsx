@@ -14,7 +14,7 @@ function Stat({ label, value, accent }: { label: string; value: React.ReactNode;
   return (
     <div>
       <p className="text-[11px] font-bold uppercase tracking-widest text-ld-muted">{label}</p>
-      <p className={`text-base font-semibold ${accent ?? "text-white"}`}>{value}</p>
+      <p className={`text-base font-semibold ${accent ?? "text-ld-white"}`}>{value}</p>
     </div>
   );
 }
@@ -48,7 +48,7 @@ export function CurrentProductCard({ snapshot }: { snapshot: LiveSnapshot }) {
 
   return (
     <div className="glass-panel relative overflow-hidden rounded-2xl">
-      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-ld-purple via-ld-cyan to-ld-purple" />
+      <div className="absolute inset-x-0 top-0 h-1 bg-ld-purple" />
 
       <AnimatePresence mode="wait">
         <motion.div
@@ -88,7 +88,7 @@ export function CurrentProductCard({ snapshot }: { snapshot: LiveSnapshot }) {
                 <p className="text-sm font-bold uppercase tracking-widest text-ld-cyan">
                   {product.brand}
                 </p>
-                <h2 className="font-display text-3xl font-extrabold leading-tight text-white lg:text-4xl">
+                <h2 className="font-display text-3xl font-extrabold leading-tight text-ld-white lg:text-4xl">
                   {product.name}
                 </h2>
                 <p className="mt-1 text-sm text-ld-muted">
@@ -96,7 +96,7 @@ export function CurrentProductCard({ snapshot }: { snapshot: LiveSnapshot }) {
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-end gap-6 rounded-xl border border-ld-border bg-black/20 p-4">
+              <div className="flex flex-wrap items-end gap-6 rounded-xl border border-ld-border bg-ld-bg-elevated p-4">
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-widest text-ld-muted">
                     Retail Price
@@ -109,13 +109,13 @@ export function CurrentProductCard({ snapshot }: { snapshot: LiveSnapshot }) {
                   <p className="text-[11px] font-bold uppercase tracking-widest text-ld-muted">
                     Market Price
                   </p>
-                  <p className="text-lg font-semibold text-white">
+                  <p className="text-lg font-semibold text-ld-white">
                     {formatCurrency(product.marketPrice)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-ld-cyan">
-                    Loot Depot Price
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-ld-purple">
+                    Live Price
                   </p>
                   <p className="font-display text-3xl font-extrabold text-gradient-brand">
                     {formatCurrency(livePrice)}
@@ -138,11 +138,11 @@ export function CurrentProductCard({ snapshot }: { snapshot: LiveSnapshot }) {
                 />
               </div>
 
-              <div className="rounded-xl border border-ld-border bg-black/20 p-4">
+              <div className="rounded-xl border border-ld-border bg-ld-bg-elevated p-4">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-ld-muted">
                   TikTok Product Name
                 </p>
-                <p className="mt-1 text-sm font-medium text-white">{product.tiktokListing}</p>
+                <p className="mt-1 text-sm font-medium text-ld-white">{product.tiktokListing}</p>
               </div>
             </div>
           </div>
@@ -151,22 +151,25 @@ export function CurrentProductCard({ snapshot }: { snapshot: LiveSnapshot }) {
             <Button
               variant="primary"
               size="xl"
+              className="uppercase tracking-wide"
               disabled={busy !== null}
               onClick={() => runAction("next", nextProduct)}
             >
-              {busy === "next" ? "Loading…" : "Next Product →"}
+              {busy === "next" ? "Loading…" : "Next Item →"}
             </Button>
             <Button
               variant="cyan"
               size="xl"
+              className="uppercase tracking-wide"
               disabled={busy !== null || product.inventory <= 0}
               onClick={() => runAction("sold", markSold)}
             >
-              {busy === "sold" ? "Marking…" : "✓ Mark Sold"}
+              {busy === "sold" ? "Marking…" : "✓ Sold"}
             </Button>
             <Button
               variant={flashDeal.active ? "danger" : "outline"}
               size="xl"
+              className="uppercase tracking-wide"
               disabled={busy !== null}
               onClick={() => runAction("flash", () => toggleFlashDeal(20))}
             >
@@ -175,6 +178,7 @@ export function CurrentProductCard({ snapshot }: { snapshot: LiveSnapshot }) {
             <Button
               variant="ghost"
               size="xl"
+              className="uppercase tracking-wide"
               onClick={() => window.alert(`Sending "${product.sku}" label to printer… (placeholder)`)}
             >
               🖨 Print Label

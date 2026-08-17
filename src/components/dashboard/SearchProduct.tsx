@@ -34,7 +34,7 @@ export function SearchProduct({ products }: { products: Product[] }) {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search by name, brand, or SKU…"
-        className="w-full rounded-xl border border-ld-border bg-ld-bg-elevated px-4 py-3 text-sm text-white placeholder:text-ld-muted/60 outline-none focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/20"
+        className="w-full rounded-xl border border-ld-border bg-ld-bg-elevated px-4 py-3 text-sm text-ld-white placeholder:text-ld-muted/60 outline-none focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/15"
       />
 
       {results.length > 0 && (
@@ -42,11 +42,11 @@ export function SearchProduct({ products }: { products: Product[] }) {
           {results.map((p) => (
             <div
               key={p.id}
-              className="flex items-center gap-3 rounded-xl border border-ld-border bg-black/20 p-2.5"
+              className="flex items-center gap-3 rounded-xl border border-ld-border bg-ld-bg-elevated p-2.5"
             >
               <BottleImage src={p.image} alt={p.name} color={p.color} glow={false} className="h-10 w-10 shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-white">{p.name}</p>
+                <p className="truncate text-sm font-semibold text-ld-white">{p.name}</p>
                 <p className="truncate text-xs text-ld-muted">
                   {p.brand} · {formatCurrency(p.lootPrice)} · {p.sku}
                 </p>
@@ -60,7 +60,7 @@ export function SearchProduct({ products }: { products: Product[] }) {
                     setBusyId(null);
                     setQuery("");
                   }}
-                  className="rounded-lg bg-ld-purple px-2.5 py-1.5 text-xs font-bold text-white hover:brightness-110"
+                  className="rounded-lg bg-ld-purple px-2.5 py-1.5 text-xs font-bold text-ld-white hover:brightness-105"
                 >
                   Go Live
                 </button>
@@ -72,7 +72,7 @@ export function SearchProduct({ products }: { products: Product[] }) {
                     setBusyId(null);
                     setQuery("");
                   }}
-                  className="rounded-lg bg-white/5 px-2.5 py-1.5 text-xs font-bold text-ld-muted hover:bg-white/10 hover:text-white"
+                  className="rounded-lg bg-ld-border/40 px-2.5 py-1.5 text-xs font-bold text-ld-muted hover:bg-ld-border/70 hover:text-ld-white"
                 >
                   + Queue
                 </button>

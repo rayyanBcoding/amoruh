@@ -1,6 +1,6 @@
-# Loot Depot OS
+# AMORUH Live OS
 
-The internal operating system for Loot Depot's TikTok Live selling business.
+The internal operating system for AMORUH's TikTok Live selling business.
 
 **One barcode scan controls the whole show**: scanning an internal SKU barcode
 updates the Operator Dashboard, the TV Display, and inventory — instantly,

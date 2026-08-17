@@ -29,7 +29,7 @@ export function NotesPyramid({ topNotes, middleNotes, baseNotes, size = "md" }: 
             >
               {tier.label} Notes
             </p>
-            <p className={clsx("font-medium text-white", size === "lg" ? "text-lg" : "text-sm")}>
+            <p className={clsx("font-medium text-ld-white", size === "lg" ? "text-lg" : "text-sm")}>
               {data[tier.key].join(", ") || "—"}
             </p>
           </div>

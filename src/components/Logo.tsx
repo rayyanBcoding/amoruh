@@ -15,18 +15,17 @@ export function Logo({
   } as const;
 
   const content = (
-    <span className={clsx("font-display font-extrabold tracking-tight", sizes[size])}>
-      <span className="text-gradient-brand">LOOT</span>{" "}
-      <span className="text-white">DEPOT</span>
-      <span className="ml-1.5 align-super text-[0.4em] font-bold tracking-widest text-ld-cyan">
-        OS
+    <span className={clsx("font-display font-bold tracking-[0.18em] text-ld-white", sizes[size])}>
+      AMORUH
+      <span className="ml-2 align-super text-[0.38em] font-semibold tracking-[0.25em] text-ld-purple">
+        LIVE OS
       </span>
     </span>
   );
 
   if (!href) return content;
   return (
-    <Link href={href} className="inline-flex items-center transition-opacity hover:opacity-80">
+    <Link href={href} className="inline-flex items-center transition-opacity hover:opacity-70">
       {content}
     </Link>
   );

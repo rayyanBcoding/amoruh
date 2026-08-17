@@ -8,12 +8,12 @@ type Size = "md" | "lg" | "xl";
 
 const VARIANT_STYLES: Record<Variant, string> = {
   primary:
-    "bg-gradient-to-r from-ld-purple to-ld-purple-dim text-white shadow-lg shadow-ld-purple/25 hover:brightness-110 active:brightness-95",
-  cyan: "bg-gradient-to-r from-ld-cyan to-ld-cyan-dim text-ld-bg shadow-lg shadow-ld-cyan/25 hover:brightness-110 active:brightness-95",
+    "bg-gradient-to-r from-ld-purple to-ld-purple-dim text-ld-white shadow-sm shadow-ld-purple/20 hover:brightness-105 active:brightness-95",
+  cyan: "bg-ld-cyan text-ld-bg shadow-sm shadow-ld-cyan/15 hover:brightness-125 active:brightness-95",
   danger:
-    "bg-ld-red/15 text-ld-red ring-1 ring-inset ring-ld-red/40 hover:bg-ld-red/25",
-  ghost: "bg-white/5 text-white hover:bg-white/10 ring-1 ring-inset ring-white/10",
-  outline: "bg-transparent text-white ring-1 ring-inset ring-ld-border hover:bg-white/5",
+    "bg-ld-red/10 text-ld-red ring-1 ring-inset ring-ld-red/35 hover:bg-ld-red/15",
+  ghost: "bg-ld-bg-elevated text-ld-white hover:bg-ld-border/40 ring-1 ring-inset ring-ld-border",
+  outline: "bg-transparent text-ld-white ring-1 ring-inset ring-ld-border hover:bg-ld-bg-elevated",
 };
 
 const SIZE_STYLES: Record<Size, string> = {

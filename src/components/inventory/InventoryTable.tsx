@@ -56,7 +56,7 @@ export function InventoryTable({ products }: { products: Product[] }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search SKU, brand, product, shelf, TikTok listing…"
-          className="w-full max-w-md rounded-xl border border-ld-border bg-ld-bg-elevated px-4 py-2.5 text-sm text-white placeholder:text-ld-muted/60 outline-none focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/20"
+          className="w-full max-w-md rounded-xl border border-ld-border bg-ld-bg-elevated px-4 py-2.5 text-sm text-ld-white placeholder:text-ld-muted/60 outline-none focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/15"
         />
         <p className="text-sm text-ld-muted">{filtered.length} products</p>
       </div>
@@ -70,7 +70,7 @@ export function InventoryTable({ products }: { products: Product[] }) {
                   key={i}
                   onClick={() => col.key && setSortKey(col.key)}
                   className={`px-3 pb-1 text-left text-[11px] font-bold uppercase tracking-widest text-ld-muted ${
-                    col.key ? "cursor-pointer select-none hover:text-white" : ""
+                    col.key ? "cursor-pointer select-none hover:text-ld-white" : ""
                   }`}
                 >
                   {col.label}
@@ -84,21 +84,21 @@ export function InventoryTable({ products }: { products: Product[] }) {
               <tr
                 key={p.id}
                 onClick={() => router.push(`/inventory/${p.id}`)}
-                className="cursor-pointer rounded-xl bg-black/20 transition-colors hover:bg-white/[0.06]"
+                className="cursor-pointer rounded-xl bg-ld-bg-elevated transition-colors hover:bg-ld-border/30"
               >
                 <td className="rounded-l-xl px-3 py-2.5">
                   <BottleImage src={p.image} alt={p.name} color={p.color} glow={false} className="h-9 w-9" />
                 </td>
                 <td className="px-3 py-2.5 font-mono text-xs text-ld-cyan">{p.sku}</td>
-                <td className="px-3 py-2.5 font-medium text-white">{p.brand}</td>
-                <td className="px-3 py-2.5 text-white">{p.name}</td>
+                <td className="px-3 py-2.5 font-medium text-ld-white">{p.brand}</td>
+                <td className="px-3 py-2.5 text-ld-white">{p.name}</td>
                 <td className="px-3 py-2.5 text-ld-muted">{p.size}</td>
-                <td className={`px-3 py-2.5 font-semibold ${p.inventory <= 3 ? "text-ld-red" : "text-white"}`}>
+                <td className={`px-3 py-2.5 font-semibold ${p.inventory <= 3 ? "text-ld-red" : "text-ld-white"}`}>
                   {p.inventory}
                 </td>
                 <td className="px-3 py-2.5 text-ld-muted">{p.shelf}</td>
                 <td className="px-3 py-2.5 text-ld-muted">{formatCurrency(p.retailPrice)}</td>
-                <td className="px-3 py-2.5 text-white">{formatCurrency(p.marketPrice)}</td>
+                <td className="px-3 py-2.5 text-ld-white">{formatCurrency(p.marketPrice)}</td>
                 <td className="max-w-[220px] truncate px-3 py-2.5 text-ld-muted">{p.tiktokListing}</td>
                 <td className="rounded-r-xl px-3 py-2.5">
                   <StatusBadge status={p.status} />

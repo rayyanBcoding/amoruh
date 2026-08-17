@@ -51,7 +51,7 @@ export default function ProductEditorPage() {
     <div className="min-h-screen">
       <Nav />
       <main className="mx-auto max-w-[1400px] px-6 py-6">
-        <h1 className="mb-6 font-display text-2xl font-extrabold text-white lg:text-3xl">
+        <h1 className="mb-6 font-display text-2xl font-extrabold text-ld-white lg:text-3xl">
           Product Editor
         </h1>
         <ProductLoader key={params.id} id={params.id} />

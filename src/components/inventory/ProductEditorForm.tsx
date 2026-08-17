@@ -39,7 +39,7 @@ function Field({
 }
 
 const inputClass =
-  "w-full rounded-lg border border-ld-border bg-ld-bg-elevated px-3.5 py-2.5 text-sm text-white placeholder:text-ld-muted/50 outline-none focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/20";
+  "w-full rounded-lg border border-ld-border bg-ld-bg-elevated px-3.5 py-2.5 text-sm text-ld-white placeholder:text-ld-muted/50 outline-none focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/15";
 
 const STATUS_OPTIONS: ProductStatus[] = ["active", "draft", "sold_out", "archived"];
 
@@ -86,7 +86,7 @@ export function ProductEditorForm({ product }: { product: Product }) {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <button
           onClick={() => router.push("/inventory")}
-          className="text-sm font-semibold text-ld-muted hover:text-white"
+          className="text-sm font-semibold text-ld-muted hover:text-ld-white"
         >
           ← Back to Inventory
         </button>
@@ -208,11 +208,11 @@ export function ProductEditorForm({ product }: { product: Product }) {
                 onChange={(e) => set("marketPrice", Number(e.target.value) as never)}
               />
             </Field>
-            <Field label="Loot Depot Price ($)">
+            <Field label="AMORUH Live Price ($)">
               <input
                 type="number"
                 min={0}
-                className={`${inputClass} border-ld-cyan/50`}
+                className={`${inputClass} border-ld-purple/50`}
                 value={form.lootPrice}
                 onChange={(e) => set("lootPrice", Number(e.target.value) as never)}
               />
