@@ -64,16 +64,17 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout>;
 
-    const disconnect = () => {
-      clearTimeout(retryTimer);
-      sourceRef.current?.close();
-      sourceRef.current = null;
-      setConnected(false);
-    };
-
+    // Deliberately NOT pausing this connection when the tab reports itself
+    // hidden. An earlier version did that to save Redis request quota, but
+    // it's not worth the risk: the Page Visibility API is unreliable in
+    // some real embedding contexts (this app has been observed reporting
+    // "hidden" indefinitely for an on-screen, active tab), and an operator
+    // alt-tabbing away mid-show and back must always find a live
+    // connection waiting — a stale dashboard/TV during an actual show is a
+    // far worse failure than some extra idle-poll requests. The poll
+    // interval on the server (src/app/api/events/route.ts) is the real
+    // lever for request volume.
     const connect = () => {
-      disconnect();
-
       const source = new EventSource("/api/events");
       sourceRef.current = source;
 
@@ -94,46 +95,26 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
           const data = JSON.parse((evt as MessageEvent).data) as { message?: string };
           if (data.message) setLastError(`Live sync error: ${data.message}`);
         } catch {
-          // not a JSON error frame — ignore
+          // not a JSON error frame (or the browser's native connection-
+          // level error, which carries no parseable data) — ignore
         }
       });
 
       source.onerror = () => {
         setConnected(false);
         source.close();
-        // Always retry, regardless of document.visibilityState: some
-        // embedding contexts (e.g. certain kiosk/preview browsers) report
-        // "hidden" persistently even for the on-screen tab, and gating the
-        // *retry* on visibility there would mean the app never recovers.
         if (!cancelled) {
           retryTimer = setTimeout(connect, 2000);
         }
       };
     };
 
-    // Proactively close the connection when the tab is backgrounded, and
-    // reopen it when visible again — an earlier version kept polling in
-    // forgotten background tabs 24/7 and burned through a free-tier Redis
-    // request quota in days. This is purely an optimization layered on top
-    // of the always-on `connect()` above: the initial connect and every
-    // error-triggered retry happen unconditionally, so an environment
-    // where visibility is unreliable just loses the optimization, not the
-    // connection itself.
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        disconnect();
-      } else if (!sourceRef.current) {
-        connect();
-      }
-    };
-
     connect();
-    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       cancelled = true;
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      disconnect();
+      clearTimeout(retryTimer);
+      sourceRef.current?.close();
     };
   }, []);
 
