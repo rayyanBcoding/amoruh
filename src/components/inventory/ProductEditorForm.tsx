@@ -99,6 +99,13 @@ function inputClass(hasError?: boolean) {
 }
 
 const STATUS_OPTIONS: ProductStatus[] = ["active", "draft", "sold_out", "archived"];
+const CONDITION_OPTIONS = [
+  "New",
+  "Factory Sealed",
+  "Tester with Box",
+  "Tester No Box",
+  "Tester No Cap",
+];
 
 export function ProductEditorForm({
   product,
@@ -297,16 +304,21 @@ export function ProductEditorForm({
             </select>
           </Field>
           <Field label="Condition">
-            <input className={inputClass()} value={form.condition} onChange={(e) => set("condition", e.target.value)} />
-          </Field>
-          <Field label="Authenticity">
             <select
               className={inputClass()}
-              value={form.authentic ? "yes" : "no"}
-              onChange={(e) => set("authentic", e.target.value === "yes")}
+              value={form.condition}
+              onChange={(e) => set("condition", e.target.value)}
             >
-              <option value="yes">Verified Authentic</option>
-              <option value="no">Unverified</option>
+              {/* Keep showing a legacy value (e.g. old data just saying "Tester")
+                  as its own option rather than silently jumping to "New". */}
+              {!CONDITION_OPTIONS.includes(form.condition) && form.condition && (
+                <option value={form.condition}>{form.condition}</option>
+              )}
+              {CONDITION_OPTIONS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
             </select>
           </Field>
         </div>
