@@ -128,6 +128,39 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Belt-and-suspenders polling fallback, independent of the SSE
+  // connection above. SSE gives near-instant updates when it's healthy,
+  // but this app's one job is "the dashboard/TV must never sit there
+  // showing stale data during a live show" — so this guarantees freshness
+  // within a few seconds even in a browser/network environment where SSE
+  // delivery turns out to be unreliable for reasons that are hard to
+  // fully pin down. Cheap (one small GET) and harmless to run alongside
+  // a working SSE connection.
+  useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/state", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as LiveSnapshot;
+        if (cancelled) return;
+        setSnapshot((prev) => (prev && prev.updatedAt === data.updatedAt ? prev : data));
+        setConnected(true);
+      } catch {
+        // SSE's own reconnect logic surfaces connectivity problems; a
+        // single failed poll isn't worth flipping the indicator for.
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   const scanBarcode = useCallback(async (code: string) => {
     const result = await postJson("/api/scan", { barcode: code });
     setLastError(result.ok ? null : result.error ?? "Scan failed");
