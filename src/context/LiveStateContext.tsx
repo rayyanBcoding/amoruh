@@ -63,6 +63,13 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout>;
+    // Capped exponential backoff: a real network hiccup or a burst of
+    // server-side restarts shouldn't turn into a self-reinforcing
+    // reconnect storm. Resets to the base delay the moment a connection
+    // actually receives data.
+    const BASE_DELAY_MS = 2000;
+    const MAX_DELAY_MS = 20000;
+    let retryDelay = BASE_DELAY_MS;
 
     // Deliberately NOT pausing this connection when the tab reports itself
     // hidden. An earlier version did that to save Redis request quota, but
@@ -75,6 +82,7 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
     // interval on the server (src/app/api/events/route.ts) is the real
     // lever for request volume.
     const connect = () => {
+      clearTimeout(retryTimer);
       const source = new EventSource("/api/events");
       sourceRef.current = source;
 
@@ -84,6 +92,7 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
           const data = JSON.parse((evt as MessageEvent).data) as LiveSnapshot;
           setSnapshot(data);
           setConnected(true);
+          retryDelay = BASE_DELAY_MS; // connection is healthy again
         } catch {
           // ignore malformed frame
         }
@@ -104,7 +113,8 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
         setConnected(false);
         source.close();
         if (!cancelled) {
-          retryTimer = setTimeout(connect, 2000);
+          retryTimer = setTimeout(connect, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, MAX_DELAY_MS);
         }
       };
     };
