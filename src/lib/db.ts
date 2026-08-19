@@ -1,27 +1,30 @@
-import { promises as fs } from "fs";
-import path from "path";
+import { KEYS, redis } from "./kv";
+import { ValidationError, validateProductInput } from "./validation";
 import type { FlashDeal, LiveSnapshot, LiveState, Product, Sale } from "./types";
 
 // -----------------------------------------------------------------------
-// Temporary JSON-file "database" for V1.
+// Data layer, backed by Upstash Redis. Everything funnels through the
+// functions in this file, so swapping in a different store later only
+// means rewriting this module — every route handler and page stays the
+// same.
 //
-// Everything funnels through the functions in this file, so swapping in a
-// real database (Postgres, Supabase, etc.) or a TikTok Shop-backed source
-// later only means rewriting this module — every route handler and page
-// stays the same.
+// History: V1 used a local JSON file here. That broke in production
+// because Vercel serverless functions get a read-only filesystem —
+// `fs.writeFile` throws EROFS. Redis gives every function instance a
+// shared, writable place to read/write the same data.
 // -----------------------------------------------------------------------
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const PRODUCTS_PATH = path.join(DATA_DIR, "products.json");
-const STATE_PATH = path.join(DATA_DIR, "state.json");
-
-async function readJson<T>(filePath: string): Promise<T> {
-  const raw = await fs.readFile(filePath, "utf-8");
-  return JSON.parse(raw) as T;
+function defaultState(): LiveState {
+  return {
+    currentProductId: null,
+    queueIds: [],
+    recentSales: [],
+    flashDeal: makeDefaultFlashDeal(),
+  };
 }
 
-async function writeJson(filePath: string, data: unknown): Promise<void> {
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
+async function bumpVersion(): Promise<void> {
+  await redis.incr(KEYS.version);
 }
 
 // ---------------------------------------------------------------------
@@ -29,7 +32,8 @@ async function writeJson(filePath: string, data: unknown): Promise<void> {
 // ---------------------------------------------------------------------
 
 export async function getProducts(): Promise<Product[]> {
-  return readJson<Product[]>(PRODUCTS_PATH);
+  const products = await redis.get<Product[]>(KEYS.products);
+  return products ?? [];
 }
 
 export async function getProduct(id: string): Promise<Product | null> {
@@ -50,9 +54,51 @@ export async function findProductByCode(code: string): Promise<Product | null> {
 }
 
 export async function saveProducts(products: Product[]): Promise<void> {
-  await writeJson(PRODUCTS_PATH, products);
+  await redis.set(KEYS.products, products);
+  await bumpVersion();
 }
 
+/** Creates a new product. Throws ValidationError on bad/duplicate input. */
+export async function createProduct(input: Partial<Product>): Promise<Product> {
+  const products = await getProducts();
+  validateProductInput(input, { existingProducts: products, isCreate: true });
+
+  const id = `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const product: Product = {
+    id,
+    sku: input.sku!.trim(),
+    barcode: input.barcode?.trim() || input.sku!.trim(),
+    brand: input.brand!.trim(),
+    name: input.name!.trim(),
+    size: input.size?.trim() || "",
+    concentration: input.concentration?.trim() || "",
+    image: input.image?.trim() || "",
+    color: input.color?.trim() || "#B89A5C",
+    cost: numberOrZero(input.cost),
+    retailPrice: numberOrZero(input.retailPrice),
+    marketPrice: numberOrZero(input.marketPrice),
+    lootPrice: numberOrZero(input.lootPrice),
+    minPrice: numberOrZero(input.minPrice),
+    topNotes: input.topNotes ?? [],
+    middleNotes: input.middleNotes ?? [],
+    baseNotes: input.baseNotes ?? [],
+    projection: input.projection?.trim() || "",
+    longevity: input.longevity?.trim() || "",
+    description: input.description?.trim() || "",
+    condition: input.condition?.trim() || "New",
+    shelf: input.shelf?.trim() || "",
+    inventory: Math.max(0, Math.round(numberOrZero(input.inventory))),
+    authentic: input.authentic ?? true,
+    tiktokListing: input.tiktokListing?.trim() || "",
+    status: input.status ?? "active",
+    notes: input.notes?.trim() || undefined,
+  };
+
+  await saveProducts([...products, product]);
+  return product;
+}
+
+/** Partially updates a product. Throws ValidationError on bad/duplicate input. */
 export async function updateProduct(
   id: string,
   patch: Partial<Product>
@@ -60,21 +106,50 @@ export async function updateProduct(
   const products = await getProducts();
   const idx = products.findIndex((p) => p.id === id);
   if (idx === -1) return null;
+
+  validateProductInput(patch, { existingProducts: products, excludeId: id, isCreate: false });
+
   products[idx] = { ...products[idx], ...patch, id: products[idx].id };
   await saveProducts(products);
   return products[idx];
 }
+
+/** Hard-deletes a product. Prefer archiving (status: "archived") in the UI;
+ *  this exists for genuine mistakes / duplicate entries. */
+export async function deleteProduct(id: string): Promise<boolean> {
+  const products = await getProducts();
+  const next = products.filter((p) => p.id !== id);
+  if (next.length === products.length) return false;
+  await saveProducts(next);
+
+  // A deleted product can't stay the live/queued item.
+  const state = await getState();
+  const patch: Partial<LiveState> = {};
+  if (state.currentProductId === id) patch.currentProductId = null;
+  if (state.queueIds.includes(id)) patch.queueIds = state.queueIds.filter((qid) => qid !== id);
+  if (Object.keys(patch).length > 0) await patchState(patch);
+
+  return true;
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === "number" && !Number.isNaN(value) ? value : 0;
+}
+
+export { ValidationError };
 
 // ---------------------------------------------------------------------
 // Live state
 // ---------------------------------------------------------------------
 
 export async function getState(): Promise<LiveState> {
-  return readJson<LiveState>(STATE_PATH);
+  const state = await redis.get<LiveState>(KEYS.state);
+  return state ?? defaultState();
 }
 
 export async function saveState(state: LiveState): Promise<void> {
-  await writeJson(STATE_PATH, state);
+  await redis.set(KEYS.state, state);
+  await bumpVersion();
 }
 
 export async function patchState(patch: Partial<LiveState>): Promise<LiveState> {
@@ -82,6 +157,15 @@ export async function patchState(patch: Partial<LiveState>): Promise<LiveState> 
   const next: LiveState = { ...current, ...patch };
   await saveState(next);
   return next;
+}
+
+// ---------------------------------------------------------------------
+// Version (used by the SSE route to detect changes cheaply)
+// ---------------------------------------------------------------------
+
+export async function getVersion(): Promise<number> {
+  const version = await redis.get<number>(KEYS.version);
+  return version ?? 0;
 }
 
 // ---------------------------------------------------------------------

@@ -17,31 +17,38 @@ const MAX_RECENT_SALES = 25;
 // POST /api/state/sold — mark the current product sold: decrement
 // inventory, log the sale, and flip status to sold_out at zero stock.
 export async function POST() {
-  const state = await getState();
-  if (!state.currentProductId) {
-    return NextResponse.json({ error: "No current product" }, { status: 400 });
+  try {
+    const state = await getState();
+    if (!state.currentProductId) {
+      return NextResponse.json({ error: "There's no current product to mark sold." }, { status: 400 });
+    }
+
+    const product = await getProduct(state.currentProductId);
+    if (!product) {
+      return NextResponse.json({ error: "The current product no longer exists." }, { status: 404 });
+    }
+
+    const salePrice = state.flashDeal.active
+      ? Math.round(product.lootPrice * (1 - state.flashDeal.discountPercent / 100))
+      : product.lootPrice;
+
+    const nextInventory = Math.max(0, product.inventory - 1);
+    await updateProduct(product.id, {
+      inventory: nextInventory,
+      status: nextInventory === 0 ? "sold_out" : product.status,
+    });
+
+    const sale = makeSaleFromProduct(product, salePrice);
+    await patchState({
+      recentSales: [sale, ...state.recentSales].slice(0, MAX_RECENT_SALES),
+    });
+
+    broadcastStateChanged("mark-sold");
+    return NextResponse.json(await buildSnapshot());
+  } catch (err) {
+    return NextResponse.json(
+      { error: `Could not mark sold: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 500 }
+    );
   }
-
-  const product = await getProduct(state.currentProductId);
-  if (!product) {
-    return NextResponse.json({ error: "Current product not found" }, { status: 404 });
-  }
-
-  const salePrice = state.flashDeal.active
-    ? Math.round(product.lootPrice * (1 - state.flashDeal.discountPercent / 100))
-    : product.lootPrice;
-
-  const nextInventory = Math.max(0, product.inventory - 1);
-  await updateProduct(product.id, {
-    inventory: nextInventory,
-    status: nextInventory === 0 ? "sold_out" : product.status,
-  });
-
-  const sale = makeSaleFromProduct(product, salePrice);
-  await patchState({
-    recentSales: [sale, ...state.recentSales].slice(0, MAX_RECENT_SALES),
-  });
-
-  broadcastStateChanged("mark-sold");
-  return NextResponse.json(await buildSnapshot());
 }

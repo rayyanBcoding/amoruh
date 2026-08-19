@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useLiveState } from "@/context/LiveStateContext";
 
 /**
@@ -15,6 +16,7 @@ export function BarcodeScanner() {
   const { scanBarcode } = useLiveState();
   const [value, setValue] = useState("");
   const [feedback, setFeedback] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [notFoundCode, setNotFoundCode] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const globalBufferRef = useRef("");
   const globalBufferTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -24,13 +26,18 @@ export function BarcodeScanner() {
       const trimmed = code.trim();
       if (!trimmed) return;
       const result = await scanBarcode(trimmed);
+      setNotFoundCode(null);
       if (result.ok) {
         setFeedback({ type: "ok", text: `Scanned ${trimmed} ✓` });
       } else {
         setFeedback({ type: "err", text: result.error ?? `"${trimmed}" not found` });
+        if (result.notFound) setNotFoundCode(trimmed);
       }
       setValue("");
-      window.setTimeout(() => setFeedback(null), 2500);
+      // Keep a "not found" message (with the Add Product link) up longer
+      // than a normal success/error flash — the operator needs time to
+      // read it and click through.
+      window.setTimeout(() => setFeedback(null), result.notFound ? 8000 : 2500);
     },
     [scanBarcode]
   );
@@ -113,15 +120,25 @@ export function BarcodeScanner() {
         />
       </form>
       {feedback && (
-        <p
-          className={
-            feedback.type === "ok"
-              ? "text-sm font-semibold text-ld-green"
-              : "text-sm font-semibold text-ld-red"
-          }
-        >
-          {feedback.text}
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p
+            className={
+              feedback.type === "ok"
+                ? "text-sm font-semibold text-ld-green"
+                : "text-sm font-semibold text-ld-red"
+            }
+          >
+            {feedback.text}
+          </p>
+          {notFoundCode && (
+            <Link
+              href={`/inventory/new?barcode=${encodeURIComponent(notFoundCode)}`}
+              className="rounded-lg bg-ld-purple/15 px-3 py-1 text-sm font-bold text-ld-purple hover:bg-ld-purple/25"
+            >
+              + Add Product with this code
+            </Link>
+          )}
+        </div>
       )}
     </div>
   );

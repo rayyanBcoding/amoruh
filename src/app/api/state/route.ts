@@ -6,6 +6,13 @@ export const dynamic = "force-dynamic";
 
 // GET /api/state — current fully-hydrated live snapshot.
 export async function GET() {
-  const snapshot = await buildSnapshot();
-  return NextResponse.json(snapshot);
+  try {
+    const snapshot = await buildSnapshot();
+    return NextResponse.json(snapshot);
+  } catch (err) {
+    return NextResponse.json(
+      { error: `Could not load live state: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 500 }
+    );
+  }
 }

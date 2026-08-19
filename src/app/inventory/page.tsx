@@ -22,13 +22,20 @@ export default function InventoryPage() {
               Full catalog. Click any product to open the editor.
             </p>
           </div>
-          {snapshot?.currentProduct && (
-            <Link href={`/inventory/${snapshot.currentProduct.id}`}>
-              <Button variant="outline" size="md">
-                Edit Live Product
+          <div className="flex flex-wrap items-center gap-2">
+            {snapshot?.currentProduct && (
+              <Link href={`/inventory/${snapshot.currentProduct.id}`}>
+                <Button variant="outline" size="md">
+                  Edit Live Product
+                </Button>
+              </Link>
+            )}
+            <Link href="/inventory/new">
+              <Button variant="primary" size="md">
+                + Add Product
               </Button>
             </Link>
-          )}
+          </div>
         </div>
 
         {loading || !snapshot ? (

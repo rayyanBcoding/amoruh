@@ -14,6 +14,7 @@ import type { LiveSnapshot } from "@/lib/types";
 interface ActionResult {
   ok: boolean;
   error?: string;
+  notFound?: boolean;
 }
 
 interface LiveStateContextValue {
@@ -41,7 +42,11 @@ async function postJson(url: string, body?: unknown): Promise<ActionResult> {
     });
     if (!res.ok) {
       const payload = await res.json().catch(() => ({}));
-      return { ok: false, error: payload?.error ?? `Request failed (${res.status})` };
+      return {
+        ok: false,
+        error: payload?.error ?? `Request failed (${res.status})`,
+        notFound: Boolean(payload?.notFound),
+      };
     }
     return { ok: true };
   } catch {
@@ -59,7 +64,17 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout>;
 
+    const disconnect = () => {
+      clearTimeout(retryTimer);
+      sourceRef.current?.close();
+      sourceRef.current = null;
+      setConnected(false);
+    };
+
     const connect = () => {
+      if (document.visibilityState === "hidden") return; // resumes on visibilitychange
+      disconnect();
+
       const source = new EventSource("/api/events");
       sourceRef.current = source;
 
@@ -74,21 +89,45 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
         }
       });
 
+      source.addEventListener("error", (evt) => {
+        if (cancelled) return;
+        try {
+          const data = JSON.parse((evt as MessageEvent).data) as { message?: string };
+          if (data.message) setLastError(`Live sync error: ${data.message}`);
+        } catch {
+          // not a JSON error frame — ignore
+        }
+      });
+
       source.onerror = () => {
         setConnected(false);
         source.close();
-        if (!cancelled) {
+        if (!cancelled && document.visibilityState !== "hidden") {
           retryTimer = setTimeout(connect, 2000);
         }
       };
     };
 
+    // Close the connection entirely while the tab is backgrounded — an
+    // earlier version kept polling in forgotten background tabs 24/7 and
+    // burned through a free-tier Redis request quota in days. Reconnect
+    // immediately (and get a fresh snapshot) the moment the tab is visible
+    // again.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        disconnect();
+      } else {
+        connect();
+      }
+    };
+
     connect();
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       cancelled = true;
-      clearTimeout(retryTimer);
-      sourceRef.current?.close();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      disconnect();
     };
   }, []);
 
