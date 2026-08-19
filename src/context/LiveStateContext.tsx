@@ -72,7 +72,6 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
     };
 
     const connect = () => {
-      if (document.visibilityState === "hidden") return; // resumes on visibilitychange
       disconnect();
 
       const source = new EventSource("/api/events");
@@ -102,21 +101,28 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
       source.onerror = () => {
         setConnected(false);
         source.close();
-        if (!cancelled && document.visibilityState !== "hidden") {
+        // Always retry, regardless of document.visibilityState: some
+        // embedding contexts (e.g. certain kiosk/preview browsers) report
+        // "hidden" persistently even for the on-screen tab, and gating the
+        // *retry* on visibility there would mean the app never recovers.
+        if (!cancelled) {
           retryTimer = setTimeout(connect, 2000);
         }
       };
     };
 
-    // Close the connection entirely while the tab is backgrounded — an
-    // earlier version kept polling in forgotten background tabs 24/7 and
-    // burned through a free-tier Redis request quota in days. Reconnect
-    // immediately (and get a fresh snapshot) the moment the tab is visible
-    // again.
+    // Proactively close the connection when the tab is backgrounded, and
+    // reopen it when visible again — an earlier version kept polling in
+    // forgotten background tabs 24/7 and burned through a free-tier Redis
+    // request quota in days. This is purely an optimization layered on top
+    // of the always-on `connect()` above: the initial connect and every
+    // error-triggered retry happen unconditionally, so an environment
+    // where visibility is unreliable just loses the optimization, not the
+    // connection itself.
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         disconnect();
-      } else {
+      } else if (!sourceRef.current) {
         connect();
       }
     };
