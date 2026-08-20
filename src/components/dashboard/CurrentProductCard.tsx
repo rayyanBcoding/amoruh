@@ -97,6 +97,14 @@ export function CurrentProductCard({ snapshot }: { snapshot: LiveSnapshot }) {
               </div>
 
               <div className="flex flex-wrap items-end gap-6 rounded-xl border border-ld-border bg-ld-bg-elevated p-4">
+                <div title="Wholesale cost — internal only, never shown on TV">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-ld-amber">
+                    Cost
+                  </p>
+                  <p className="text-lg font-semibold text-ld-amber">
+                    {formatCurrency(product.cost)}
+                  </p>
+                </div>
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-widest text-ld-muted">
                     Retail Price

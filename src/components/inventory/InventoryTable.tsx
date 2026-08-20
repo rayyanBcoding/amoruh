@@ -8,7 +8,7 @@ import { BottleImage } from "@/components/BottleImage";
 import { StatusBadge } from "@/components/Badge";
 import { formatCurrency } from "@/lib/format";
 
-type SortKey = "brand" | "name" | "inventory" | "retailPrice" | "marketPrice" | "lootPrice";
+type SortKey = "brand" | "name" | "inventory" | "cost" | "retailPrice" | "marketPrice" | "lootPrice";
 
 async function adjustInventory(id: string, action: string, value?: number) {
   const res = await fetch(`/api/products/${id}/inventory`, {
@@ -109,6 +109,7 @@ export function InventoryTable({ products }: { products: Product[] }) {
     { key: null, label: "Size" },
     { key: "inventory", label: "Quantity" },
     { key: null, label: "Shelf" },
+    { key: "cost", label: "Cost" },
     { key: "retailPrice", label: "MSRP" },
     { key: "marketPrice", label: "Market" },
     { key: "lootPrice", label: "Live Price" },
@@ -139,7 +140,7 @@ export function InventoryTable({ products }: { products: Product[] }) {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1100px] border-separate border-spacing-y-2 text-sm">
+        <table className="w-full min-w-[1200px] border-separate border-spacing-y-2 text-sm">
           <thead>
             <tr>
               {columns.map((col, i) => (
@@ -175,6 +176,9 @@ export function InventoryTable({ products }: { products: Product[] }) {
                   <QuickInventory product={p} />
                 </td>
                 <td className="px-3 py-2.5 text-ld-muted">{p.shelf}</td>
+                <td className="px-3 py-2.5 text-ld-amber" title="Wholesale cost — internal only, never shown on TV">
+                  {formatCurrency(p.cost)}
+                </td>
                 <td className="px-3 py-2.5 text-ld-muted">{formatCurrency(p.retailPrice)}</td>
                 <td className="px-3 py-2.5 text-ld-white">{formatCurrency(p.marketPrice)}</td>
                 <td className="px-3 py-2.5 font-semibold text-ld-purple">{formatCurrency(p.lootPrice)}</td>
