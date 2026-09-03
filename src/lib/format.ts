@@ -6,6 +6,13 @@ export function formatCurrency(value: number): string {
   }).format(value);
 }
 
+export function formatDate(iso: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", {
     hour: "numeric",

@@ -10,6 +10,7 @@ import { ConnectionDot } from "./ConnectionDot";
 const LINKS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/inventory", label: "Inventory" },
+  { href: "/intake", label: "Inventory Intake" },
 ];
 
 export function Nav() {
