@@ -1,9 +1,10 @@
 // Inventory Intake Mode — domain types.
 //
 // Everything here is additive to the existing catalog model in
-// src/lib/types.ts. Nothing here changes Product.cost or Product.inventory —
-// see src/lib/intake-db.ts for how lots derive their "remaining" quantity
-// from those two existing fields instead of duplicating them.
+// src/lib/types.ts. Product.cost and Product.inventory are never
+// repurposed — see src/lib/intake-db.ts / src/lib/intake-receiving.ts for
+// how lot "remaining" is derived purely from InventoryTransaction
+// movements, never from Product.inventory.
 
 export type POStatus =
   | "awaiting_delivery"
@@ -49,12 +50,14 @@ export interface PurchaseOrderLine {
   expectedQty: number;
   unitCost: number;
   lineTotal: number;
-  /** Cumulative quantity actually received against this line so far (across receiving events). */
+  /** Cumulative quantity actually received against this line so far (across receiving events). Can exceed expectedQty (overage). */
   receivedQty: number;
   status: POLineStatus;
   /** How the match to productId was made — surfaced in the review UI. */
   matchType: "upc" | "sku" | "fuzzy" | "manual" | "new_product" | "unmatched";
   matchConfidence: number | null;
+  /** True for a line created via "Add Unexpected Item" during receiving — not on the original invoice. */
+  isUnexpected?: boolean;
 }
 
 export interface PurchaseOrder {
@@ -73,10 +76,14 @@ export interface PurchaseOrder {
   totalExpectedQty: number;
   totalReceivedQty: number;
   subtotal: number;
+  /** Freight/shipping cost for the whole PO — kept separate from every
+   *  line's unitCost, always. See intake-costing.ts for how it's spread
+   *  across units. */
+  shippingCost: number;
 }
 
-/** One immutable cost layer, created when a PO line is first received and
- *  grown (receivedQuantity increases) by every subsequent partial delivery
+/** One cost layer, created when a PO line is first received and grown
+ *  (receivedQuantity increases) by every subsequent partial delivery
  *  against the same line. unitCost never changes after creation — this is
  *  what makes cost-by-PO possible. */
 export interface InventoryLot {
@@ -87,20 +94,37 @@ export interface InventoryLot {
   productId: string;
   supplierId: string;
   supplierName: string;
+  /** Purchase (supplier) unit cost only — freight is never merged in here. */
   unitCost: number;
+  /** Cumulative quantity ever received into this lot (denormalized display total). */
   receivedQuantity: number;
   receivedDate: string;
   invoiceDate: string;
 }
 
-/** Derived (never stored) view of a lot plus how much of it is still on
- *  hand, per the FIFO depletion computed in intake-db.ts. */
-export interface InventoryLotWithRemaining extends InventoryLot {
-  remaining: number;
+/** A cost breakdown for one unit — purchase + freight (+ future duty/other),
+ *  always computed live from the lot's PO so a freight edit is reflected
+ *  immediately everywhere, with no stored value to migrate. */
+export interface CostBreakdown {
+  purchase: number;
+  freight: number;
+  duty: number;
+  other: number;
+  landed: number;
 }
 
-export type ReceivingEventType = "received" | "modify" | "not_received";
+/** Lot + its live cost breakdown + its remaining quantity, computed purely
+ *  from InventoryTransaction movements against that lot (never from
+ *  Product.inventory). */
+export interface InventoryLotWithRemaining extends InventoryLot {
+  remaining: number;
+  cost: CostBreakdown;
+}
 
+export type ReceiveMethod = "barcode" | "manual" | "receive_all";
+export type ReceivingEventType = "received" | "modify" | "not_received" | "unexpected";
+
+/** Append-only audit record of one receiving action — every field §20 asks for. */
 export interface ReceivingEvent {
   id: string;
   poId: string;
@@ -108,12 +132,46 @@ export interface ReceivingEvent {
   poLineId: string;
   productId: string | null;
   productName: string;
+  sku: string;
+  upc: string;
   type: ReceivingEventType;
-  expectedQty: number;
+  method: ReceiveMethod;
+  /** Remaining-expected immediately BEFORE this event. */
+  expectedQtyAtEvent: number;
+  /** Physically received in THIS event only (not cumulative). */
   actualQty: number;
+  /** actualQty - expectedQtyAtEvent: negative = short, positive = overage. */
   difference: number;
-  location: string;
+  /** Reason for a not_received or unexpected event. */
+  reason: string;
   notes: string;
+  /** Cost breakdown frozen at the moment of this event — permanent, never recalculated. */
+  cost: CostBreakdown;
+  operator: string;
+  timestamp: string;
+  /** Set for every event created by one Receive All action, so they can be grouped. */
+  batchId: string | null;
+  idempotencyKey: string;
+}
+
+export type InventoryTransactionReason =
+  | "po_receiving"
+  | "po_receive_all"
+  | "po_unexpected_item"
+  | "sale"
+  | "manual_adjustment";
+
+/** Append-only ledger entry for one inventory movement against one lot.
+ *  quantityDelta is signed: positive = added to the lot, negative = consumed. */
+export interface InventoryTransaction {
+  id: string;
+  productId: string;
+  poId: string | null;
+  poLineId: string | null;
+  lotId: string;
+  quantityDelta: number;
+  reason: InventoryTransactionReason;
+  receivingEventId: string | null;
   operator: string;
   timestamp: string;
 }
@@ -159,4 +217,16 @@ export interface MatchedLineItem extends ExtractedLineItem {
   matchType: MatchType;
   /** Best candidate (if any) — for "fuzzy" this needs explicit confirm; for "unmatched" this is null. */
   candidate: MatchCandidate | null;
+}
+
+// ---------------------------------------------------------------------
+// Scan resolution (receiving)
+// ---------------------------------------------------------------------
+
+export type ScanStatus = "found" | "duplicate" | "unexpected" | "unknown";
+
+export interface ScanResolution {
+  status: ScanStatus;
+  line: PurchaseOrderLine | null;
+  productId: string | null;
 }

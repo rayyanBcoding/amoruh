@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
-import { getPO, getPOLines, getInvoiceDocument, recomputePOFromLines, savePOLines, updatePOStatus } from "@/lib/intake-db";
+import {
+  getPO,
+  getPOLines,
+  getInvoiceDocument,
+  recomputePOFromLines,
+  savePOLines,
+  updatePOStatus,
+  updatePOShippingCost,
+} from "@/lib/intake-db";
 import type { POStatus } from "@/lib/intake-types";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +28,7 @@ interface PatchBody {
   /** Resolve a still-unmatched line to a product from the PO Detail screen. */
   lineId?: string;
   productId?: string | null;
+  shippingCost?: number;
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -48,6 +57,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (body.status) {
     await updatePOStatus(id, body.status);
+  }
+
+  if (typeof body.shippingCost === "number") {
+    if (!Number.isFinite(body.shippingCost) || body.shippingCost < 0) {
+      return NextResponse.json({ error: "Shipping cost must be a non-negative number." }, { status: 400 });
+    }
+    await updatePOShippingCost(id, body.shippingCost);
   }
 
   const updated = await recomputePOFromLines(id);

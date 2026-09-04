@@ -8,6 +8,7 @@ import {
   updateProduct,
 } from "@/lib/db";
 import { broadcastStateChanged } from "@/lib/events";
+import { consumeFromOldestLot } from "@/lib/intake-receiving";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +43,15 @@ export async function POST() {
     await patchState({
       recentSales: [sale, ...state.recentSales].slice(0, MAX_RECENT_SALES),
     });
+
+    // Best-effort FIFO lot consumption — keeps Intake Mode's cost-layer
+    // ledger accurate for stock that came in through a PO. Awaited (not
+    // fire-and-forget) so it actually completes before this serverless
+    // function returns — but it can never fail the sale or change its
+    // outcome: consumeFromOldestLot has its own try/catch and simply
+    // returns false on any problem. A product with no lots (predates
+    // Intake Mode) is a harmless no-op here.
+    await consumeFromOldestLot(product.id, 1, "Live Show — Mark Sold");
 
     broadcastStateChanged("mark-sold");
     return NextResponse.json(await buildSnapshot());

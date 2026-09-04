@@ -1,10 +1,15 @@
 import { redis } from "./kv";
+import { computeCostBreakdown } from "./intake-costing";
 import type {
+  InventoryLot,
+  InventoryLotWithRemaining,
+  InventoryTransaction,
   InvoiceDocument,
   MatchedLineItem,
   PurchaseOrder,
   PurchaseOrderLine,
   POStatus,
+  ReceivingEvent,
   Supplier,
 } from "./intake-types";
 import type { ExtractedPO } from "./intake-types";
@@ -15,18 +20,29 @@ import type { ExtractedPO } from "./intake-types";
 // Same Redis-blob-per-collection convention as the rest of the app.
 // PO lines are stored one key per PO (amoruh:intake:po_lines:{poId})
 // since every read of them is already scoped to a single PO (PO Detail,
-// Receiving) — see intake-lots.ts (Phase 2) for the per-product lot store,
-// which is queried the other way (by productId, across POs).
+// Receiving). Lots are stored one key per product (queried the other
+// way — by productId, across every PO that ever shipped that product).
+// Receiving events and inventory transactions are flat, append-only
+// collections — small enough at this business's volume to read/filter
+// in memory. See src/lib/intake-receiving.ts for how these are WRITTEN
+// (a single atomic Lua script, never plain redis.set() calls, for
+// anything that mutates inventory) — everything in this file is either
+// pure reads or the non-inventory-affecting PO/line/document writes that
+// were already safe as plain read-modify-write (Phase 1's pattern).
 // ---------------------------------------------------------------------
 
-const KEYS = {
+export const KEYS = {
   suppliers: "amoruh:intake:suppliers",
   pos: "amoruh:intake:pos",
   poLines: (poId: string) => `amoruh:intake:po_lines:${poId}`,
   documents: "amoruh:intake:documents",
+  lots: (productId: string) => `amoruh:intake:lots:${productId}`,
+  receivingEvents: "amoruh:intake:receiving_events",
+  inventoryTransactions: "amoruh:intake:inventory_transactions",
+  idempotency: (key: string) => `amoruh:intake:idempotency:${key}`,
 } as const;
 
-function newId(prefix: string): string {
+export function newId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -161,6 +177,7 @@ export async function createPOFromReview(input: {
     totalExpectedQty: poLines.reduce((sum, l) => sum + l.expectedQty, 0),
     totalReceivedQty: 0,
     subtotal: poLines.reduce((sum, l) => sum + l.lineTotal, 0),
+    shippingCost: 0,
   };
 
   const pos = await getPOs();
@@ -176,6 +193,18 @@ export async function updatePOStatus(poId: string, status: POStatus): Promise<vo
   if (idx === -1) return;
   pos[idx] = { ...pos[idx], status };
   await savePOs(pos);
+}
+
+/** Freight is a simple, non-inventory-affecting field — safe as a plain
+ *  read-modify-write, unlike anything that touches lots/transactions/
+ *  Product.inventory (see intake-receiving.ts for those). */
+export async function updatePOShippingCost(poId: string, shippingCost: number): Promise<PurchaseOrder | null> {
+  const pos = await getPOs();
+  const idx = pos.findIndex((p) => p.id === poId);
+  if (idx === -1) return null;
+  pos[idx] = { ...pos[idx], shippingCost: Math.max(0, shippingCost) };
+  await savePOs(pos);
+  return pos[idx];
 }
 
 /** Recomputes a PO's denormalized totals + status from its current lines.
@@ -202,4 +231,70 @@ export async function recomputePOFromLines(poId: string): Promise<PurchaseOrder 
 
 function numberOrZero(value: unknown): number {
   return typeof value === "number" && !Number.isNaN(value) ? value : 0;
+}
+
+// ---------------------------------------------------------------------
+// Inventory lots (reads only — writes go through intake-receiving.ts's
+// atomic Lua helper, never a plain redis.set() here, because they always
+// happen alongside a Product.inventory change and a receiving event).
+// ---------------------------------------------------------------------
+
+export async function getLotsForProduct(productId: string): Promise<InventoryLot[]> {
+  return (await redis.get<InventoryLot[]>(KEYS.lots(productId))) ?? [];
+}
+
+// ---------------------------------------------------------------------
+// Receiving events (audit trail) and inventory transactions (ledger) —
+// both flat, append-only collections. Reads only, same reasoning as lots.
+// ---------------------------------------------------------------------
+
+export async function getAllReceivingEvents(): Promise<ReceivingEvent[]> {
+  return (await redis.get<ReceivingEvent[]>(KEYS.receivingEvents)) ?? [];
+}
+
+export async function getReceivingEvents(filter?: { poId?: string; productId?: string }): Promise<ReceivingEvent[]> {
+  const events = await getAllReceivingEvents();
+  const filtered = events.filter(
+    (e) => (!filter?.poId || e.poId === filter.poId) && (!filter?.productId || e.productId === filter.productId)
+  );
+  return [...filtered].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+export async function getAllInventoryTransactions(): Promise<InventoryTransaction[]> {
+  return (await redis.get<InventoryTransaction[]>(KEYS.inventoryTransactions)) ?? [];
+}
+
+async function getTransactionsForProduct(productId: string): Promise<InventoryTransaction[]> {
+  const all = await getAllInventoryTransactions();
+  return all.filter((t) => t.productId === productId);
+}
+
+/** A product's lots with their live cost breakdown and remaining
+ *  quantity — remaining is purely sum(quantityDelta) across that lot's
+ *  own InventoryTransactions. Never derived from, or checked against,
+ *  Product.inventory. */
+export async function getLotsWithRemaining(productId: string): Promise<InventoryLotWithRemaining[]> {
+  const [lots, transactions, pos] = await Promise.all([
+    getLotsForProduct(productId),
+    getTransactionsForProduct(productId),
+    getPOs(),
+  ]);
+
+  const remainingByLot = new Map<string, number>();
+  for (const tx of transactions) {
+    remainingByLot.set(tx.lotId, (remainingByLot.get(tx.lotId) ?? 0) + tx.quantityDelta);
+  }
+  const poById = new Map(pos.map((p) => [p.id, p]));
+
+  return [...lots]
+    .sort((a, b) => a.receivedDate.localeCompare(b.receivedDate))
+    .map((lot) => {
+      const po = poById.get(lot.poId);
+      const cost = computeCostBreakdown(lot.unitCost, po ?? { shippingCost: 0, totalExpectedQty: 0 });
+      return {
+        ...lot,
+        remaining: remainingByLot.get(lot.id) ?? 0,
+        cost,
+      };
+    });
 }
