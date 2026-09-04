@@ -513,7 +513,7 @@ export async function receiveAll(input: ReceiveAllInput): Promise<ReceiveAllResu
   const unmatchedCount = lines.filter((l) => !l.productId).length;
   if (unmatchedCount > 0) {
     throw new ReceivingError(
-      `${unmatchedCount} product${unmatchedCount === 1 ? "" : "s"} require review before this PO can be approved.`
+      `${unmatchedCount} product${unmatchedCount === 1 ? "" : "s"} ${unmatchedCount === 1 ? "requires" : "require"} review before this PO can be approved.`
     );
   }
 

@@ -708,7 +708,8 @@ function ReceiveAllDialog({
 
       {unmatchedCount > 0 && (
         <p className="mb-4 rounded-lg bg-ld-red/10 px-3 py-2 text-sm font-semibold text-ld-red">
-          {unmatchedCount} product{unmatchedCount === 1 ? "" : "s"} require review before this PO can be approved.
+          {unmatchedCount} product{unmatchedCount === 1 ? "" : "s"} {unmatchedCount === 1 ? "requires" : "require"} review
+          before this PO can be approved.
         </p>
       )}
       {error && <p className="mb-4 text-sm font-semibold text-ld-red">{error}</p>}
