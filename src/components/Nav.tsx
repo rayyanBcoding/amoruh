@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import clsx from "clsx";
 import { Logo } from "./Logo";
 import { useLiveState } from "@/context/LiveStateContext";
@@ -15,7 +15,14 @@ const LINKS = [
 
 export function Nav() {
   const pathname = usePathname();
+  const router = useRouter();
   const { connected } = useLiveState();
+
+  const lock = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+    router.refresh();
+  };
 
   return (
     <header className="sticky top-0 z-40 border-b border-ld-border bg-ld-bg">
@@ -50,7 +57,16 @@ export function Nav() {
           </Link>
         </nav>
 
-        <ConnectionDot connected={connected} />
+        <div className="flex items-center gap-3">
+          <ConnectionDot connected={connected} />
+          <button
+            onClick={lock}
+            title="Lock the site"
+            className="rounded-lg px-3 py-2 text-xs font-semibold text-ld-muted transition-colors hover:bg-ld-bg-elevated hover:text-ld-white"
+          >
+            🔒 Lock
+          </button>
+        </div>
       </div>
     </header>
   );
