@@ -8,13 +8,13 @@ export const dynamic = "force-dynamic";
 // kill mid-frame.
 export const maxDuration = 60;
 
-// Tuned up from an earlier 1s interval, which (combined with tabs left
-// open in the background for a long time) burned through a free-tier
-// Redis request quota. The client also now closes this connection
-// entirely while its tab is hidden (see LiveStateContext), which matters
-// far more than this number for total request volume — this interval is
-// just the steady-state "how fresh does live feel" knob.
-const POLL_INTERVAL_MS = 2500;
+// Tuned up twice now from an original 1s interval — a tab left open 24/7
+// (the TV display especially) multiplies this out to hundreds of
+// thousands of Redis commands a month, which is what exhausted the
+// Upstash free-tier request quota (twice). This interval is the
+// steady-state "how fresh does live feel" knob; the client-side polling
+// fallback below is the far bigger cost driver, see LiveStateContext.
+const POLL_INTERVAL_MS = 4000;
 const MAX_STREAM_MS = 50_000;
 
 // GET /api/events — Server-Sent Events stream.

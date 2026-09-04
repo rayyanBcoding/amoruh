@@ -129,13 +129,19 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Belt-and-suspenders polling fallback, independent of the SSE
-  // connection above. SSE gives near-instant updates when it's healthy,
-  // but this app's one job is "the dashboard/TV must never sit there
-  // showing stale data during a live show" — so this guarantees freshness
-  // within a few seconds even in a browser/network environment where SSE
-  // delivery turns out to be unreliable for reasons that are hard to
-  // fully pin down. Cheap (one small GET) and harmless to run alongside
-  // a working SSE connection.
+  // connection above. SSE gives near-instant updates when it's healthy;
+  // this exists purely as a backstop for a browser/network environment
+  // where SSE delivery turns out to be unreliable for reasons that are
+  // hard to fully pin down — it does NOT need to be fast, since SSE is
+  // already carrying the real-time load.
+  //
+  // This was originally a 3s interval, which — multiplied across every
+  // tab this app has open (every page mounts LiveStateProvider), 24/7 for
+  // things like the TV display — was the single biggest driver behind
+  // exhausting Upstash's free-tier monthly request quota (twice). A
+  // "worst case, data is stale for up to 20s if SSE is somehow also
+  // broken" backstop is still a perfectly good guarantee for this app, at
+  // a fraction of the request volume.
   useEffect(() => {
     let cancelled = false;
 
@@ -154,7 +160,7 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
     };
 
     poll();
-    const interval = setInterval(poll, 3000);
+    const interval = setInterval(poll, 20000);
     return () => {
       cancelled = true;
       clearInterval(interval);
