@@ -7,8 +7,8 @@ import { ProductEditorForm } from "@/components/inventory/ProductEditorForm";
 
 function NewProductForm() {
   const searchParams = useSearchParams();
-  const prefillBarcode = searchParams.get("barcode") ?? undefined;
-  return <ProductEditorForm prefillBarcode={prefillBarcode} />;
+  const barcode = searchParams.get("barcode") ?? undefined;
+  return <ProductEditorForm initialValues={barcode ? { sku: barcode, barcode } : undefined} />;
 }
 
 export default function NewProductPage() {

@@ -6,6 +6,7 @@ import { upload } from "@vercel/blob/client";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
 import { MatchBadge } from "@/components/intake/IntakeBadges";
+import { CreateProductModal } from "@/components/intake/CreateProductModal";
 import { formatCurrency } from "@/lib/format";
 import type { ExtractedPO, MatchedLineItem } from "@/lib/intake-types";
 import type { Product } from "@/lib/types";
@@ -24,6 +25,8 @@ export default function UploadInvoicePage() {
   const [lines, setLines] = useState<MatchedLineItem[]>([]);
   const [resolved, setResolved] = useState<(string | null)[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [modalLineIndex, setModalLineIndex] = useState<number | null>(null);
+  const [bulkCreating, setBulkCreating] = useState(false);
 
   const loadProducts = () => {
     fetch("/api/products")
@@ -113,7 +116,68 @@ export default function UploadInvoicePage() {
     }
   };
 
-  const unmatchedCount = lines.filter((_, i) => !resolved[i]).length;
+  // Three buckets, per the spec: Matched Existing / Possible Match —
+  // Review Required / New Product — Ready to Create. matchType +
+  // resolved[] already carry everything needed to partition every line;
+  // nothing new is computed here beyond counting.
+  const matchedCount = lines.filter((_, i) => resolved[i] !== null).length;
+  const reviewCount = lines.filter((l, i) => l.matchType === "fuzzy" && resolved[i] === null).length;
+  const readyIndices = lines
+    .map((l, i) => i)
+    .filter((i) => lines[i].matchType === "unmatched" && resolved[i] === null);
+  const readyCount = readyIndices.length;
+
+  const handleProductCreated = (i: number, product: Product) => {
+    setResolved((prev) => prev.map((v, idx) => (idx === i ? product.id : v)));
+    setProducts((prev) => [...prev, product]);
+    setModalLineIndex(null);
+  };
+
+  const createAllReady = async () => {
+    if (readyIndices.length === 0) return;
+    setBulkCreating(true);
+    setError(null);
+    const specs = readyIndices.map((i) => {
+      const l = lines[i];
+      return {
+        sku: l.upc || `NEW-${Date.now()}-${i}`,
+        barcode: l.upc || undefined,
+        brand: l.brand,
+        name: l.name,
+        size: l.size,
+        concentration: l.concentration,
+        description: l.rawDescription,
+        cost: l.unitCost,
+        status: "draft",
+        inventory: 0,
+      };
+    });
+    try {
+      const res = await fetch("/api/products/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ products: specs }),
+      });
+      const data = await res.json();
+      const results: { ok: boolean; product?: Product; error?: string }[] = data.results ?? [];
+      setResolved((prev) => {
+        const next = [...prev];
+        results.forEach((r, j) => {
+          if (r.ok && r.product) next[readyIndices[j]] = r.product.id;
+        });
+        return next;
+      });
+      setProducts((prev) => [...prev, ...results.filter((r) => r.ok && r.product).map((r) => r.product as Product)]);
+      const failedCount = results.filter((r) => !r.ok).length;
+      if (failedCount > 0) {
+        setError(`${failedCount} product${failedCount === 1 ? "" : "s"} could not be created — check for a duplicate SKU/UPC.`);
+      }
+    } catch {
+      setError("Could not create products — check your connection and try again.");
+    } finally {
+      setBulkCreating(false);
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -168,15 +232,28 @@ export default function UploadInvoicePage() {
             </div>
 
             <div className="glass-panel rounded-2xl p-5">
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="font-display text-lg font-bold text-ld-white">
                   {lines.length} Line Item{lines.length === 1 ? "" : "s"}
                 </h2>
-                {unmatchedCount > 0 && (
-                  <p className="text-sm font-semibold text-ld-amber">
-                    {unmatchedCount} line{unmatchedCount === 1 ? "" : "s"} still need a product match
-                  </p>
-                )}
+                <div className="flex flex-wrap items-center gap-4 text-sm">
+                  <span className="text-ld-muted">
+                    <span className="font-semibold text-ld-green">{matchedCount} matched existing</span>
+                    {" · "}
+                    <span className={reviewCount > 0 ? "font-semibold text-ld-amber" : ""}>
+                      {reviewCount} require review
+                    </span>
+                    {" · "}
+                    <span className={readyCount > 0 ? "font-semibold text-ld-cyan" : ""}>
+                      {readyCount} ready to create
+                    </span>
+                  </span>
+                  {readyCount > 0 && (
+                    <Button variant="cyan" size="md" disabled={bulkCreating} onClick={createAllReady}>
+                      {bulkCreating ? "Creating…" : `Create ${readyCount} New Product${readyCount === 1 ? "" : "s"}`}
+                    </Button>
+                  )}
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -248,14 +325,12 @@ export default function UploadInvoicePage() {
                           </select>
                           {!resolved[i] && (
                             <div className="mt-1 flex items-center gap-2">
-                              <a
-                                href={`/inventory/new?barcode=${encodeURIComponent(line.upc)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                              <button
+                                onClick={() => setModalLineIndex(i)}
                                 className="text-xs font-bold text-ld-cyan hover:underline"
                               >
-                                + Create New Product
-                              </a>
+                                + Create New Product From Invoice
+                              </button>
                               <button onClick={loadProducts} className="text-xs text-ld-muted hover:text-ld-white">
                                 ↻ Refresh
                               </button>
@@ -281,6 +356,24 @@ export default function UploadInvoicePage() {
           </div>
         )}
       </main>
+
+      {modalLineIndex !== null && (
+        <CreateProductModal
+          initialValues={{
+            sku: lines[modalLineIndex].upc || "",
+            barcode: lines[modalLineIndex].upc || "",
+            brand: lines[modalLineIndex].brand,
+            name: lines[modalLineIndex].name,
+            size: lines[modalLineIndex].size,
+            concentration: lines[modalLineIndex].concentration,
+            description: lines[modalLineIndex].rawDescription,
+            cost: lines[modalLineIndex].unitCost,
+            status: "draft",
+          }}
+          onCreated={(product) => handleProductCreated(modalLineIndex, product)}
+          onClose={() => setModalLineIndex(null)}
+        />
+      )}
     </div>
   );
 }

@@ -6,10 +6,18 @@ import Link from "next/link";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
 import { POStatusBadge, LineStatusBadge, MatchBadge } from "@/components/intake/IntakeBadges";
+import { CreateProductModal } from "@/components/intake/CreateProductModal";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { computePOReviewSummary } from "@/lib/intake-review";
+import { computePOReviewSummary, isLineConfirmed } from "@/lib/intake-review";
+import { matchLineItem } from "@/lib/intake-matching";
 import type { InvoiceDocument, PurchaseOrder, PurchaseOrderLine } from "@/lib/intake-types";
 import type { Product } from "@/lib/types";
+
+interface BulkCreateResultSummary {
+  created: number;
+  failed: number;
+  failedLineIds: string[];
+}
 
 interface Detail {
   po: PurchaseOrder;
@@ -24,6 +32,9 @@ export default function PODetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [shippingInput, setShippingInput] = useState("");
   const [savingShipping, setSavingShipping] = useState(false);
+  const [modalLineId, setModalLineId] = useState<string | null>(null);
+  const [bulkCreating, setBulkCreating] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkCreateResultSummary | null>(null);
 
   const load = useCallback(() => {
     fetch(`/api/intake/pos/${params.poId}`)
@@ -80,6 +91,26 @@ export default function PODetailPage() {
     load();
   };
 
+  const runBulkCreate = async () => {
+    setBulkCreating(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/intake/pos/${params.poId}/bulk-create-products`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Could not create products.");
+      type Result = { lineId: string; status: string; error?: string };
+      const results: Result[] = data.results ?? [];
+      const created = results.filter((r) => r.status === "created" || r.status === "linked_existing").length;
+      const failed = results.filter((r) => r.status === "failed" || r.status === "needs_review");
+      setBulkResult({ created, failed: failed.length, failedLineIds: failed.map((r) => r.lineId) });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create products.");
+    } finally {
+      setBulkCreating(false);
+    }
+  };
+
   const reviewClose = async () => {
     if (!detail) return;
     const existingProductIds = new Set(products.map((p) => p.id));
@@ -100,6 +131,40 @@ export default function PODetailPage() {
   const productById = new Map(products.map((p) => [p.id, p]));
   const existingProductIds = new Set(products.map((p) => p.id));
   const reviewSummary = detail ? computePOReviewSummary(detail.lines, existingProductIds) : null;
+
+  // Three-way bucket, matching the Upload/Review screen: Matched Existing /
+  // Possible Match — Review Required / New Product — Ready to Create.
+  // A saved PO's persisted matchType collapses any never-confirmed line to
+  // "unmatched" (the original fuzzy candidate isn't stored), so the fuzzy
+  // check is re-run live here against today's catalog — this also doubles
+  // as the safety check the bulk button needs (never bulk-create over a
+  // line that now has a decent candidate).
+  const unresolvedLines = detail ? detail.lines.filter((l) => !isLineConfirmed(l, existingProductIds)) : [];
+  const liveFuzzyByLineId = new Map(
+    unresolvedLines
+      .map((l) => [
+        l.id,
+        matchLineItem(
+          {
+            rawDescription: l.rawDescription,
+            upc: l.upc,
+            brand: l.brand,
+            name: l.name,
+            size: l.size,
+            concentration: l.concentration,
+            quantity: l.expectedQty,
+            unitCost: l.unitCost,
+            lineTotal: l.lineTotal,
+          },
+          products
+        ),
+      ] as const)
+      .filter(([, m]) => m.matchType === "fuzzy")
+  );
+  const reviewRequiredCount = liveFuzzyByLineId.size;
+  const readyToCreateCount = unresolvedLines.length - reviewRequiredCount;
+
+  const modalLine = detail?.lines.find((l) => l.id === modalLineId) ?? null;
 
   return (
     <div className="min-h-screen">
@@ -163,14 +228,40 @@ export default function PODetailPage() {
             </div>
 
             {reviewSummary && (
-              <div className="mb-6 grid grid-cols-3 gap-4">
-                <Stat label="Total Products" value={String(reviewSummary.total)} />
-                <Stat label="Confirmed" value={String(reviewSummary.confirmed)} accent="text-ld-green" />
-                <Stat
-                  label="Require Review"
-                  value={String(reviewSummary.unresolvedLineIds.length)}
-                  accent={reviewSummary.unresolvedLineIds.length > 0 ? "text-ld-red" : "text-ld-green"}
-                />
+              <div className="mb-6">
+                <div className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <Stat label="Total Products" value={String(reviewSummary.total)} />
+                  <Stat label="Matched Existing" value={String(reviewSummary.confirmed)} accent="text-ld-green" />
+                  <Stat
+                    label="Possible Match — Review"
+                    value={String(reviewRequiredCount)}
+                    accent={reviewRequiredCount > 0 ? "text-ld-amber" : undefined}
+                  />
+                  <Stat
+                    label="Ready to Create"
+                    value={String(readyToCreateCount)}
+                    accent={readyToCreateCount > 0 ? "text-ld-cyan" : undefined}
+                  />
+                </div>
+                {readyToCreateCount > 0 && detail.po.status !== "closed" && (
+                  <Button variant="cyan" size="md" disabled={bulkCreating} onClick={runBulkCreate}>
+                    {bulkCreating ? "Creating…" : `Create ${readyToCreateCount} New Product${readyToCreateCount === 1 ? "" : "s"}`}
+                  </Button>
+                )}
+                {bulkResult && (
+                  <p className="mt-2 text-sm">
+                    <span className="font-semibold text-ld-green">{bulkResult.created} created and linked</span>
+                    {bulkResult.failed > 0 && (
+                      <>
+                        {" · "}
+                        <span className="font-semibold text-ld-red">{bulkResult.failed} failed</span>{" "}
+                        <button onClick={runBulkCreate} className="font-bold text-ld-cyan hover:underline">
+                          Retry {bulkResult.failed} Failed Item{bulkResult.failed === 1 ? "" : "s"}
+                        </button>
+                      </>
+                    )}
+                  </p>
+                )}
               </div>
             )}
 
@@ -220,20 +311,42 @@ export default function PODetailPage() {
                                 {product.sku} — {product.brand} {product.name}
                               </p>
                             ) : (
-                              <div className="flex items-center gap-2">
-                                <MatchBadge type="unmatched" />
-                                <select
-                                  defaultValue=""
-                                  onChange={(e) => resolveLine(line.id, e.target.value || null)}
-                                  className="rounded-lg border border-ld-border bg-ld-bg px-2 py-1 text-xs text-ld-white outline-none focus:border-ld-purple"
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                  {liveFuzzyByLineId.has(line.id) ? (
+                                    <MatchBadge type="fuzzy" confidence={liveFuzzyByLineId.get(line.id)!.candidate?.confidence} />
+                                  ) : (
+                                    <MatchBadge type="unmatched" />
+                                  )}
+                                  <select
+                                    defaultValue=""
+                                    onChange={(e) => resolveLine(line.id, e.target.value || null)}
+                                    className="rounded-lg border border-ld-border bg-ld-bg px-2 py-1 text-xs text-ld-white outline-none focus:border-ld-purple"
+                                  >
+                                    <option value="">Match to product…</option>
+                                    {products.map((p) => (
+                                      <option key={p.id} value={p.id}>
+                                        {p.sku} — {p.brand} {p.name} ({p.size})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                {liveFuzzyByLineId.has(line.id) && (
+                                  <button
+                                    onClick={() => resolveLine(line.id, liveFuzzyByLineId.get(line.id)!.candidate!.productId)}
+                                    className="block text-xs font-bold text-ld-purple hover:underline"
+                                  >
+                                    Use {liveFuzzyByLineId.get(line.id)!.candidate!.brand}{" "}
+                                    {liveFuzzyByLineId.get(line.id)!.candidate!.name} (
+                                    {liveFuzzyByLineId.get(line.id)!.candidate!.size})
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => setModalLineId(line.id)}
+                                  className="block text-xs font-bold text-ld-cyan hover:underline"
                                 >
-                                  <option value="">Match to product…</option>
-                                  {products.map((p) => (
-                                    <option key={p.id} value={p.id}>
-                                      {p.sku} — {p.brand} {p.name} ({p.size})
-                                    </option>
-                                  ))}
-                                </select>
+                                  + Create New Product From Invoice
+                                </button>
                               </div>
                             )}
                           </td>
@@ -247,6 +360,28 @@ export default function PODetailPage() {
           </>
         )}
       </main>
+
+      {modalLine && (
+        <CreateProductModal
+          initialValues={{
+            sku: modalLine.upc || "",
+            barcode: modalLine.upc || "",
+            brand: modalLine.brand,
+            name: modalLine.name,
+            size: modalLine.size,
+            concentration: modalLine.concentration,
+            description: modalLine.rawDescription,
+            cost: modalLine.unitCost,
+            status: "draft",
+          }}
+          createUrl={`/api/intake/pos/${params.poId}/lines/${modalLine.id}/create-product`}
+          onCreated={() => {
+            setModalLineId(null);
+            load();
+          }}
+          onClose={() => setModalLineId(null)}
+        />
+      )}
     </div>
   );
 }

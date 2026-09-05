@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
+import { Overlay } from "@/components/Overlay";
 import { ReceivingScanner } from "@/components/intake/ReceivingScanner";
 import { LineStatusBadge } from "@/components/intake/IntakeBadges";
 import { formatCurrency } from "@/lib/format";
@@ -320,17 +321,6 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
   );
 }
 
-// ---------------------------------------------------------------------
-// Shared overlay shell
-// ---------------------------------------------------------------------
-
-function Overlay({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className={`glass-panel w-full ${wide ? "max-w-2xl" : "max-w-lg"} rounded-2xl p-6`}>{children}</div>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------
 // Confirm Received (§1, §2, §3, §4, §5, §13)

@@ -14,11 +14,11 @@ type FormState = Omit<Product, "topNotes" | "middleNotes" | "baseNotes"> & {
 
 const BRAND_COLORS = ["#B89A5C", "#2F2E22", "#8fa3c9", "#2fb3a0", "#7a1f1f", "#2e5339", "#1c4fa0"];
 
-function blankProduct(prefillBarcode?: string): Product {
+function blankProduct(initialValues?: Partial<Product>): Product {
   return {
     id: "",
-    sku: prefillBarcode ?? "",
-    barcode: prefillBarcode ?? "",
+    sku: "",
+    barcode: "",
     brand: "",
     name: "",
     size: "",
@@ -43,6 +43,7 @@ function blankProduct(prefillBarcode?: string): Product {
     tiktokListing: "",
     status: "active",
     notes: "",
+    ...initialValues,
   };
 }
 
@@ -109,15 +110,29 @@ const CONDITION_OPTIONS = [
 
 export function ProductEditorForm({
   product,
-  prefillBarcode,
+  initialValues,
+  createUrl = "/api/products",
+  onCreated,
+  onCancel,
 }: {
   /** Omit (or pass undefined) to render in "Add Product" (create) mode. */
   product?: Product;
-  prefillBarcode?: string;
+  /** Create-mode only: prefill fields (e.g. from an invoice line). */
+  initialValues?: Partial<Product>;
+  /** Create-mode only: where Save POSTs to. Defaults to the plain product
+   *  endpoint; Intake Mode points this at a PO-line-aware route instead
+   *  so create + link-to-PO-line happens as one atomic server call. */
+  createUrl?: string;
+  /** Called instead of navigating to /inventory/[id] after a create —
+   *  used when this form is rendered inside a modal (e.g. CreateProductModal)
+   *  rather than as its own page. */
+  onCreated?: (product: Product) => void;
+  /** Called instead of navigating to /inventory on Cancel — same reasoning. */
+  onCancel?: () => void;
 }) {
   const router = useRouter();
   const isCreate = !product;
-  const [form, setForm] = useState<FormState>(toFormState(product ?? blankProduct(prefillBarcode)));
+  const [form, setForm] = useState<FormState>(toFormState(product ?? blankProduct(initialValues)));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -154,7 +169,7 @@ export function ProductEditorForm({
     setFieldErrors({});
 
     const payload = toPayload(form);
-    const url = isCreate ? "/api/products" : `/api/products/${product!.id}`;
+    const url = isCreate ? createUrl : `/api/products/${product!.id}`;
     const method = isCreate ? "POST" : "PUT";
 
     let res: Response;
@@ -184,13 +199,21 @@ export function ProductEditorForm({
     setTimeout(() => setSaved(false), 2500);
 
     if (isCreate && body?.id) {
-      router.push(`/inventory/${body.id}`);
+      if (onCreated) {
+        onCreated(body as Product);
+      } else {
+        router.push(`/inventory/${body.id}`);
+      }
     }
   };
 
   const handleCancel = () => {
     if (dirty && !window.confirm("Discard unsaved changes?")) return;
-    router.push("/inventory");
+    if (onCancel) {
+      onCancel();
+    } else {
+      router.push("/inventory");
+    }
   };
 
   const handleArchiveToggle = async () => {
