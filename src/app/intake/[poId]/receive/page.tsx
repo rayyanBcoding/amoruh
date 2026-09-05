@@ -8,6 +8,8 @@ import { Button } from "@/components/Button";
 import { ReceivingScanner } from "@/components/intake/ReceivingScanner";
 import { LineStatusBadge } from "@/components/intake/IntakeBadges";
 import { formatCurrency } from "@/lib/format";
+import { computePOReviewSummary } from "@/lib/intake-review";
+import type { POReviewSummary } from "@/lib/intake-review";
 import type {
   InventoryLotWithRemaining,
   PurchaseOrder,
@@ -77,12 +79,16 @@ export default function ReceivePage() {
   }, [toast]);
 
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const existingProductIds = useMemo(() => new Set(products.map((p) => p.id)), [products]);
 
   const remainingLines = useMemo(
     () => detail?.lines.filter((l) => l.expectedQty - l.receivedQty > 0) ?? [],
     [detail]
   );
-  const unmatchedCount = useMemo(() => detail?.lines.filter((l) => !l.productId).length ?? 0, [detail]);
+  const reviewSummary = useMemo(
+    () => computePOReviewSummary(detail?.lines ?? [], existingProductIds),
+    [detail, existingProductIds]
+  );
 
   const handleScanResolved = (resolution: ScanResolution, code: string) => {
     setError(null);
@@ -157,9 +163,21 @@ export default function ReceivePage() {
             </div>
 
             <div className="glass-panel rounded-2xl p-5">
-              <h2 className="mb-4 font-display text-lg font-bold text-ld-white">
-                Line Items — {remainingLines.length} remaining
-              </h2>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="font-display text-lg font-bold text-ld-white">
+                  Line Items — {remainingLines.length} remaining
+                </h2>
+                <p className="text-sm text-ld-muted">
+                  {reviewSummary.total} total ·{" "}
+                  <span className="font-semibold text-ld-green">{reviewSummary.confirmed} confirmed</span>
+                  {reviewSummary.unresolvedLineIds.length > 0 && (
+                    <>
+                      {" "}
+                      · <span className="font-semibold text-ld-red">{reviewSummary.unresolvedLineIds.length} require review</span>
+                    </>
+                  )}
+                </p>
+              </div>
               <div className="space-y-2">
                 {detail.lines.map((line) => {
                   const product = line.productId ? productById.get(line.productId) : undefined;
@@ -179,7 +197,7 @@ export default function ReceivePage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <LineStatusBadge status={line.status} />
-                        {!line.productId ? (
+                        {!product ? (
                           <span className="text-xs font-semibold text-ld-amber">Needs product match</span>
                         ) : (
                           <Button
@@ -244,7 +262,7 @@ export default function ReceivePage() {
         <ReceiveAllDialog
           poId={poId}
           remainingLines={remainingLines}
-          unmatchedCount={unmatchedCount}
+          reviewSummary={reviewSummary}
           operator={operator}
           onClose={() => setDialog(null)}
           onSuccess={(message) => {
@@ -657,14 +675,14 @@ function UnexpectedItemDialog({
 function ReceiveAllDialog({
   poId,
   remainingLines,
-  unmatchedCount,
+  reviewSummary,
   operator,
   onClose,
   onSuccess,
 }: {
   poId: string;
   remainingLines: PurchaseOrderLine[];
-  unmatchedCount: number;
+  reviewSummary: POReviewSummary;
   operator: string;
   onClose: () => void;
   onSuccess: (message: string) => void;
@@ -674,6 +692,7 @@ function ReceiveAllDialog({
   const [idempotencyKey] = useState(newIdempotencyKey());
 
   const remainingUnits = remainingLines.reduce((s, l) => s + (l.expectedQty - l.receivedQty), 0);
+  const unresolvedCount = reviewSummary.unresolvedLineIds.length;
 
   const submit = async () => {
     setBusy(true);
@@ -706,11 +725,27 @@ function ReceiveAllDialog({
         and cost-layer records, apply this PO&apos;s freight allocation, and mark the applicable lines received.
       </p>
 
-      {unmatchedCount > 0 && (
-        <p className="mb-4 rounded-lg bg-ld-red/10 px-3 py-2 text-sm font-semibold text-ld-red">
-          {unmatchedCount} product{unmatchedCount === 1 ? "" : "s"} {unmatchedCount === 1 ? "requires" : "require"} review
-          before this PO can be approved.
-        </p>
+      <div className="mb-4 grid grid-cols-3 gap-3 rounded-xl border border-ld-border bg-ld-bg-elevated p-3 text-center text-sm">
+        <div>
+          <p className="text-lg font-bold text-ld-white">{reviewSummary.total}</p>
+          <p className="text-[11px] uppercase tracking-widest text-ld-muted">Total Products</p>
+        </div>
+        <div>
+          <p className="text-lg font-bold text-ld-green">{reviewSummary.confirmed}</p>
+          <p className="text-[11px] uppercase tracking-widest text-ld-muted">Confirmed</p>
+        </div>
+        <div>
+          <p className={`text-lg font-bold ${unresolvedCount > 0 ? "text-ld-red" : "text-ld-green"}`}>{unresolvedCount}</p>
+          <p className="text-[11px] uppercase tracking-widest text-ld-muted">Require Review</p>
+        </div>
+      </div>
+
+      {unresolvedCount > 0 && (
+        <Link href={`/intake/${poId}`}>
+          <Button variant="outline" size="md" fullWidth className="mb-4">
+            Review {unresolvedCount} Product{unresolvedCount === 1 ? "" : "s"}
+          </Button>
+        </Link>
       )}
       {error && <p className="mb-4 text-sm font-semibold text-ld-red">{error}</p>}
 
@@ -718,7 +753,7 @@ function ReceiveAllDialog({
         <Button variant="ghost" size="md" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="primary" size="md" disabled={busy || unmatchedCount > 0} onClick={submit}>
+        <Button variant="primary" size="md" disabled={busy || unresolvedCount > 0} onClick={submit}>
           Confirm Receive All
         </Button>
       </div>

@@ -7,6 +7,7 @@ import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
 import { POStatusBadge, LineStatusBadge, MatchBadge } from "@/components/intake/IntakeBadges";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { computePOReviewSummary } from "@/lib/intake-review";
 import type { InvoiceDocument, PurchaseOrder, PurchaseOrderLine } from "@/lib/intake-types";
 import type { Product } from "@/lib/types";
 
@@ -81,7 +82,8 @@ export default function PODetailPage() {
 
   const reviewClose = async () => {
     if (!detail) return;
-    const unmatched = detail.lines.filter((l) => !l.productId).length;
+    const existingProductIds = new Set(products.map((p) => p.id));
+    const unmatched = computePOReviewSummary(detail.lines, existingProductIds).unresolvedLineIds.length;
     const msg =
       unmatched > 0
         ? `${unmatched} product${unmatched === 1 ? "" : "s"} still need review. Close this PO anyway? Closed POs are read-only.`
@@ -96,6 +98,8 @@ export default function PODetailPage() {
   };
 
   const productById = new Map(products.map((p) => [p.id, p]));
+  const existingProductIds = new Set(products.map((p) => p.id));
+  const reviewSummary = detail ? computePOReviewSummary(detail.lines, existingProductIds) : null;
 
   return (
     <div className="min-h-screen">
@@ -157,6 +161,18 @@ export default function PODetailPage() {
               <Stat label="PO Subtotal" value={formatCurrency(detail.po.subtotal)} accent="text-ld-amber" />
               <Stat label="Created" value={formatDate(detail.po.createdAt)} />
             </div>
+
+            {reviewSummary && (
+              <div className="mb-6 grid grid-cols-3 gap-4">
+                <Stat label="Total Products" value={String(reviewSummary.total)} />
+                <Stat label="Confirmed" value={String(reviewSummary.confirmed)} accent="text-ld-green" />
+                <Stat
+                  label="Require Review"
+                  value={String(reviewSummary.unresolvedLineIds.length)}
+                  accent={reviewSummary.unresolvedLineIds.length > 0 ? "text-ld-red" : "text-ld-green"}
+                />
+              </div>
+            )}
 
             <FreightSummary
               po={detail.po}

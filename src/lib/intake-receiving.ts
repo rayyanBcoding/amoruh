@@ -2,6 +2,7 @@ import { redis } from "./kv";
 import { KEYS as CoreKeys } from "./kv";
 import { getProducts, getVersion } from "./db";
 import { computeCostBreakdown } from "./intake-costing";
+import { computePOReviewSummary } from "./intake-review";
 import {
   KEYS,
   newId,
@@ -510,11 +511,15 @@ export async function receiveAll(input: ReceiveAllInput): Promise<ReceiveAllResu
   if (!po) throw new ReceivingError("Purchase order not found.", 404);
   if (po.status === "closed") throw new ReceivingError("This PO is closed.");
 
-  const unmatchedCount = lines.filter((l) => !l.productId).length;
-  if (unmatchedCount > 0) {
-    throw new ReceivingError(
-      `${unmatchedCount} product${unmatchedCount === 1 ? "" : "s"} ${unmatchedCount === 1 ? "requires" : "require"} review before this PO can be approved.`
-    );
+  // A line only counts as confirmed if its productId is set AND that
+  // product still exists — a stale/dangling productId (the product it
+  // pointed to was since deleted) is treated the same as never-matched,
+  // not silently accepted. See intake-review.ts.
+  const existingProductIds = new Set(products.map((p) => p.id));
+  const { unresolvedLineIds } = computePOReviewSummary(lines, existingProductIds);
+  if (unresolvedLineIds.length > 0) {
+    const n = unresolvedLineIds.length;
+    throw new ReceivingError(`${n} product${n === 1 ? "" : "s"} ${n === 1 ? "requires" : "require"} review before this PO can be approved.`);
   }
 
   const remainingLines = lines.filter((l) => l.expectedQty - l.receivedQty > 0);
