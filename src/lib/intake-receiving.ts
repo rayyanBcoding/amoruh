@@ -1,6 +1,6 @@
-import { redis } from "./kv";
-import { KEYS as CoreKeys } from "./kv";
+import { redis, KEYS as CoreKeys } from "./kv";
 import { getProducts, getVersion } from "./db";
+import { atomicWrite, checkIdempotencyFast, type Write } from "./atomic-write";
 import { computeCostBreakdown } from "./intake-costing";
 import { computePOReviewSummary } from "./intake-review";
 import {
@@ -10,7 +10,6 @@ import {
   getPOs,
   getPOLines,
   getLotsForProduct,
-  getLotsWithRemaining,
   getAllReceivingEvents,
   getAllInventoryTransactions,
 } from "./intake-db";
@@ -48,36 +47,6 @@ export class ReceivingError extends Error {
     this.name = "ReceivingError";
     this.status = status;
   }
-}
-
-interface Write {
-  key: string;
-  value: unknown;
-}
-
-const ATOMIC_WRITE_SCRIPT = `
-local existing = redis.call('GET', KEYS[1])
-if existing then
-  return existing
-end
-for i = 2, #KEYS do
-  redis.call('SET', KEYS[i], ARGV[i])
-end
-redis.call('SET', KEYS[1], ARGV[1], 'EX', 2592000)
-return ARGV[1]
-`;
-
-async function atomicWrite(idempotencyKey: string, resultId: string, writes: Write[]): Promise<string> {
-  const keys = [KEYS.idempotency(idempotencyKey), ...writes.map((w) => w.key)];
-  const args = [resultId, ...writes.map((w) => JSON.stringify(w.value))];
-  const result = await redis.eval<(string | number)[], string>(ATOMIC_WRITE_SCRIPT, keys, args);
-  return result;
-}
-
-/** Fast-path optimization only — NOT the source of duplicate protection.
- *  The Lua script's own GET-then-SET is the real authority (see above). */
-async function checkIdempotencyFast(idempotencyKey: string): Promise<string | null> {
-  return (await redis.get<string>(KEYS.idempotency(idempotencyKey))) ?? null;
 }
 
 async function getReceivingEventById(id: string): Promise<ReceivingEvent | null> {
@@ -348,6 +317,11 @@ async function buildReceiveWrites(params: {
 
     const currentVersion = await getVersion();
     writes.push({ key: CoreKeys.version, value: currentVersion + 1 });
+
+    // So a sale right after this receive sees fresh state — see
+    // sales-analytics.ts's optimistic-concurrency check.
+    const currentProductVersion = (await redis.get<number>(CoreKeys.productVersion(product.id))) ?? 0;
+    writes.push({ key: CoreKeys.productVersion(product.id), value: currentProductVersion + 1 });
   }
 
   writes.push({ key: KEYS.poLines(po.id), value: updatedLines });
@@ -623,6 +597,13 @@ export async function receiveAll(input: ReceiveAllInput): Promise<ReceiveAllResu
     writes.push({ key: CoreKeys.products, value: workingProducts });
     const currentVersion = await getVersion();
     writes.push({ key: CoreKeys.version, value: currentVersion + 1 });
+
+    // Bump every touched product's version — same reasoning as the
+    // single-line path above.
+    for (const productId of lotsByProduct.keys()) {
+      const currentProductVersion = (await redis.get<number>(CoreKeys.productVersion(productId))) ?? 0;
+      writes.push({ key: CoreKeys.productVersion(productId), value: currentProductVersion + 1 });
+    }
   }
   writes.push({ key: KEYS.poLines(po.id), value: workingLines });
 
@@ -649,35 +630,8 @@ export async function receiveAll(input: ReceiveAllInput): Promise<ReceiveAllResu
   };
 }
 
-// ---------------------------------------------------------------------
-// Mark Sold hook (best-effort, never blocks a sale) — see the Phase 2
-// plan's "Revised: InventoryLot / InventoryTransaction relationship."
-// A single-key write (inventory_transactions only) — no multi-key
-// coordination needed, so a plain redis.set() is fine here.
-// ---------------------------------------------------------------------
-
-export async function consumeFromOldestLot(productId: string, quantity: number, operator: string): Promise<boolean> {
-  try {
-    const lotsWithRemaining = await getLotsWithRemaining(productId);
-    const lot = lotsWithRemaining.find((l) => l.remaining > 0);
-    if (!lot) return false;
-
-    const transactions = await getAllInventoryTransactions();
-    const transaction: InventoryTransaction = {
-      id: newId("txn"),
-      productId,
-      poId: lot.poId,
-      poLineId: lot.poLineId,
-      lotId: lot.id,
-      quantityDelta: -Math.min(quantity, lot.remaining),
-      reason: "sale",
-      receivingEventId: null,
-      operator,
-      timestamp: new Date().toISOString(),
-    };
-    await redis.set(KEYS.inventoryTransactions, [...transactions, transaction]);
-    return true;
-  } catch {
-    return false;
-  }
-}
+// Mark Sold's lot consumption now lives in sales-analytics.ts
+// (findOldestLotWithStock + markProductSold), as part of one atomic,
+// version-checked write alongside the sale record and inventory update —
+// see the latest Phase 2.5 plan ("Average Sale Price + per-sale actual
+// profit"). It's no longer a best-effort hook living in this file.

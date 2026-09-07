@@ -1,4 +1,4 @@
-import type { CostBreakdown, PurchaseOrder } from "./intake-types";
+import type { CostBreakdown, InventoryLotWithRemaining, PurchaseOrder } from "./intake-types";
 
 // ---------------------------------------------------------------------
 // Landed cost math — kept in one place so freight allocation always
@@ -39,4 +39,17 @@ export function computeCostBreakdown(
     other,
     landed: purchaseCost + freight + duty + other,
   };
+}
+
+/** Weighted-average landed cost across a product's currently-remaining
+ *  lots — weighted by each lot's remaining quantity, not a plain average
+ *  of the per-lot costs. `null` when there's no remaining stock in any
+ *  lot (the legacy/manual-product fallback case — callers should fall
+ *  back to Product.cost, labeled distinctly as a legacy cost). */
+export function computeWeightedAverageLandedCost(lots: InventoryLotWithRemaining[]): number | null {
+  const active = lots.filter((l) => l.remaining > 0);
+  const totalQty = active.reduce((sum, l) => sum + l.remaining, 0);
+  if (totalQty === 0) return null;
+  const totalCost = active.reduce((sum, l) => sum + l.remaining * l.cost.landed, 0);
+  return totalCost / totalQty;
 }

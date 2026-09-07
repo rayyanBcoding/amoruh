@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import type { LiveSnapshot } from "@/lib/types";
 import { Logo } from "@/components/Logo";
 import { formatCurrency } from "@/lib/format";
+import { getFragranceNotes } from "@/lib/fragrance-notes";
 
 export function TVStage({ snapshot }: { snapshot: LiveSnapshot }) {
   const product = snapshot.currentProduct;
@@ -107,10 +108,10 @@ export function TVStage({ snapshot }: { snapshot: LiveSnapshot }) {
                 <div className="grid grid-cols-3 gap-6">
                   <div className="rounded-2xl border border-ld-border bg-ld-bg-card p-5">
                     <p className="text-xs font-bold uppercase tracking-widest text-ld-cyan">
-                      Top Notes
+                      Fragrance Notes
                     </p>
                     <p className="mt-1 text-lg font-semibold text-ld-white">
-                      {product.topNotes.join(", ")}
+                      {getFragranceNotes(product).join(", ")}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-ld-border bg-ld-bg-card p-5">

@@ -4,11 +4,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
 import type { LiveSnapshot } from "@/lib/types";
 import { BottleImage } from "@/components/BottleImage";
-import { NotesPyramid } from "@/components/NotesPyramid";
 import { AuthenticBadge, StatusBadge } from "@/components/Badge";
 import { Button } from "@/components/Button";
 import { formatCurrency } from "@/lib/format";
 import { useLiveState } from "@/context/LiveStateContext";
+import { displayStatus } from "@/lib/product-status";
+import { getFragranceNotes } from "@/lib/fragrance-notes";
 
 function Stat({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) {
   return (
@@ -65,7 +66,7 @@ export function CurrentProductCard({ snapshot }: { snapshot: LiveSnapshot }) {
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ld-red" />
                 Live Now
               </span>
-              <StatusBadge status={product.status} />
+              <StatusBadge status={displayStatus(product)} />
               {flashDeal.active && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-ld-amber/15 px-3 py-1 text-xs font-bold uppercase tracking-widest text-ld-amber ring-1 ring-inset ring-ld-amber/40">
                   ⚡ Flash Deal −{flashDeal.discountPercent}%
@@ -139,11 +140,10 @@ export function CurrentProductCard({ snapshot }: { snapshot: LiveSnapshot }) {
               </div>
 
               <div className="border-t border-ld-border pt-4">
-                <NotesPyramid
-                  topNotes={product.topNotes}
-                  middleNotes={product.middleNotes}
-                  baseNotes={product.baseNotes}
-                />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-ld-muted">Fragrance Notes</p>
+                <p className="mt-1 text-sm font-medium text-ld-white">
+                  {getFragranceNotes(product).join(", ") || "—"}
+                </p>
               </div>
 
               <div className="rounded-xl border border-ld-border bg-ld-bg-elevated p-4">

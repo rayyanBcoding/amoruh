@@ -82,6 +82,7 @@ export async function createProduct(input: Partial<Product>): Promise<Product> {
     topNotes: input.topNotes ?? [],
     middleNotes: input.middleNotes ?? [],
     baseNotes: input.baseNotes ?? [],
+    fragranceNotes: input.fragranceNotes ?? undefined,
     projection: input.projection?.trim() || "",
     longevity: input.longevity?.trim() || "",
     description: input.description?.trim() || "",

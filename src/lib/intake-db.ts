@@ -243,6 +243,17 @@ export async function getLotsForProduct(productId: string): Promise<InventoryLot
   return (await redis.get<InventoryLot[]>(KEYS.lots(productId))) ?? [];
 }
 
+/** Every productId that has at least one lot key — used by the Inventory
+ *  table's aggregate landed-cost endpoint to know which products to
+ *  compute a weighted average for. `redis.keys()` over one prefix is a
+ *  fine cost at this business's product count, same reasoning already
+ *  used for the flat receiving-event/transaction collections. */
+export async function getAllProductIdsWithLots(): Promise<string[]> {
+  const lotKeys = await redis.keys("amoruh:intake:lots:*");
+  const prefix = "amoruh:intake:lots:";
+  return lotKeys.map((k) => k.slice(prefix.length));
+}
+
 // ---------------------------------------------------------------------
 // Receiving events (audit trail) and inventory transactions (ledger) —
 // both flat, append-only collections. Reads only, same reasoning as lots.

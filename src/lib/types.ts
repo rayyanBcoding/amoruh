@@ -35,6 +35,12 @@ export interface Product {
   topNotes: string[];
   middleNotes: string[];
   baseNotes: string[];
+  /** Unified fragrance notes — the real field going forward. Undefined/empty
+   *  on products never edited under the new system; see
+   *  src/lib/fragrance-notes.ts for the display fallback that merges
+   *  topNotes/middleNotes/baseNotes in that case. topNotes/middleNotes/
+   *  baseNotes are kept for backward compatibility and are never cleared. */
+  fragranceNotes?: string[];
   projection: string;
   longevity: string;
   description: string;

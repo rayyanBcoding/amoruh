@@ -1,14 +1,32 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Product } from "@/lib/types";
 import { BottleImage } from "@/components/BottleImage";
 import { StatusBadge } from "@/components/Badge";
 import { formatCurrency } from "@/lib/format";
+import { displayStatus } from "@/lib/product-status";
 
-type SortKey = "brand" | "name" | "inventory" | "cost" | "retailPrice" | "marketPrice" | "lootPrice";
+type SortKey = "brand" | "name" | "inventory" | "landedCost" | "avgSalePrice";
+type FilterKey = "all" | "active" | "sold_out" | "archived";
+
+interface LandedCostInfo {
+  weightedAvgLandedCost: number | null;
+  totalRemaining: number;
+}
+interface SalesSummaryInfo {
+  averageSalePrice: number | null;
+  saleCount: number;
+}
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "active", label: "Active" },
+  { key: "sold_out", label: "Sold Out" },
+  { key: "archived", label: "Archived" },
+];
 
 async function adjustInventory(id: string, action: string, value?: number) {
   const res = await fetch(`/api/products/${id}/inventory`, {
@@ -76,29 +94,68 @@ export function InventoryTable({ products }: { products: Product[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("brand");
-  const [showArchived, setShowArchived] = useState(false);
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [landedCosts, setLandedCosts] = useState<Record<string, LandedCostInfo>>({});
+  const [salesSummary, setSalesSummary] = useState<Record<string, SalesSummaryInfo>>({});
+
+  useEffect(() => {
+    fetch("/api/intake/landed-costs")
+      .then((res) => (res.ok ? res.json() : {}))
+      .then(setLandedCosts)
+      .catch(() => {});
+    fetch("/api/intake/sales-summary")
+      .then((res) => (res.ok ? res.json() : {}))
+      .then(setSalesSummary)
+      .catch(() => {});
+  }, []);
+
+  const rows = useMemo(() => {
+    return products.map((p) => {
+      const landed = landedCosts[p.id];
+      const landedCost = landed?.weightedAvgLandedCost ?? null;
+      const isLegacyCost = landedCost === null;
+      return {
+        product: p,
+        status: displayStatus(p),
+        landedCost: landedCost ?? p.cost,
+        isLegacyCost,
+        avgSalePrice: salesSummary[p.id]?.averageSalePrice ?? null,
+      };
+    });
+  }, [products, landedCosts, salesSummary]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const base = showArchived ? products : products.filter((p) => p.status !== "archived");
-    const rows = !q
+    const base =
+      filter === "all" ? rows.filter((r) => r.status !== "archived") : rows.filter((r) => r.status === filter);
+    const searched = !q
       ? base
       : base.filter(
-          (p) =>
-            p.name.toLowerCase().includes(q) ||
-            p.brand.toLowerCase().includes(q) ||
-            p.sku.toLowerCase().includes(q) ||
-            p.barcode.toLowerCase().includes(q) ||
-            p.tiktokListing.toLowerCase().includes(q) ||
-            p.shelf.toLowerCase().includes(q)
+          (r) =>
+            r.product.name.toLowerCase().includes(q) ||
+            r.product.brand.toLowerCase().includes(q) ||
+            r.product.sku.toLowerCase().includes(q) ||
+            r.product.barcode.toLowerCase().includes(q) ||
+            r.product.tiktokListing.toLowerCase().includes(q) ||
+            r.product.shelf.toLowerCase().includes(q)
         );
-    return [...rows].sort((a, b) => {
-      if (typeof a[sortKey] === "number") {
-        return (b[sortKey] as number) - (a[sortKey] as number);
+    return [...searched].sort((a, b) => {
+      switch (sortKey) {
+        case "brand":
+          return a.product.brand.localeCompare(b.product.brand);
+        case "name":
+          return a.product.name.localeCompare(b.product.name);
+        case "inventory":
+          return b.product.inventory - a.product.inventory;
+        case "landedCost":
+          return b.landedCost - a.landedCost;
+        case "avgSalePrice":
+          return (b.avgSalePrice ?? -1) - (a.avgSalePrice ?? -1);
+        default:
+          return 0;
       }
-      return String(a[sortKey]).localeCompare(String(b[sortKey]));
     });
-  }, [products, query, sortKey, showArchived]);
+  }, [rows, query, sortKey, filter]);
 
   const columns: { key: SortKey | null; label: string }[] = [
     { key: null, label: "" },
@@ -106,13 +163,10 @@ export function InventoryTable({ products }: { products: Product[] }) {
     { key: null, label: "UPC" },
     { key: "brand", label: "Brand" },
     { key: "name", label: "Product" },
-    { key: null, label: "Size" },
     { key: "inventory", label: "Quantity" },
     { key: null, label: "Shelf" },
-    { key: "cost", label: "Cost" },
-    { key: "retailPrice", label: "MSRP" },
-    { key: "marketPrice", label: "Market" },
-    { key: "lootPrice", label: "Live Price" },
+    { key: "landedCost", label: "Landed Cost" },
+    { key: "avgSalePrice", label: "Avg. Sale Price" },
     { key: null, label: "Status" },
     { key: null, label: "" },
   ];
@@ -127,20 +181,25 @@ export function InventoryTable({ products }: { products: Product[] }) {
           className="w-full max-w-md rounded-xl border border-ld-border bg-ld-bg-elevated px-4 py-2.5 text-sm text-ld-white placeholder:text-ld-muted/60 outline-none focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/15"
         />
         <div className="flex items-center gap-4">
-          <label className="flex items-center gap-1.5 text-sm text-ld-muted">
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => setShowArchived(e.target.checked)}
-            />
-            Show archived
-          </label>
+          <div className="flex items-center gap-1 rounded-xl bg-ld-bg-elevated p-1">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-bold uppercase tracking-wide transition-colors ${
+                  filter === f.key ? "bg-ld-purple text-ld-white" : "text-ld-muted hover:text-ld-white"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
           <p className="text-sm text-ld-muted">{filtered.length} products</p>
         </div>
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1200px] border-separate border-spacing-y-2 text-sm">
+        <table className="w-full min-w-[1100px] border-separate border-spacing-y-2 text-sm">
           <thead>
             <tr>
               {columns.map((col, i) => (
@@ -158,7 +217,7 @@ export function InventoryTable({ products }: { products: Product[] }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((p) => (
+            {filtered.map(({ product: p, status, landedCost, isLegacyCost, avgSalePrice }) => (
               <tr
                 key={p.id}
                 onClick={() => router.push(`/inventory/${p.id}`)}
@@ -171,19 +230,26 @@ export function InventoryTable({ products }: { products: Product[] }) {
                 <td className="px-3 py-2.5 font-mono text-xs text-ld-muted">{p.barcode}</td>
                 <td className="px-3 py-2.5 font-medium text-ld-white">{p.brand}</td>
                 <td className="px-3 py-2.5 text-ld-white">{p.name}</td>
-                <td className="px-3 py-2.5 text-ld-muted">{p.size}</td>
                 <td className="px-3 py-2.5">
                   <QuickInventory product={p} />
                 </td>
                 <td className="px-3 py-2.5 text-ld-muted">{p.shelf}</td>
-                <td className="px-3 py-2.5 text-ld-amber" title="Wholesale cost — internal only, never shown on TV">
-                  {formatCurrency(p.cost)}
+                <td
+                  className={`px-3 py-2.5 ${isLegacyCost ? "italic text-ld-muted" : "text-ld-amber"}`}
+                  title={
+                    isLegacyCost
+                      ? "No PO cost-layer history yet — showing the legacy Product.cost value"
+                      : "Weighted-average landed cost across remaining PO cost layers"
+                  }
+                >
+                  {formatCurrency(landedCost)}
+                  {isLegacyCost && <span className="ml-1 text-[10px] uppercase tracking-wide">Legacy</span>}
                 </td>
-                <td className="px-3 py-2.5 text-ld-muted">{formatCurrency(p.retailPrice)}</td>
-                <td className="px-3 py-2.5 text-ld-white">{formatCurrency(p.marketPrice)}</td>
-                <td className="px-3 py-2.5 font-semibold text-ld-purple">{formatCurrency(p.lootPrice)}</td>
+                <td className="px-3 py-2.5 text-ld-white">
+                  {avgSalePrice === null ? <span className="text-ld-muted">No sales yet</span> : formatCurrency(avgSalePrice)}
+                </td>
                 <td className="px-3 py-2.5">
-                  <StatusBadge status={p.status} />
+                  <StatusBadge status={status} />
                 </td>
                 <td className="rounded-r-xl px-3 py-2.5">
                   <Link

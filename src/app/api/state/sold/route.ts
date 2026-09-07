@@ -1,64 +1,42 @@
 import { NextResponse } from "next/server";
-import {
-  buildSnapshot,
-  getProduct,
-  getState,
-  makeSaleFromProduct,
-  patchState,
-  updateProduct,
-} from "@/lib/db";
+import { buildSnapshot } from "@/lib/db";
 import { broadcastStateChanged } from "@/lib/events";
-import { consumeFromOldestLot } from "@/lib/intake-receiving";
+import { markProductSold, SalesError } from "@/lib/sales-analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_RECENT_SALES = 25;
+interface Body {
+  operator?: string;
+  idempotencyKey: string;
+}
 
-// POST /api/state/sold — mark the current product sold: decrement
-// inventory, log the sale, and flip status to sold_out at zero stock.
-export async function POST() {
+// POST /api/state/sold — mark the current product sold. The actual
+// write (inventory decrement, lot consumption, durable SaleRecord,
+// aggregate update, recentSales) all happen as one atomic,
+// version-checked operation in markProductSold() — see
+// src/lib/sales-analytics.ts. This route is just the thin wrapper.
+export async function POST(req: Request) {
+  let body: Body;
   try {
-    const state = await getState();
-    if (!state.currentProductId) {
-      return NextResponse.json({ error: "There's no current product to mark sold." }, { status: 400 });
-    }
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
 
-    const product = await getProduct(state.currentProductId);
-    if (!product) {
-      return NextResponse.json({ error: "The current product no longer exists." }, { status: 404 });
-    }
+  if (!body.idempotencyKey) {
+    return NextResponse.json({ error: "Missing idempotencyKey." }, { status: 400 });
+  }
 
-    const salePrice = state.flashDeal.active
-      ? Math.round(product.lootPrice * (1 - state.flashDeal.discountPercent / 100))
-      : product.lootPrice;
-
-    const nextInventory = Math.max(0, product.inventory - 1);
-    await updateProduct(product.id, {
-      inventory: nextInventory,
-      status: nextInventory === 0 ? "sold_out" : product.status,
-    });
-
-    const sale = makeSaleFromProduct(product, salePrice);
-    await patchState({
-      recentSales: [sale, ...state.recentSales].slice(0, MAX_RECENT_SALES),
-    });
-
-    // Best-effort FIFO lot consumption — keeps Intake Mode's cost-layer
-    // ledger accurate for stock that came in through a PO. Awaited (not
-    // fire-and-forget) so it actually completes before this serverless
-    // function returns — but it can never fail the sale or change its
-    // outcome: consumeFromOldestLot has its own try/catch and simply
-    // returns false on any problem. A product with no lots (predates
-    // Intake Mode) is a harmless no-op here.
-    await consumeFromOldestLot(product.id, 1, "Live Show — Mark Sold");
-
+  try {
+    await markProductSold({ operator: body.operator || "Live Show", idempotencyKey: body.idempotencyKey });
     broadcastStateChanged("mark-sold");
     return NextResponse.json(await buildSnapshot());
   } catch (err) {
+    const status = err instanceof SalesError ? err.status : 500;
     return NextResponse.json(
-      { error: `Could not mark sold: ${err instanceof Error ? err.message : String(err)}` },
-      { status: 500 }
+      { error: err instanceof Error ? err.message : "Could not mark sold." },
+      { status }
     );
   }
 }

@@ -180,7 +180,15 @@ export function LiveStateProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const markSold = useCallback(async () => {
-    const result = await postJson("/api/state/sold");
+    // A fresh idempotency key per click — this makes the write itself
+    // safe to retry (see markProductSold in sales-analytics.ts), not a
+    // click-debounce mechanism; the button is already disabled while a
+    // request is in flight.
+    const idempotencyKey =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `sold_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const result = await postJson("/api/state/sold", { idempotencyKey });
     setLastError(result.ok ? null : result.error ?? "Could not mark sold");
     return result;
   }, []);

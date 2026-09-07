@@ -3,13 +3,17 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Product, ProductStatus } from "@/lib/types";
+import type { InventoryLotWithRemaining } from "@/lib/intake-types";
 import { ImageUpload } from "@/components/inventory/ImageUpload";
 import { Button } from "@/components/Button";
+import { StatusBadge } from "@/components/Badge";
+import { formatCurrency } from "@/lib/format";
+import { displayStatus } from "@/lib/product-status";
+import { getFragranceNotes } from "@/lib/fragrance-notes";
+import { computeWeightedAverageLandedCost } from "@/lib/intake-costing";
 
-type FormState = Omit<Product, "topNotes" | "middleNotes" | "baseNotes"> & {
-  topNotes: string;
-  middleNotes: string;
-  baseNotes: string;
+type FormState = Omit<Product, "fragranceNotes"> & {
+  fragranceNotes: string;
 };
 
 const BRAND_COLORS = ["#B89A5C", "#2F2E22", "#8fa3c9", "#2fb3a0", "#7a1f1f", "#2e5339", "#1c4fa0"];
@@ -50,18 +54,14 @@ function blankProduct(initialValues?: Partial<Product>): Product {
 function toFormState(product: Product): FormState {
   return {
     ...product,
-    topNotes: product.topNotes.join(", "),
-    middleNotes: product.middleNotes.join(", "),
-    baseNotes: product.baseNotes.join(", "),
+    fragranceNotes: getFragranceNotes(product).join(", "),
   };
 }
 
 function toPayload(form: FormState): Partial<Product> {
   return {
     ...form,
-    topNotes: form.topNotes.split(",").map((s) => s.trim()).filter(Boolean),
-    middleNotes: form.middleNotes.split(",").map((s) => s.trim()).filter(Boolean),
-    baseNotes: form.baseNotes.split(",").map((s) => s.trim()).filter(Boolean),
+    fragranceNotes: form.fragranceNotes.split(",").map((s) => s.trim()).filter(Boolean),
     cost: Number(form.cost) || 0,
     retailPrice: Number(form.retailPrice) || 0,
     marketPrice: Number(form.marketPrice) || 0,
@@ -91,6 +91,15 @@ function Field({
   );
 }
 
+function SummaryStat({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) {
+  return (
+    <div>
+      <p className="text-[11px] font-bold uppercase tracking-widest text-ld-muted">{label}</p>
+      <div className={`mt-1 text-base font-semibold ${accent ?? "text-ld-white"}`}>{value}</div>
+    </div>
+  );
+}
+
 function inputClass(hasError?: boolean) {
   return `w-full rounded-lg border px-3.5 py-2.5 text-sm text-ld-white placeholder:text-ld-muted/50 outline-none focus:ring-4 ${
     hasError
@@ -99,7 +108,6 @@ function inputClass(hasError?: boolean) {
   }`;
 }
 
-const STATUS_OPTIONS: ProductStatus[] = ["active", "draft", "sold_out", "archived"];
 const CONDITION_OPTIONS = [
   "New",
   "Factory Sealed",
@@ -139,7 +147,27 @@ export function ProductEditorForm({
   const [bannerError, setBannerError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [initialSnapshot, setInitialSnapshot] = useState(() => JSON.stringify(form));
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [lots, setLots] = useState<InventoryLotWithRemaining[]>([]);
+  const [salesSummary, setSalesSummary] = useState<{ averageSalePrice: number | null; saleCount: number } | null>(
+    null
+  );
   const dirty = JSON.stringify(form) !== initialSnapshot;
+
+  // Financial summary panel data (edit mode only) — reads from the same
+  // lot/cost-layer and sales-aggregate sources Inventory Intake already
+  // built, never a second, potentially-conflicting number.
+  useEffect(() => {
+    if (isCreate || !product) return;
+    fetch(`/api/intake/products/${product.id}/lots`)
+      .then((res) => (res.ok ? res.json() : { lots: [] }))
+      .then((data) => setLots(data.lots ?? []))
+      .catch(() => {});
+    fetch(`/api/intake/products/${product.id}/sales-summary`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setSalesSummary)
+      .catch(() => {});
+  }, [isCreate, product]);
 
   // Warn on tab close / reload if there are unsaved changes.
   useEffect(() => {
@@ -255,6 +283,19 @@ export function ProductEditorForm({
     }
   };
 
+  // Product-level financial summary — Inventory Intake's lot/cost-layer
+  // data is the source of truth; Product.cost is only ever the fallback
+  // for a product with no PO/lot history yet, and is labeled as such
+  // rather than presented as an equal, authoritative landed cost.
+  const weightedAvgLandedCost = computeWeightedAverageLandedCost(lots);
+  const isLegacyCost = weightedAvgLandedCost === null;
+  const displayedLandedCost = weightedAvgLandedCost ?? product?.cost ?? 0;
+  const activeLots = [...lots].filter((l) => l.remaining > 0);
+  const grossMargin =
+    salesSummary?.averageSalePrice != null && weightedAvgLandedCost != null
+      ? salesSummary.averageSalePrice - weightedAvgLandedCost
+      : null;
+
   return (
     <div className="glass-panel rounded-2xl p-6 lg:p-8">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -273,7 +314,7 @@ export function ProductEditorForm({
           {!isCreate && (
             <>
               <Button variant="outline" size="md" disabled={saving || deleting} onClick={handleArchiveToggle}>
-                {product!.status === "archived" ? "Restore" : "Archive"}
+                {product!.status === "archived" ? "Restore Product" : "Archive Product"}
               </Button>
               <Button variant="danger" size="md" disabled={saving || deleting} onClick={handleDelete}>
                 {deleting ? "Deleting…" : "Delete Permanently"}
@@ -295,6 +336,47 @@ export function ProductEditorForm({
         </div>
       )}
 
+      {!isCreate && product && (
+        <div className="mb-6 grid grid-cols-2 gap-4 rounded-xl border border-ld-border bg-ld-bg-elevated p-4 sm:grid-cols-5">
+          <SummaryStat label="Inventory" value={`${product.inventory} units`} />
+          <SummaryStat label="Status" value={<StatusBadge status={displayStatus(product)} />} />
+          <SummaryStat
+            label={isLegacyCost ? "Legacy Cost" : "Weighted Avg. Landed Cost"}
+            value={formatCurrency(displayedLandedCost)}
+            accent={isLegacyCost ? "italic text-ld-muted" : "text-ld-amber"}
+          />
+          <SummaryStat
+            label="Average Sale Price"
+            value={salesSummary?.averageSalePrice != null ? formatCurrency(salesSummary.averageSalePrice) : "No sales yet"}
+          />
+          <SummaryStat
+            label="Est. Avg. Gross Margin"
+            value={grossMargin != null ? formatCurrency(grossMargin) : "—"}
+            accent={grossMargin == null ? undefined : grossMargin >= 0 ? "text-ld-green" : "text-ld-red"}
+          />
+        </div>
+      )}
+
+      {!isCreate && activeLots.length > 0 && (
+        <div className="mb-6 rounded-xl border border-ld-border p-4">
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-ld-muted">Current Cost Layers</p>
+          <div className="space-y-2">
+            {activeLots.map((lot) => (
+              <div
+                key={lot.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-ld-bg-elevated px-3 py-2 text-sm"
+              >
+                <span className="font-semibold text-ld-white">{lot.poNumber}</span>
+                <span className="text-ld-muted">Remaining {lot.remaining}</span>
+                <span className="text-ld-amber">Purchase {formatCurrency(lot.unitCost)}</span>
+                <span className="text-ld-amber">Freight {formatCurrency(lot.cost.freight)}</span>
+                <span className="font-semibold text-ld-purple">Landed {formatCurrency(lot.cost.landed)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[220px_1fr]">
         <div className="space-y-4">
           <ImageUpload value={form.image} color={form.color} onChange={(url) => set("image", url)} />
@@ -312,19 +394,6 @@ export function ProductEditorForm({
                 onChange={(e) => set("color", e.target.value)}
               />
             </div>
-          </Field>
-          <Field label="Status">
-            <select
-              className={inputClass()}
-              value={form.status}
-              onChange={(e) => set("status", e.target.value as ProductStatus)}
-            >
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s.replace("_", " ")}
-                </option>
-              ))}
-            </select>
           </Field>
           <Field label="Condition">
             <select
@@ -438,59 +507,32 @@ export function ProductEditorForm({
             </Field>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="AMORUH Live Price ($)" error={fieldErrors.lootPrice}>
-              <input
-                type="number"
-                min={0}
-                className={`${inputClass(!!fieldErrors.lootPrice)} border-ld-purple/50`}
-                value={form.lootPrice}
-                onChange={(e) => set("lootPrice", Number(e.target.value) as never)}
-              />
-            </Field>
-            <Field label="Minimum Selling Price ($)" error={fieldErrors.minPrice}>
-              <input
-                type="number"
-                min={0}
-                className={inputClass(!!fieldErrors.minPrice)}
-                value={form.minPrice}
-                onChange={(e) => set("minPrice", Number(e.target.value) as never)}
-              />
-            </Field>
-          </div>
+          <Field label="AMORUH Live Price ($)" error={fieldErrors.lootPrice}>
+            <input
+              type="number"
+              min={0}
+              className={`${inputClass(!!fieldErrors.lootPrice)} border-ld-purple/50`}
+              value={form.lootPrice}
+              onChange={(e) => set("lootPrice", Number(e.target.value) as never)}
+            />
+          </Field>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Field label="Top Notes (comma separated)">
-              <input className={inputClass()} value={form.topNotes} onChange={(e) => set("topNotes", e.target.value)} />
-            </Field>
-            <Field label="Middle Notes (comma separated)">
-              <input
-                className={inputClass()}
-                value={form.middleNotes}
-                onChange={(e) => set("middleNotes", e.target.value)}
-              />
-            </Field>
-            <Field label="Base Notes (comma separated)">
-              <input className={inputClass()} value={form.baseNotes} onChange={(e) => set("baseNotes", e.target.value)} />
-            </Field>
-          </div>
+          <Field label="Fragrance Notes (comma separated)">
+            <input
+              className={inputClass()}
+              value={form.fragranceNotes}
+              onChange={(e) => set("fragranceNotes", e.target.value)}
+              placeholder="e.g. Bergamot, Lemon, Lavender, Cedar, Amber"
+            />
+          </Field>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Projection">
-              <input
-                className={inputClass()}
-                value={form.projection}
-                onChange={(e) => set("projection", e.target.value)}
-              />
-            </Field>
-            <Field label="Longevity">
-              <input
-                className={inputClass()}
-                value={form.longevity}
-                onChange={(e) => set("longevity", e.target.value)}
-              />
-            </Field>
-          </div>
+          <Field label="Longevity">
+            <input
+              className={inputClass()}
+              value={form.longevity}
+              onChange={(e) => set("longevity", e.target.value)}
+            />
+          </Field>
 
           <Field label="Description">
             <textarea
@@ -517,6 +559,36 @@ export function ProductEditorForm({
               onChange={(e) => set("notes", e.target.value)}
             />
           </Field>
+
+          <div className="border-t border-ld-border pt-4">
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              className="text-xs font-bold uppercase tracking-widest text-ld-muted hover:text-ld-white"
+            >
+              {advancedOpen ? "▾" : "▸"} Advanced
+            </button>
+            {advancedOpen && (
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Field label="Minimum Selling Price ($)" error={fieldErrors.minPrice}>
+                  <input
+                    type="number"
+                    min={0}
+                    className={inputClass(!!fieldErrors.minPrice)}
+                    value={form.minPrice}
+                    onChange={(e) => set("minPrice", Number(e.target.value) as never)}
+                  />
+                </Field>
+                <Field label="Projection">
+                  <input
+                    className={inputClass()}
+                    value={form.projection}
+                    onChange={(e) => set("projection", e.target.value)}
+                  />
+                </Field>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

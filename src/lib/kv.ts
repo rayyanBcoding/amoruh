@@ -26,4 +26,10 @@ export const KEYS = {
   /** Bumped by every mutating write; the SSE route polls this cheaply to
    *  detect changes across serverless instances without a shared process. */
   version: "amoruh:version",
+  /** Per-product optimistic-concurrency counter — bumped by every write
+   *  that changes THIS product's inventory (Phase 2 receiving,
+   *  markProductSold). A bare counter, not a copy of inventory itself —
+   *  there's still only one source of truth for the actual number. See
+   *  sales-analytics.ts for the compare-and-swap that reads this. */
+  productVersion: (productId: string) => `amoruh:product_version:${productId}`,
 } as const;
