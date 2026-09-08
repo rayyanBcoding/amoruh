@@ -51,6 +51,12 @@ const GIFT_SET_PATTERN = /\bgift\s*set\b|\bset\s*of\b|\bcoffret\b|\b\d\s*pc\s*se
 
 export interface StructuredAttributes {
   brandToken: string;
+  /** Every content token (stopwords/size/unit stripped, but NOT
+   *  brand-stripped) — used to check brand containment when this side
+   *  has no explicit brand column of its own (see brandsMatch). */
+  allTokens: string[];
+  /** Brand-stripped, for cross-side text similarity (supporting
+   *  evidence only). */
   coreNameTokens: string[];
   sizeMl: number | null;
   concentration: string | null;
@@ -81,11 +87,35 @@ export function parseConcentration(text: string): string | null {
   return null;
 }
 
+const SIZE_TOKEN_PATTERN = /(\d+(?:\.\d+)?)\s*(ml|oz)/;
+// "100ml" survives tokenize() as one token (caught by SIZE_TOKEN_PATTERN
+// below), but "100 ML" (a space before the unit) splits into two
+// separate tokens — "100" (caught by the bare-digit check) and a stray
+// "ml" that neither check removes on its own. Without UNIT_WORDS, that
+// stray unit token asymmetrically survives only on the spaced side,
+// which is precisely the "100ml" vs "100 ML" case this matcher exists
+// to treat as equivalent — so it's filtered explicitly here too.
+const UNIT_WORDS = new Set(["ml", "oz", "fl"]);
+
+function contentTokens(fullText: string): string[] {
+  return [
+    ...new Set(
+      tokenize(fullText).filter(
+        (t) => !STOPWORDS.has(t) && !SIZE_TOKEN_PATTERN.test(t) && !UNIT_WORDS.has(t) && !/^\d+$/.test(t)
+      )
+    ),
+  ].sort();
+}
+
 /** Extracts structured attributes from a combined brand+name/description
  *  string — used identically for a supplier row and a catalog product so
  *  the two sides are always compared on the same basis. `brand` is
- *  passed separately when known (supplier rows / Product.brand) so it
- *  can be stripped from the core-name token set for text comparison. */
+ *  passed separately WHEN KNOWN (e.g. a supplier sheet with its own
+ *  Brand column, or Product.brand) — many real supplier sheets have only
+ *  one free-text description column with no separate brand field at
+ *  all, so `brand` may legitimately be "". brandsMatch() below handles
+ *  that case by checking brand-word containment against `allTokens`
+ *  rather than requiring both sides to have an isolated brand string. */
 export function extractAttributes(fullText: string, brand: string): StructuredAttributes {
   const brandToken = normalize(brand);
   const sizeMl = parseSizeMl(fullText);
@@ -93,25 +123,11 @@ export function extractAttributes(fullText: string, brand: string): StructuredAt
   const isTester = TESTER_PATTERN.test(normalize(fullText));
   const isGiftSet = GIFT_SET_PATTERN.test(normalize(fullText));
 
-  const brandTokens = new Set(tokenize(brand));
-  const sizeToken = /(\d+(?:\.\d+)?)\s*(ml|oz)/;
-  // "100ml" survives tokenize() as one token (caught by sizeToken below),
-  // but "100 ML" (a space before the unit) splits into two separate
-  // tokens — "100" (caught by the bare-digit check) and a stray "ml"
-  // that neither check removes on its own. Without UNIT_WORDS, that
-  // stray unit token asymmetrically survives only on the spaced side,
-  // which is precisely the "100ml" vs "100 ML" case this matcher exists
-  // to treat as equivalent — so it's filtered explicitly here too.
-  const UNIT_WORDS = new Set(["ml", "oz", "fl"]);
-  const coreNameTokens = [
-    ...new Set(
-      tokenize(fullText).filter(
-        (t) => !brandTokens.has(t) && !STOPWORDS.has(t) && !sizeToken.test(t) && !UNIT_WORDS.has(t) && !/^\d+$/.test(t)
-      )
-    ),
-  ].sort();
+  const allTokens = contentTokens(fullText);
+  const brandWords = new Set(tokenize(brand));
+  const coreNameTokens = allTokens.filter((t) => !brandWords.has(t));
 
-  return { brandToken, coreNameTokens, sizeMl, concentration, isTester, isGiftSet };
+  return { brandToken, allTokens, coreNameTokens, sizeMl, concentration, isTester, isGiftSet };
 }
 
 export function extractProductAttributes(p: Pick<Product, "brand" | "name" | "size" | "concentration">): StructuredAttributes {
@@ -138,10 +154,23 @@ function textScore(a: StructuredAttributes, b: StructuredAttributes, rawA: strin
   return Math.max(tokenScore, bigram);
 }
 
-function brandsMatch(a: string, b: string): boolean {
-  if (!a || !b) return false;
-  if (a === b) return true;
-  return bigramSimilarity(a, b) >= 0.8;
+/** Both sides with an explicit brand string: compare directly (with typo
+ *  tolerance). If exactly one side has no brand column at all (common
+ *  for supplier sheets — a single free-text description, no separate
+ *  Brand field), fall back to checking whether the KNOWN side's brand
+ *  appears, as whole word(s), within the OTHER side's full text — this
+ *  is what lets "Aventus by Creed 100ml" (no brand column) still
+ *  confirm against a catalog product whose brand is "Creed". If
+ *  NEITHER side has a brand at all, there's nothing to confirm against. */
+function brandsMatch(a: StructuredAttributes, b: StructuredAttributes): boolean {
+  if (a.brandToken && b.brandToken) {
+    return a.brandToken === b.brandToken || bigramSimilarity(a.brandToken, b.brandToken) >= 0.8;
+  }
+  const known = a.brandToken ? a : b;
+  const unknown = a.brandToken ? b : a;
+  if (!known.brandToken) return false;
+  const brandWords = known.brandToken.split(" ").filter(Boolean);
+  return brandWords.length > 0 && brandWords.every((w) => unknown.allTokens.includes(w));
 }
 
 function sizesMatch(a: number, b: number): boolean {
@@ -164,7 +193,7 @@ export interface HardGateResult {
  *  concentration mismatch, or any tester/gift-set disagreement all fail
  *  this regardless of how similar the surrounding text is. */
 export function checkHardGates(a: StructuredAttributes, b: StructuredAttributes): HardGateResult {
-  if (!brandsMatch(a.brandToken, b.brandToken)) {
+  if (!brandsMatch(a, b)) {
     return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
   }
   if (a.isTester !== b.isTester) return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
