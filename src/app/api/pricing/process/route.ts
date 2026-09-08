@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupplier, updateSupplier } from "@/lib/intake-db";
-import { applyColumnMapping, computeHeaderSignature, parseSpreadsheet } from "@/lib/pricing-parse";
+import { computeHeaderSignature, parseSpreadsheet } from "@/lib/pricing-parse";
 import { processSupplierUpload } from "@/lib/pricing-process";
 import type { SupplierColumnMapping } from "@/lib/intake-types";
 
@@ -19,10 +19,12 @@ interface Body {
 }
 
 // POST /api/pricing/process — the operator has confirmed (or reused) a
-// column mapping and an upload type; this re-fetches the file (avoids
-// round-tripping potentially thousands of rows back and forth over
-// HTTP), applies the mapping, remembers it on the supplier if it's new
-// or changed, and runs the full stage-then-commit pipeline.
+// column mapping and an upload type. Remembers the mapping on the
+// supplier if it's new or changed, then hands off to
+// processSupplierUpload, which creates the upload record FIRST and only
+// then fetches/parses the file itself — so a failure at any point
+// (can't download the blob, can't parse it, a bad row) always leaves a
+// real, visible "failed" record, never a bare HTTP error with no trace.
 export async function POST(req: Request) {
   let body: Body;
   try {
@@ -37,32 +39,34 @@ export async function POST(req: Request) {
   const supplier = await getSupplier(body.supplierId);
   if (!supplier) return NextResponse.json({ error: "Supplier not found." }, { status: 404 });
 
-  const blobRes = await fetch(body.blobUrl);
-  if (!blobRes.ok) return NextResponse.json({ error: "Could not download the uploaded file." }, { status: 400 });
-
-  let sheet;
+  // Only needs the header row to decide whether to remember a new
+  // mapping — the full row-by-row fetch/parse for staging happens
+  // inside processSupplierUpload, after the upload record already
+  // exists.
   try {
-    sheet = parseSpreadsheet(await blobRes.arrayBuffer());
+    const blobRes = await fetch(body.blobUrl);
+    if (blobRes.ok) {
+      const sheet = parseSpreadsheet(await blobRes.arrayBuffer());
+      const signature = computeHeaderSignature(sheet.headers);
+      const mappingChanged =
+        !supplier.columnMapping ||
+        JSON.stringify(supplier.columnMapping.headerSignature) !== JSON.stringify(signature) ||
+        JSON.stringify(supplier.columnMapping.columnMap) !== JSON.stringify(body.columnMap);
+      if (mappingChanged || supplier.defaultUploadType !== body.uploadType) {
+        await updateSupplier(supplier.id, {
+          columnMapping: { headerSignature: signature, columnMap: body.columnMap, confirmedAt: new Date().toISOString() },
+          defaultUploadType: body.uploadType,
+        });
+      }
+    }
+    // If the blob can't be fetched here, don't fail the request over a
+    // mapping-memory nicety — processSupplierUpload will hit the exact
+    // same fetch next and surface the real error as a proper failed
+    // upload record.
   } catch {
-    return NextResponse.json({ error: "Could not read this file." }, { status: 400 });
+    // Same reasoning — let processSupplierUpload be the source of truth
+    // for whether this upload actually succeeds or fails.
   }
-  if (sheet.rows.length === 0) {
-    return NextResponse.json({ error: "This file has no data rows." }, { status: 400 });
-  }
-
-  const signature = computeHeaderSignature(sheet.headers);
-  const mappingChanged =
-    !supplier.columnMapping || JSON.stringify(supplier.columnMapping.headerSignature) !== JSON.stringify(signature) ||
-    JSON.stringify(supplier.columnMapping.columnMap) !== JSON.stringify(body.columnMap);
-
-  if (mappingChanged || supplier.defaultUploadType !== body.uploadType) {
-    await updateSupplier(supplier.id, {
-      columnMapping: { headerSignature: signature, columnMap: body.columnMap, confirmedAt: new Date().toISOString() },
-      defaultUploadType: body.uploadType,
-    });
-  }
-
-  const rows = applyColumnMapping(sheet.rows, body.columnMap);
 
   try {
     const upload = await processSupplierUpload({
@@ -70,7 +74,7 @@ export async function POST(req: Request) {
       filename: body.filename ?? "price-list",
       blobUrl: body.blobUrl,
       uploadType: body.uploadType,
-      rows,
+      columnMap: body.columnMap,
       retryUploadId: body.retryUploadId,
     });
     return NextResponse.json(upload);

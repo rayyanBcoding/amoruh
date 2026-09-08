@@ -13,13 +13,14 @@ import {
   type OffersByProductOp,
 } from "./pricing-db";
 import { deriveOfferKey, matchSupplierRow } from "./pricing-matching";
+import { applyColumnMapping, parseSpreadsheet } from "./pricing-parse";
 import { getUsdRate, convertToUsd } from "./pricing-fx";
+import type { SupplierColumnMapping } from "./intake-types";
 import type {
   SupplierAlias,
   SupplierOfferCurrent,
   SupplierOfferSnapshot,
   SupplierPriceUpload,
-  SupplierRawRow,
 } from "./pricing-types";
 
 // ---------------------------------------------------------------------
@@ -42,7 +43,7 @@ export async function processSupplierUpload(input: {
   filename: string;
   blobUrl: string;
   uploadType: "full" | "partial";
-  rows: SupplierRawRow[];
+  columnMap: SupplierColumnMapping["columnMap"];
   /** Retry a specific FAILED upload by id instead of starting a new one.
    *  Reuses the same id AND the same seq — a genuine retry re-stages
    *  everything fresh (deterministic snapshot keys mean this can never
@@ -51,6 +52,12 @@ export async function processSupplierUpload(input: {
    *  with a brand-new, higher seq the way an unrelated new upload would. */
   retryUploadId?: string;
 }): Promise<SupplierPriceUpload> {
+  // The upload record is created FIRST, before the file is even fetched
+  // — so a failure at ANY point (can't download the blob, can't parse
+  // it, a bad row) is always visible as a real "failed" record, never
+  // silent. Fetching/parsing used to happen in the API route before
+  // this function was ever called, which meant those failures left no
+  // trace at all — fixed by moving that work inside this try block.
   let upload: SupplierPriceUpload;
   if (input.retryUploadId) {
     const existing = await getUpload(input.retryUploadId);
@@ -60,7 +67,7 @@ export async function processSupplierUpload(input: {
     if (existing.status !== "failed") {
       throw new Error(`Only a failed upload can be retried (this one is "${existing.status}").`);
     }
-    upload = { ...existing, status: "processing", processedRows: 0, error: null, completedAt: null, totalRows: input.rows.length };
+    upload = { ...existing, status: "processing", processedRows: 0, error: null, completedAt: null };
     await updateUploadProgress(upload.id, upload);
   } else {
     upload = await createUpload({
@@ -68,11 +75,18 @@ export async function processSupplierUpload(input: {
       filename: input.filename,
       blobUrl: input.blobUrl,
       uploadType: input.uploadType,
-      totalRows: input.rows.length,
+      totalRows: 0,
     });
   }
 
   try {
+    const blobRes = await fetch(input.blobUrl);
+    if (!blobRes.ok) throw new Error("Could not download the uploaded file.");
+    const sheet = parseSpreadsheet(await blobRes.arrayBuffer());
+    if (sheet.rows.length === 0) throw new Error("This file has no data rows.");
+    const rows = applyColumnMapping(sheet.rows, input.columnMap);
+    await updateUploadProgress(upload.id, { totalRows: rows.length });
+
     const [products, existingAliases, previousOffers] = await Promise.all([
       getProducts(),
       getAliasesForSupplier(input.supplierId),
@@ -89,8 +103,8 @@ export async function processSupplierUpload(input: {
     let newCandidates = 0;
     const nowIso = new Date().toISOString();
 
-    for (let i = 0; i < input.rows.length; i++) {
-      const row = input.rows[i];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
       const offerKey = deriveOfferKey(row.supplierSku, row.description);
       const aliasesSoFar = existingAliases.concat(newAliases);
       const match = matchSupplierRow(
@@ -205,7 +219,7 @@ export async function processSupplierUpload(input: {
     const finishedUpload: SupplierPriceUpload = {
       ...upload,
       status: "completed",
-      processedRows: input.rows.length,
+      processedRows: rows.length,
       autoMatched,
       needsReview,
       newCandidates,
