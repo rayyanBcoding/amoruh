@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/inventory", label: "Inventory" },
   { href: "/intake", label: "Inventory Intake" },
+  { href: "/pricing", label: "Pricing / Ordering" },
 ];
 
 export function Nav() {

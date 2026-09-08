@@ -21,10 +21,55 @@ export type POLineStatus =
   | "overage"
   | "damaged";
 
+export type PreferredOrderingMethod = "whatsapp" | "email" | "portal" | "excel" | "phone_agent";
+
+/** Remembered spreadsheet layout for one supplier's price list — see
+ *  pricing-parse.ts for how a new upload's header row is compared
+ *  against `headerSignature` to decide whether to reuse this mapping or
+ *  ask again. columnMap keys are the canonical fields Pricing/Ordering
+ *  understands; values are the 0-based column index in that supplier's
+ *  sheet. */
+export interface SupplierColumnMapping {
+  /** Normalized header row this mapping was confirmed against — used to
+   *  detect "the layout changed" on a later upload. */
+  headerSignature: string[];
+  columnMap: {
+    supplierSku?: number;
+    description?: number;
+    brand?: number;
+    quantity?: number;
+    price?: number;
+    currency?: number;
+    upc?: number;
+    ean?: number;
+    category?: number;
+  };
+  confirmedAt: string;
+}
+
+/** Supplier — extended, additive-only, from Phase 1's bare {id, name,
+ *  createdAt}. Existing PurchaseOrder.supplierId / getOrCreateSupplier()
+ *  callers are unaffected; a supplier created before Pricing/Ordering
+ *  simply has undefined profile fields. */
 export interface Supplier {
   id: string;
   name: string;
   createdAt: string;
+  country?: string;
+  defaultCurrency?: string;
+  contactPerson?: string;
+  email?: string;
+  whatsapp?: string;
+  website?: string;
+  orderingMethod?: PreferredOrderingMethod;
+  notes?: string;
+  typicalShippingMethod?: string;
+  /** Remembered from the last confirmed price-list upload — see
+   *  SupplierColumnMapping above. One layout per supplier for Phase 1A. */
+  columnMapping?: SupplierColumnMapping;
+  /** Pre-selected (but always still editable) choice on the upload
+   *  screen — most suppliers consistently send one or the other. */
+  defaultUploadType?: "full" | "partial";
 }
 
 export interface InvoiceDocument {
