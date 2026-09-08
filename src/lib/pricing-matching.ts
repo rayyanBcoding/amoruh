@@ -170,7 +170,20 @@ function brandsMatch(a: StructuredAttributes, b: StructuredAttributes): boolean 
   const unknown = a.brandToken ? b : a;
   if (!known.brandToken) return false;
   const brandWords = known.brandToken.split(" ").filter(Boolean);
-  return brandWords.length > 0 && brandWords.every((w) => unknown.allTokens.includes(w));
+  if (brandWords.length === 0) return false;
+  // Full word containment — e.g. "Creed" inside "aventus by creed 100ml".
+  if (brandWords.every((w) => unknown.allTokens.includes(w))) return true;
+  // Common multi-word-brand abbreviation/initialism — e.g. "JPG" for
+  // "Jean Paul Gaultier", "YSL" for "Yves Saint Laurent". Required
+  // explicitly by spec §2 ("common abbreviations"); without this, a
+  // supplier row that only ever writes the initialism can never
+  // structurally confirm against a catalog brand stored under its full
+  // name, which would otherwise wrongly read as an alias conflict.
+  if (brandWords.length > 1) {
+    const initials = brandWords.map((w) => w[0]).join("");
+    if (unknown.allTokens.includes(initials)) return true;
+  }
+  return false;
 }
 
 function sizesMatch(a: number, b: number): boolean {
