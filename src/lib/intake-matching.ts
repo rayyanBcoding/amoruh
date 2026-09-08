@@ -12,14 +12,18 @@ import type { ExtractedLineItem, MatchCandidate, MatchedLineItem } from "./intak
 
 const FUZZY_THRESHOLD = 0.55;
 
-function normalize(s: string): string {
+/** Exported for reuse by pricing-matching.ts (Pricing/Ordering's supplier
+ *  price-sheet matcher) — same normalization, no behavior change here. */
+export function normalize(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 /** Dice coefficient over character bigrams — cheap, dependency-free, and
  *  tolerant of word-order/spacing differences between an invoice's product
- *  description and our own catalog naming. */
-function bigramSimilarity(a: string, b: string): number {
+ *  description and our own catalog naming. Exported for reuse by
+ *  pricing-matching.ts, which combines this with token-set similarity
+ *  (bigram alone under-scores cases where whole words move around). */
+export function bigramSimilarity(a: string, b: string): number {
   const na = normalize(a);
   const nb = normalize(b);
   if (!na || !nb) return 0;

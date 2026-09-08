@@ -66,6 +66,24 @@ export async function getOrCreateSupplier(name: string): Promise<Supplier> {
   return supplier;
 }
 
+export async function getSupplier(id: string): Promise<Supplier | null> {
+  const suppliers = await getSuppliers();
+  return suppliers.find((s) => s.id === id) ?? null;
+}
+
+/** Partial update — used by the Pricing/Ordering supplier profile form
+ *  and by column-mapping confirmation. Plain read-modify-write, same as
+ *  the rest of this small collection (one operator editing one profile
+ *  at a time — no concurrent-write race analogous to receiving/sales). */
+export async function updateSupplier(id: string, patch: Partial<Supplier>): Promise<Supplier | null> {
+  const suppliers = await getSuppliers();
+  const idx = suppliers.findIndex((s) => s.id === id);
+  if (idx === -1) return null;
+  suppliers[idx] = { ...suppliers[idx], ...patch, id: suppliers[idx].id };
+  await redis.set(KEYS.suppliers, suppliers);
+  return suppliers[idx];
+}
+
 // ---------------------------------------------------------------------
 // Purchase Orders
 // ---------------------------------------------------------------------
