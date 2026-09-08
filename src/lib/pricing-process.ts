@@ -4,6 +4,7 @@ import {
   createUpload,
   getAliasesForSupplier,
   getCommittedOffers,
+  getUpload,
   markUploadFailed,
   newId,
   updateUploadProgress,
@@ -42,14 +43,34 @@ export async function processSupplierUpload(input: {
   blobUrl: string;
   uploadType: "full" | "partial";
   rows: SupplierRawRow[];
+  /** Retry a specific FAILED upload by id instead of starting a new one.
+   *  Reuses the same id AND the same seq — a genuine retry re-stages
+   *  everything fresh (deterministic snapshot keys mean this can never
+   *  duplicate history) and competes for the commit with the SAME
+   *  ordering priority it originally had, rather than jumping the queue
+   *  with a brand-new, higher seq the way an unrelated new upload would. */
+  retryUploadId?: string;
 }): Promise<SupplierPriceUpload> {
-  const upload = await createUpload({
-    supplierId: input.supplierId,
-    filename: input.filename,
-    blobUrl: input.blobUrl,
-    uploadType: input.uploadType,
-    totalRows: input.rows.length,
-  });
+  let upload: SupplierPriceUpload;
+  if (input.retryUploadId) {
+    const existing = await getUpload(input.retryUploadId);
+    if (!existing || existing.supplierId !== input.supplierId) {
+      throw new Error("Upload to retry was not found for this supplier.");
+    }
+    if (existing.status !== "failed") {
+      throw new Error(`Only a failed upload can be retried (this one is "${existing.status}").`);
+    }
+    upload = { ...existing, status: "processing", processedRows: 0, error: null, completedAt: null, totalRows: input.rows.length };
+    await updateUploadProgress(upload.id, upload);
+  } else {
+    upload = await createUpload({
+      supplierId: input.supplierId,
+      filename: input.filename,
+      blobUrl: input.blobUrl,
+      uploadType: input.uploadType,
+      totalRows: input.rows.length,
+    });
+  }
 
   try {
     const [products, existingAliases, previousOffers] = await Promise.all([

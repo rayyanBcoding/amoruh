@@ -14,6 +14,8 @@ interface Body {
   filename?: string;
   uploadType?: "full" | "partial";
   columnMap?: SupplierColumnMapping["columnMap"];
+  /** Retry a specific failed upload by id — see processSupplierUpload. */
+  retryUploadId?: string;
 }
 
 // POST /api/pricing/process — the operator has confirmed (or reused) a
@@ -69,6 +71,7 @@ export async function POST(req: Request) {
       blobUrl: body.blobUrl,
       uploadType: body.uploadType,
       rows,
+      retryUploadId: body.retryUploadId,
     });
     return NextResponse.json(upload);
   } catch (err) {

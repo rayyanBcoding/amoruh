@@ -95,10 +95,18 @@ export function extractAttributes(fullText: string, brand: string): StructuredAt
 
   const brandTokens = new Set(tokenize(brand));
   const sizeToken = /(\d+(?:\.\d+)?)\s*(ml|oz)/;
+  // "100ml" survives tokenize() as one token (caught by sizeToken below),
+  // but "100 ML" (a space before the unit) splits into two separate
+  // tokens — "100" (caught by the bare-digit check) and a stray "ml"
+  // that neither check removes on its own. Without UNIT_WORDS, that
+  // stray unit token asymmetrically survives only on the spaced side,
+  // which is precisely the "100ml" vs "100 ML" case this matcher exists
+  // to treat as equivalent — so it's filtered explicitly here too.
+  const UNIT_WORDS = new Set(["ml", "oz", "fl"]);
   const coreNameTokens = [
     ...new Set(
       tokenize(fullText).filter(
-        (t) => !brandTokens.has(t) && !STOPWORDS.has(t) && !sizeToken.test(t) && !/^\d+$/.test(t)
+        (t) => !brandTokens.has(t) && !STOPWORDS.has(t) && !sizeToken.test(t) && !UNIT_WORDS.has(t) && !/^\d+$/.test(t)
       )
     ),
   ].sort();
@@ -190,15 +198,22 @@ export function scoreStructuredMatch(a: StructuredAttributes, b: StructuredAttri
   const text = textScore(a, b, rawA, rawB);
 
   if (gate.sizeBothParsed && gate.concentrationBothRecognized) {
-    // Brand + size + concentration all cleanly agree — this is the
-    // "different word order/spacing" case (spec's literal example) and
-    // should score very high; text can only nudge it toward 1.0.
+    // Brand + size + concentration all cleanly agree — every structured
+    // signal available confirms this is the same product; text can only
+    // nudge it toward 1.0.
     return { confidence: Math.min(1, 0.95 + text * 0.05), gate };
   }
   if (gate.sizeBothParsed) {
-    // Concentration unrecognized on one/both sides — strong structured
-    // evidence but incomplete; text closes the gap honestly.
-    return { confidence: 0.75 * 0.6 + text * 0.4, gate };
+    // Brand + size agree; concentration wasn't recognized on one or both
+    // sides (the hard gate above already ruled out an actual conflict —
+    // this is "not mentioned," not "different"). This is the common
+    // real-world case (spec's own "Creed Aventus 100ml," no EDP/EDT
+    // marker at all) and should still score high on structured grounds
+    // alone — text confirms rather than having to carry the score, so a
+    // pair like "Aventus by Creed 100ml" / "Creed Aventus 100 ML" lands
+    // comfortably above the auto-match threshold even before text is
+    // added, exactly as the word-order-independent design intends.
+    return { confidence: Math.min(1, 0.87 + text * 0.13), gate };
   }
   // Size didn't even parse on one side (malformed row) — can't fully
   // confirm structurally; lean on text but cap below auto-match so this

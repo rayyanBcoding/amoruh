@@ -101,6 +101,37 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
     }
   };
 
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const retryUpload = async (u: SupplierPriceUpload) => {
+    if (!supplier?.columnMapping) {
+      setError("No remembered column mapping to retry with — upload the file again instead.");
+      return;
+    }
+    setRetryingId(u.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/pricing/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          supplierId: id,
+          blobUrl: u.blobUrl,
+          filename: u.filename,
+          uploadType: u.uploadType,
+          columnMap: supplier.columnMapping.columnMap,
+          retryUploadId: u.id,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Retry failed.");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Retry failed.");
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
   const reset = () => {
     setStage("idle");
     setBlobUrl(null);
@@ -253,9 +284,18 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
               {uploads.map((u) => (
                 <div key={u.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-ld-bg-elevated px-4 py-3 text-sm">
                   <span className="text-ld-white">{u.filename}</span>
-                  <span className="text-xs text-ld-muted">
+                  <span className="flex items-center gap-2 text-xs text-ld-muted">
                     {u.uploadType} · {new Date(u.startedAt).toLocaleString()} ·{" "}
                     <span className={u.status === "failed" ? "text-ld-red" : "text-ld-green"}>{u.status}</span>
+                    {u.status === "failed" && (
+                      <button
+                        disabled={retryingId === u.id}
+                        onClick={() => retryUpload(u)}
+                        className="rounded-lg bg-ld-red/15 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-ld-red hover:bg-ld-red/25"
+                      >
+                        {retryingId === u.id ? "Retrying…" : "Retry"}
+                      </button>
+                    )}
                   </span>
                 </div>
               ))}
