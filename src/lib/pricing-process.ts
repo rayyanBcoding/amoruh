@@ -13,7 +13,14 @@ import {
   type OffersByProductOp,
 } from "./pricing-db";
 import { deriveOfferKey, matchSupplierRow } from "./pricing-matching";
-import { applyColumnMapping, parseSpreadsheet } from "./pricing-parse";
+import {
+  applyColumnMapping,
+  columnMapInBounds,
+  computeSanityChecks,
+  parseSpreadsheetRaw,
+  sheetColumnCount,
+  verifyHeaderSignature,
+} from "./pricing-parse";
 import { getUsdRate, convertToUsd } from "./pricing-fx";
 import type { SupplierColumnMapping } from "./intake-types";
 import type {
@@ -43,6 +50,14 @@ export async function processSupplierUpload(input: {
   filename: string;
   blobUrl: string;
   uploadType: "full" | "partial";
+  /** The EXACT mapping the operator confirmed in Preview — header row,
+   *  columns, and the header text they were looking at when they
+   *  approved it. This function never detects or suggests a header row
+   *  or column map itself; it only verifies this confirmed
+   *  configuration still applies to the freshly-refetched file. See
+   *  verifyHeaderSignature below. */
+  headerRowIndex: number;
+  headerSignature: string[];
   columnMap: SupplierColumnMapping["columnMap"];
   /** Retry a specific FAILED upload by id instead of starting a new one.
    *  Reuses the same id AND the same seq — a genuine retry re-stages
@@ -82,9 +97,36 @@ export async function processSupplierUpload(input: {
   try {
     const blobRes = await fetch(input.blobUrl);
     if (!blobRes.ok) throw new Error("Could not download the uploaded file.");
-    const sheet = parseSpreadsheet(await blobRes.arrayBuffer());
-    if (sheet.rows.length === 0) throw new Error("This file has no data rows.");
-    const rows = applyColumnMapping(sheet.rows, input.columnMap);
+    const rawRows = parseSpreadsheetRaw(await blobRes.arrayBuffer());
+    if (rawRows.length === 0) throw new Error("This file appears to be empty.");
+
+    // Verify — never re-detect. If the confirmed header row no longer
+    // holds the confirmed header text (the file changed, or a stale/
+    // mismatched request), refuse rather than guessing a new mapping
+    // the operator never saw in Preview.
+    if (!verifyHeaderSignature(rawRows, input.headerRowIndex, input.headerSignature)) {
+      throw new Error(
+        "Confirmed mapping no longer matches this file's header row — return to Preview and review the spreadsheet mapping."
+      );
+    }
+    const columnCount = sheetColumnCount(rawRows);
+    if (!columnMapInBounds(input.columnMap, columnCount)) {
+      throw new Error("Confirmed mapping no longer passes validation — return to Preview and review the spreadsheet mapping.");
+    }
+
+    const dataRows = rawRows.slice(input.headerRowIndex + 1);
+    const rows = applyColumnMapping(dataRows, input.columnMap, input.headerSignature);
+
+    // Re-run the SAME sanity checks Preview showed, server-side, before
+    // anything is written — never trust that the disabled Process
+    // button alone kept a bad mapping from reaching this point (stale
+    // browser state, a UI bug, a changed file, or a misfired retry
+    // could all otherwise bypass it).
+    const sanity = computeSanityChecks(rows);
+    if (!sanity.ok) {
+      throw new Error(`Confirmed mapping no longer passes validation — return to Preview and review the spreadsheet mapping. (${sanity.warnings.join(" ")})`);
+    }
+
     await updateUploadProgress(upload.id, { totalRows: rows.length });
 
     const [products, existingAliases, previousOffers] = await Promise.all([
