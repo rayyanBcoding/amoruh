@@ -51,17 +51,23 @@ export async function GET(req: Request) {
   );
 
   const uploads = await Promise.all(
-    (uploadIds as string[]).map((id) => redis.get(`amoruh:pricing:upload:${id}`))
+    (uploadIds as string[]).map((id) => redis.get<{ processedRows?: number; totalRows?: number }>(`amoruh:pricing:upload:${id}`))
   );
 
-  let totalSnapshotKeys = 0;
-  for (const id of uploadIds as string[]) {
-    const keys = await redis.keys(`amoruh:pricing:offer_snapshot:${id}:*`);
-    totalSnapshotKeys += keys.length;
-  }
-
+  // NOTE: redis.keys() over a pattern that scales with ROW COUNT (one
+  // key per snapshot, one key per offerKey) hits Upstash's "too many
+  // keys to fetch" guard at this real supplier's scale (6,307 rows) —
+  // confirmed directly against production. Snapshot keys are
+  // deterministic (offer_snapshot:{uploadId}:{rowIndex} for
+  // rowIndex 0..processedRows-1), so the count comes straight from each
+  // upload's own processedRows — no scan needed. History keys are one
+  // per CURRENT offerKey, all already known from getCommittedOffers
+  // above — also no scan needed. redis.keys() is only used below for
+  // generation keys, which scale with UPLOAD COUNT (tiny), never row
+  // count — safe at any real supplier's size.
+  const totalSnapshotKeys = uploads.reduce((sum, u) => sum + (u?.processedRows ?? u?.totalRows ?? 0), 0);
   const genKeys = await redis.keys(`amoruh:pricing:offer_current:${supplierId}:*`);
-  const historyKeys = await redis.keys(`amoruh:pricing:offer_history:${supplierId}:*`);
+  const historyKeyCount = offerEntries.length;
 
   const isClean = productLinks.length === 0 && !aliases;
 
@@ -73,7 +79,7 @@ export async function GET(req: Request) {
       generationsToRemove: genKeys.length,
       generationKeys: genKeys,
       snapshotsToRemove: totalSnapshotKeys,
-      historyKeysToRemove: historyKeys.length,
+      historyKeysToRemove: historyKeyCount,
       productLinksFound: productLinks.length,
       productLinks,
       aliasesFound: aliases ? (aliases as unknown[]).length : 0,
