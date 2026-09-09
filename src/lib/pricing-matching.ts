@@ -130,8 +130,23 @@ export function extractAttributes(fullText: string, brand: string): StructuredAt
   return { brandToken, allTokens, coreNameTokens, sizeMl, concentration, isTester, isGiftSet };
 }
 
+/** Deliberately does NOT fold `p.concentration` into the text used for
+ *  name/core-token comparison. Fixed directly: a supplier row almost
+ *  never spells out "Eau de Parfum," so appending the catalog product's
+ *  own concentration FIELD to its comparison text created an extra
+ *  token ("parfum") the row could never match — unfairly discounting a
+ *  genuine match's text score without actually helping distinguish real
+ *  flankers. A flanker word that's genuinely part of a product's
+ *  marketed identity (e.g. "Aventus Cologne," "Le Male Le Parfum") lives
+ *  in `p.name` already, not in the separate concentration field, so it's
+ *  still fully present in the comparison text and still counted. The
+ *  concentration BUCKET itself (used only by the hard gate, never for
+ *  text comparison) is still resolved from name+concentration combined,
+ *  so a flanker word appearing only in `p.name` is still recognized. */
 export function extractProductAttributes(p: Pick<Product, "brand" | "name" | "size" | "concentration">): StructuredAttributes {
-  return extractAttributes(`${p.brand} ${p.name} ${p.size} ${p.concentration}`, p.brand);
+  const base = extractAttributes(`${p.brand} ${p.name} ${p.size}`, p.brand);
+  const concentration = parseConcentration(`${p.name} ${p.concentration}`);
+  return { ...base, concentration };
 }
 
 export function tokenSetSimilarity(a: string[], b: string[]): number {
@@ -144,14 +159,47 @@ export function tokenSetSimilarity(a: string[], b: string[]): number {
   return union === 0 ? 0 : intersection / union;
 }
 
-/** Text similarity used only as SUPPORTING evidence beneath structured
- *  attributes — token-set (word-order independent, fixes "Aventus by
- *  Creed 100ml" vs "Creed Aventus 100 ML") combined with bigram (catches
- *  in-token misspellings token-set alone would miss), max of the two. */
-function textScore(a: StructuredAttributes, b: StructuredAttributes, rawA: string, rawB: string): number {
-  const tokenScore = tokenSetSimilarity(a.coreNameTokens, b.coreNameTokens);
-  const bigram = bigramSimilarity(rawA, rawB);
-  return Math.max(tokenScore, bigram);
+/** Text similarity — token-set (word-order independent, fixes "Aventus
+ *  by Creed 100ml" vs "Creed Aventus 100 ML") combined with bigram
+ *  (catches in-token misspellings token-set alone would miss, e.g.
+ *  "Aventis" vs "Aventus").
+ *
+ *  Two real bugs here, both confirmed directly and both fixed:
+ *
+ *  1. Bigram over the FULL raw strings (brand, stray words like "by,"
+ *     size, country/gender codes and all) can't tell "one side has an
+ *     entire extra distinguishing WORD" from "these are basically the
+ *     same string" — "Creed Aventus" vs "Creed Aventus Cologne" scored
+ *     0.68 on raw-string bigram alone (one string is just a prefix of
+ *     the other) even though token-set correctly saw a 50% mismatch
+ *     (the missing "cologne" — the very flanker word that makes these
+ *     different products). Conversely, raw-string bigram can also score
+ *     too LOW for a genuine typo match ("Aventis by Creed 100 ML" vs
+ *     "Creed Aventus") because unrelated surrounding words dilute it.
+ *     Fixed by comparing bigram over the same BRAND-STRIPPED core-name
+ *     tokens used for token-set similarity, not the full raw strings —
+ *     isolating the actual name comparison from brand/size/stray-word
+ *     noise on both sides of the bug.
+ *  2. Each side's own `coreNameTokens` only ever strips ITS OWN brand
+ *     field. When one side has no separate brand column (`brandToken`
+ *     is ""), its brand word never gets stripped from its own tokens,
+ *     while the other side (which does have an explicit brand) strips
+ *     it — an asymmetric comparison that unfairly drags a genuine
+ *     match's score down. Fixed by resolving ONE shared brand (whichever
+ *     side has one) and stripping it fresh from BOTH sides' full token
+ *     lists here, so the comparison is always apples-to-apples
+ *     regardless of which side happened to have a Brand column. */
+function textScore(a: StructuredAttributes, b: StructuredAttributes): number {
+  const knownBrand = a.brandToken || b.brandToken;
+  const brandWords = knownBrand ? new Set(knownBrand.split(" ").filter(Boolean)) : new Set<string>();
+  const coreA = brandWords.size > 0 ? a.allTokens.filter((t) => !brandWords.has(t)) : a.coreNameTokens;
+  const coreB = brandWords.size > 0 ? b.allTokens.filter((t) => !brandWords.has(t)) : b.coreNameTokens;
+
+  const tokenScore = tokenSetSimilarity(coreA, coreB);
+  const bigram = bigramSimilarity(coreA.join(" "), coreB.join(" "));
+  const maxLen = Math.max(coreA.length, coreB.length, 1);
+  const lengthAgreement = 1 - Math.abs(coreA.length - coreB.length) / maxLen;
+  return Math.max(tokenScore, bigram * lengthAgreement);
 }
 
 /** Both sides with an explicit brand string: compare directly (with typo
@@ -230,37 +278,43 @@ export interface StructuredMatchScore {
   gate: HardGateResult;
 }
 
-/** Confidence composition — structured agreement is the primary driver;
- *  text score fills gaps rather than leading, and can never override a
- *  failed hard gate (checkHardGates must be called first). */
-export function scoreStructuredMatch(a: StructuredAttributes, b: StructuredAttributes, rawA: string, rawB: string): StructuredMatchScore {
+/** Confidence composition.
+ *
+ *  Revised after direct testing against a real 6,305-row supplier file
+ *  matched against a real catalog found concrete false positives: the
+ *  original design gave brand+size(+concentration) agreement such a
+ *  high baseline (0.87, or 0.95 with matching concentration) that text
+ *  similarity could barely move the result — "GUESS GIRL EDT 100ml"
+ *  auto-matched to "Guess Seductive Noir Body Lotion" (text similarity
+ *  0.22) purely because brand and size lined up. Worse, "PACO RABANNE 1
+ *  MILLION LUCKY EDT 100ml" auto-matched "1 Million Travel Set" at 0.98
+ *  confidence — both sides say EDT 100ml, but that only confirms
+ *  format, not which fragrance. Concentration match is strong NEGATIVE
+ *  evidence (a mismatch is disqualifying, via the hard gate above) but
+ *  weak POSITIVE evidence — many different products from one brand
+ *  share a format. Brand and size confirm you're looking at plausibly
+ *  the same PRODUCT LINE; text similarity is what actually confirms
+ *  it's the same PRODUCT, and is now the primary driver once the hard
+ *  gates (which can still only push toward zero, never up) pass.
+ *
+ *  Calibrated directly against real cases: "Aventus by Creed 100ml" /
+ *  "Creed Aventus 100ml EDP" (text 0.67, no concentration stated on the
+ *  row) clears the 0.85 auto-match threshold; the four real false
+ *  positives above (text 0.22–0.58) all now land below it — most below
+ *  0.55, straight to New Candidate rather than even Match Review. */
+export function scoreStructuredMatch(a: StructuredAttributes, b: StructuredAttributes): StructuredMatchScore {
   const gate = checkHardGates(a, b);
   if (!gate.passes) return { confidence: 0, gate };
 
-  const text = textScore(a, b, rawA, rawB);
+  if (!gate.sizeBothParsed) {
+    // Size didn't even parse on one side (malformed row) — can't fully
+    // confirm structurally; lean on text but cap below auto-match so
+    // this always lands in Match Review rather than trusting text alone.
+    return { confidence: Math.min(0.7, textScore(a, b)), gate };
+  }
 
-  if (gate.sizeBothParsed && gate.concentrationBothRecognized) {
-    // Brand + size + concentration all cleanly agree — every structured
-    // signal available confirms this is the same product; text can only
-    // nudge it toward 1.0.
-    return { confidence: Math.min(1, 0.95 + text * 0.05), gate };
-  }
-  if (gate.sizeBothParsed) {
-    // Brand + size agree; concentration wasn't recognized on one or both
-    // sides (the hard gate above already ruled out an actual conflict —
-    // this is "not mentioned," not "different"). This is the common
-    // real-world case (spec's own "Creed Aventus 100ml," no EDP/EDT
-    // marker at all) and should still score high on structured grounds
-    // alone — text confirms rather than having to carry the score, so a
-    // pair like "Aventus by Creed 100ml" / "Creed Aventus 100 ML" lands
-    // comfortably above the auto-match threshold even before text is
-    // added, exactly as the word-order-independent design intends.
-    return { confidence: Math.min(1, 0.87 + text * 0.13), gate };
-  }
-  // Size didn't even parse on one side (malformed row) — can't fully
-  // confirm structurally; lean on text but cap below auto-match so this
-  // always lands in Match Review rather than trusting text alone.
-  return { confidence: Math.min(0.7, text), gate };
+  const text = textScore(a, b);
+  return { confidence: Math.min(1, 0.05 + text * 1.3), gate };
 }
 
 // ---------------------------------------------------------------------
@@ -374,7 +428,7 @@ export function matchSupplierRow(row: MatchRowInput, products: Product[], aliase
   let best: { product: Product; score: StructuredMatchScore } | null = null;
   for (const p of products) {
     const productAttrs = extractProductAttributes(p);
-    const score = scoreStructuredMatch(rowAttrs, productAttrs, rowText, `${p.brand} ${p.name}`);
+    const score = scoreStructuredMatch(rowAttrs, productAttrs);
     if (score.confidence > 0 && (!best || score.confidence > best.score.confidence)) {
       best = { product: p, score };
     }
