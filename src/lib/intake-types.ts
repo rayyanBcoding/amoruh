@@ -30,6 +30,13 @@ export type PreferredOrderingMethod = "whatsapp" | "email" | "portal" | "excel" 
  *  understands; values are the 0-based column index in that supplier's
  *  sheet. */
 export interface SupplierColumnMapping {
+  /** Which raw sheet row (0-based) holds the header — real supplier
+   *  files often have preamble rows (company name, a date, a note)
+   *  before the actual header, so this is never assumed to be row 0.
+   *  Reuse on a later upload requires this exact row to still hold
+   *  `headerSignature` below — see resolveHeaderRow/verifyHeaderSignature
+   *  in pricing-parse.ts. */
+  headerRowIndex: number;
   /** Normalized header row this mapping was confirmed against — used to
    *  detect "the layout changed" on a later upload. */
   headerSignature: string[];

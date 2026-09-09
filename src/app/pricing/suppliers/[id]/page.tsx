@@ -5,9 +5,24 @@ import { upload } from "@vercel/blob/client";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
 import type { Supplier, SupplierColumnMapping } from "@/lib/intake-types";
-import type { SupplierPriceUpload } from "@/lib/pricing-types";
+import type { SupplierPriceUpload, SupplierRawRow } from "@/lib/pricing-types";
 
-type Stage = "idle" | "uploading" | "mapping" | "processing" | "done";
+type Stage = "idle" | "uploading" | "mapping" | "preview" | "processing" | "done";
+
+interface ColumnPreview {
+  index: number;
+  letter: string;
+  header: string;
+  samples: string[];
+}
+
+interface SanityCheck {
+  ok: boolean;
+  totalRows: number;
+  priceValidRatio: number;
+  descriptionValidRatio: number;
+  warnings: string[];
+}
 
 const FIELD_LABELS: [keyof SupplierColumnMapping["columnMap"], string][] = [
   ["supplierSku", "Supplier SKU"],
@@ -21,6 +36,11 @@ const FIELD_LABELS: [keyof SupplierColumnMapping["columnMap"], string][] = [
   ["category", "Category"],
 ];
 
+function columnLabel(col: ColumnPreview | undefined): string {
+  if (!col) return "";
+  return `${col.letter} — ${col.header || "(blank)"}`;
+}
+
 export default function SupplierDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -28,13 +48,22 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
   const [uploads, setUploads] = useState<SupplierPriceUpload[]>([]);
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
 
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [filename, setFilename] = useState("");
-  const [headers, setHeaders] = useState<string[]>([]);
-  const [rowCount, setRowCount] = useState(0);
+
+  const [headerRowWindow, setHeaderRowWindow] = useState<string[][]>([]);
+  const [detectedHeaderRowIndex, setDetectedHeaderRowIndex] = useState(0);
+  const [headerRowIndex, setHeaderRowIndex] = useState(0);
+  const [headerConfident, setHeaderConfident] = useState(true);
+  const [headerSignature, setHeaderSignature] = useState<string[]>([]);
+  const [columns, setColumns] = useState<ColumnPreview[]>([]);
   const [columnMap, setColumnMap] = useState<SupplierColumnMapping["columnMap"]>({});
   const [mappingReused, setMappingReused] = useState(false);
+  const [previewRows, setPreviewRows] = useState<SupplierRawRow[]>([]);
+  const [totalProductRows, setTotalProductRows] = useState(0);
+  const [sanityCheck, setSanityCheck] = useState<SanityCheck | null>(null);
   const [uploadType, setUploadType] = useState<"full" | "partial">("full");
   const [result, setResult] = useState<SupplierPriceUpload | null>(null);
 
@@ -52,6 +81,45 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
 
   useEffect(load, [id]);
 
+  const columnAt = (idx: number | undefined) => columns.find((c) => c.index === idx);
+
+  // Re-fetches the full preview pass whenever the header row or column
+  // map changes, so what's shown is never stale relative to the current
+  // selection. Never writes anything.
+  const refreshPreview = async (overrides: { headerRowIndex?: number; columnMap?: SupplierColumnMapping["columnMap"] }) => {
+    if (!blobUrl) return;
+    setLoadingPreview(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/pricing/parse-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supplierId: id, blobUrl, ...overrides }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Could not read this file.");
+
+      setHeaderRowWindow(data.headerRowWindow);
+      setDetectedHeaderRowIndex(data.detectedHeaderRowIndex);
+      setHeaderRowIndex(data.headerRowIndex);
+      setHeaderConfident(data.headerConfident);
+      setHeaderSignature(data.headerSignature);
+      setColumns(data.columns);
+      setColumnMap(data.columnMap);
+      setMappingReused(Boolean(data.mappingReused));
+      setPreviewRows(data.previewRows);
+      setTotalProductRows(data.totalProductRows);
+      setSanityCheck(data.sanityCheck);
+      setUploadType(data.defaultUploadType ?? "full");
+      return data;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      throw err;
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
   const handleFile = async (file: File) => {
     setError(null);
     setStage("uploading");
@@ -68,16 +136,37 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Could not read this file.");
 
-      setHeaders(data.headers);
-      setRowCount(data.rowCount);
-      setUploadType(data.defaultUploadType ?? "full");
+      setHeaderRowWindow(data.headerRowWindow);
+      setDetectedHeaderRowIndex(data.detectedHeaderRowIndex);
+      setHeaderRowIndex(data.headerRowIndex);
+      setHeaderConfident(data.headerConfident);
+      setHeaderSignature(data.headerSignature);
+      setColumns(data.columns);
+      setColumnMap(data.columnMap);
       setMappingReused(Boolean(data.mappingReused));
-      setColumnMap(data.mappingReused ? data.columnMap : data.suggestedColumnMap);
-      setStage("mapping");
+      setPreviewRows(data.previewRows);
+      setTotalProductRows(data.totalProductRows);
+      setSanityCheck(data.sanityCheck);
+      setUploadType(data.defaultUploadType ?? "full");
+
+      // Reuse only ever skips the column-mapping step — Preview is
+      // always shown, regardless.
+      setStage(data.mappingReused ? "preview" : "mapping");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setStage("idle");
     }
+  };
+
+  const changeHeaderRow = async (newIndex: number) => {
+    setHeaderRowIndex(newIndex);
+    await refreshPreview({ headerRowIndex: newIndex }).catch(() => {});
+  };
+
+  const changeColumn = async (field: keyof SupplierColumnMapping["columnMap"], value: number | undefined) => {
+    const next = { ...columnMap, [field]: value };
+    setColumnMap(next);
+    await refreshPreview({ headerRowIndex, columnMap: next }).catch(() => {});
   };
 
   const submitProcess = async () => {
@@ -88,7 +177,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
       const res = await fetch("/api/pricing/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ supplierId: id, blobUrl, filename, uploadType, columnMap }),
+        body: JSON.stringify({ supplierId: id, blobUrl, filename, uploadType, headerRowIndex, headerSignature, columnMap }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Could not process this upload.");
@@ -97,7 +186,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
-      setStage("mapping");
+      setStage("preview");
     }
   };
 
@@ -118,6 +207,8 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
           blobUrl: u.blobUrl,
           filename: u.filename,
           uploadType: u.uploadType,
+          headerRowIndex: supplier.columnMapping.headerRowIndex,
+          headerSignature: supplier.columnMapping.headerSignature,
           columnMap: supplier.columnMapping.columnMap,
           retryUploadId: u.id,
         }),
@@ -135,8 +226,10 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
   const reset = () => {
     setStage("idle");
     setBlobUrl(null);
-    setHeaders([]);
+    setColumns([]);
     setColumnMap({});
+    setPreviewRows([]);
+    setSanityCheck(null);
     setResult(null);
     setError(null);
   };
@@ -153,7 +246,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
   return (
     <div className="min-h-screen">
       <Nav />
-      <main className="mx-auto max-w-[1000px] px-6 py-6">
+      <main className="mx-auto max-w-[1100px] px-6 py-6">
         <h1 className="mb-1 font-display text-2xl font-extrabold text-ld-white lg:text-3xl">{supplier.name}</h1>
         <p className="mb-6 text-sm text-ld-muted">
           {[supplier.country, supplier.defaultCurrency, supplier.orderingMethod].filter(Boolean).join(" · ") || "No profile details yet"}
@@ -188,14 +281,80 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
 
           {stage === "mapping" && (
             <div className="space-y-5">
+              <div>
+                <p className="mb-2 text-sm text-ld-white">
+                  Detected header row: <span className="font-semibold text-ld-cyan">Row {headerRowIndex + 1}</span>
+                  {!headerConfident && (
+                    <span className="ml-2 text-xs font-semibold text-ld-amber">
+                      Low confidence — please double-check this is the right row.
+                    </span>
+                  )}
+                </p>
+                <div className="max-h-40 overflow-y-auto rounded-xl border border-ld-border">
+                  {headerRowWindow.map((row, i) => (
+                    <button
+                      key={i}
+                      onClick={() => changeHeaderRow(i)}
+                      className={`flex w-full items-start gap-3 border-b border-ld-border/50 px-3 py-1.5 text-left text-xs last:border-b-0 ${
+                        i === headerRowIndex ? "bg-ld-purple/15 text-ld-white" : "text-ld-muted hover:bg-ld-bg-elevated"
+                      }`}
+                    >
+                      <span className="w-12 shrink-0 font-mono">Row {i + 1}</span>
+                      <span className="truncate">{row.filter(Boolean).join(" · ") || "(blank row)"}</span>
+                      {i === detectedHeaderRowIndex && <span className="ml-auto shrink-0 text-[10px] uppercase text-ld-cyan">Detected</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-ld-muted">
+                  Map Each Field to a Spreadsheet Column
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {FIELD_LABELS.map(([field, label]) => (
+                    <div key={field}>
+                      <label className="mb-1 block text-[11px] font-bold uppercase tracking-widest text-ld-muted">{label}</label>
+                      <select
+                        value={columnMap[field] ?? ""}
+                        onChange={(e) => changeColumn(field, e.target.value === "" ? undefined : Number(e.target.value))}
+                        className="w-full rounded-lg border border-ld-border bg-ld-bg-elevated px-2 py-1.5 text-xs text-ld-white outline-none focus:border-ld-purple"
+                      >
+                        <option value="">— None —</option>
+                        {columns.map((c) => (
+                          <option key={c.index} value={c.index}>
+                            {columnLabel(c)}
+                          </option>
+                        ))}
+                      </select>
+                      {columnMap[field] !== undefined && columnAt(columnMap[field])?.samples && columnAt(columnMap[field])!.samples.length > 0 && (
+                        <p className="mt-1 truncate text-[10px] text-ld-muted">
+                          Sample: {columnAt(columnMap[field])!.samples.join(", ")}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={reset}>
+                  Cancel
+                </Button>
+                <Button variant="primary" disabled={loadingPreview} onClick={() => setStage("preview")}>
+                  Continue to Preview
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {stage === "preview" && (
+            <div className="space-y-5">
               <p className="text-sm text-ld-muted">
-                {rowCount} data row{rowCount === 1 ? "" : "s"} found.{" "}
                 {mappingReused ? (
                   <span className="font-semibold text-ld-green">Using the remembered column layout for this supplier.</span>
                 ) : (
-                  <span className="font-semibold text-ld-amber">
-                    New or changed layout — confirm which column is which (this will be remembered for next time).
-                  </span>
+                  <span>Header row {headerRowIndex + 1} · {columns.length} columns mapped.</span>
                 )}
               </p>
 
@@ -223,36 +382,71 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                 )}
               </div>
 
-              {!mappingReused && (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  {FIELD_LABELS.map(([field, label]) => (
-                    <div key={field}>
-                      <label className="mb-1 block text-[11px] font-bold uppercase tracking-widest text-ld-muted">{label}</label>
-                      <select
-                        value={columnMap[field] ?? ""}
-                        onChange={(e) =>
-                          setColumnMap((prev) => ({ ...prev, [field]: e.target.value === "" ? undefined : Number(e.target.value) }))
-                        }
-                        className="w-full rounded-lg border border-ld-border bg-ld-bg-elevated px-2 py-1.5 text-xs text-ld-white outline-none focus:border-ld-purple"
-                      >
-                        <option value="">— None —</option>
-                        {headers.map((h, i) => (
-                          <option key={i} value={i}>
-                            {h || `Column ${i + 1}`}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-ld-muted">
+                    Preview — First {previewRows.length} of {totalProductRows.toLocaleString()} Product Rows
+                  </p>
+                  {loadingPreview && <span className="text-xs text-ld-muted">Refreshing…</span>}
+                </div>
+                <div className="overflow-x-auto rounded-xl border border-ld-border">
+                  <table className="w-full min-w-[700px] text-xs">
+                    <thead>
+                      <tr className="border-b border-ld-border bg-ld-bg-elevated text-left text-[10px] font-bold uppercase tracking-widest text-ld-muted">
+                        <th className="px-3 py-2">SKU</th>
+                        <th className="px-3 py-2">Description</th>
+                        <th className="px-3 py-2">Brand</th>
+                        <th className="px-3 py-2">Qty</th>
+                        <th className="px-3 py-2">Price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewRows.map((r, i) => (
+                        <tr key={i} className="border-b border-ld-border/40 last:border-b-0">
+                          <td className="px-3 py-1.5 font-mono text-ld-cyan">{r.supplierSku || "—"}</td>
+                          <td className="px-3 py-1.5 text-ld-white">{r.description || "—"}</td>
+                          <td className="px-3 py-1.5 text-ld-muted">{r.brand || "—"}</td>
+                          <td className="px-3 py-1.5 text-ld-muted">{r.quantity ?? "—"}</td>
+                          <td className="px-3 py-1.5 text-ld-amber">
+                            {r.price > 0 ? `${r.currency} ${r.price}` : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                      {previewRows.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="px-3 py-6 text-center text-ld-muted">
+                            No product rows parsed with this mapping.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {sanityCheck && !sanityCheck.ok && (
+                <div className="rounded-xl border border-ld-red/30 bg-ld-red/5 p-4">
+                  <p className="mb-1 text-sm font-bold text-ld-red">This mapping may be incorrect.</p>
+                  {sanityCheck.warnings.map((w, i) => (
+                    <p key={i} className="text-xs text-ld-red">{w}</p>
                   ))}
+                  <p className="mt-2 text-xs text-ld-muted">
+                    Review the parsed preview above, then go back and fix the mapping before continuing.
+                  </p>
                 </div>
               )}
 
-              <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={reset}>
-                  Cancel
+              <div className="flex items-center justify-between">
+                <Button variant="ghost" onClick={() => setStage("mapping")}>
+                  ← Back — Fix Mapping
                 </Button>
-                <Button variant="primary" onClick={submitProcess} disabled={!columnMap.description && !columnMap.supplierSku}>
-                  Process {rowCount} Row{rowCount === 1 ? "" : "s"}
+                <Button
+                  variant="primary"
+                  size="lg"
+                  disabled={!sanityCheck?.ok || loadingPreview}
+                  onClick={submitProcess}
+                >
+                  Process {totalProductRows.toLocaleString()} Product{totalProductRows === 1 ? "" : "s"}
                 </Button>
               </div>
             </div>
