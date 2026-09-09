@@ -6,6 +6,17 @@ import { useRouter } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
 
+interface SupplierBreakdown {
+  supplierId: string;
+  supplierName: string;
+  currentlyListed: number;
+  noLongerListed: number;
+  matched: number;
+  reviewRequired: number;
+  newCandidates: number;
+  ignored: number;
+}
+
 interface DashboardData {
   uploadsToday: number;
   recentUploads: {
@@ -21,7 +32,7 @@ interface DashboardData {
     startedAt: string;
     isLive: boolean;
   }[];
-  matchReview: { total: number; needsReview: number; newCandidates: number; aliasConflicts: number; barcodeConflicts: number };
+  matchReview: { reviewRequired: number; newCandidates: number; matched: number; bySupplier: SupplierBreakdown[] };
   supplierCount: number;
 }
 
@@ -63,7 +74,7 @@ export default function PricingDashboardPage() {
           <h1 className="font-display text-2xl font-extrabold text-ld-white lg:text-3xl">Pricing / Ordering</h1>
           <div className="flex gap-2">
             <Link href="/pricing/match-review">
-              <Button variant="cyan">Match Review{data && data.matchReview.total > 0 ? ` (${data.matchReview.total})` : ""}</Button>
+              <Button variant="cyan">Match Review{data && data.matchReview.reviewRequired > 0 ? ` (${data.matchReview.reviewRequired})` : ""}</Button>
             </Link>
             <Link href="/pricing/suppliers">
               <Button variant="primary">Suppliers</Button>
@@ -97,21 +108,49 @@ export default function PricingDashboardPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <StatCard label="Suppliers" value={data?.supplierCount ?? "—"} />
           <StatCard label="Lists Uploaded Today" value={data?.uploadsToday ?? "—"} />
-          <StatCard label="Match Review Queue" value={data?.matchReview.total ?? "—"} accent={data && data.matchReview.total > 0 ? "text-ld-amber" : undefined} />
+          <StatCard
+            label="Review Required"
+            value={data?.matchReview.reviewRequired ?? "—"}
+            accent={data && data.matchReview.reviewRequired > 0 ? "text-ld-amber" : undefined}
+          />
           <StatCard label="New Product Candidates" value={data?.matchReview.newCandidates ?? "—"} accent="text-ld-cyan" />
+          <StatCard label="Matched" value={data?.matchReview.matched ?? "—"} accent="text-ld-green" />
         </div>
 
-        {data && (data.matchReview.aliasConflicts > 0 || data.matchReview.barcodeConflicts > 0) && (
-          <div className="glass-panel mt-4 rounded-2xl border border-ld-red/30 p-4 text-sm text-ld-red">
-            {data.matchReview.aliasConflicts} alias conflict{data.matchReview.aliasConflicts === 1 ? "" : "s"} and{" "}
-            {data.matchReview.barcodeConflicts} barcode conflict{data.matchReview.barcodeConflicts === 1 ? "" : "s"} need review —{" "}
-            <Link href="/pricing/match-review" className="underline">
-              open Match Review
-            </Link>
-            .
+        {data && data.matchReview.bySupplier.length > 0 && (
+          <div className="glass-panel mt-4 rounded-2xl p-5">
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-ld-muted">Per-Supplier Breakdown</p>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[700px] text-sm">
+                <thead>
+                  <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-ld-muted">
+                    <th className="py-1 pr-4">Supplier</th>
+                    <th className="py-1 pr-4">Currently Listed</th>
+                    <th className="py-1 pr-4">No Longer Listed</th>
+                    <th className="py-1 pr-4">Matched</th>
+                    <th className="py-1 pr-4">Review Required</th>
+                    <th className="py-1 pr-4">New Candidates</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.matchReview.bySupplier.map((s) => (
+                    <tr key={s.supplierId} className="border-t border-ld-border/40">
+                      <td className="py-2 pr-4 font-semibold text-ld-white">{s.supplierName}</td>
+                      <td className="py-2 pr-4 text-ld-white">{s.currentlyListed.toLocaleString()}</td>
+                      <td className="py-2 pr-4 text-ld-muted">{s.noLongerListed.toLocaleString()}</td>
+                      <td className="py-2 pr-4 text-ld-green">{s.matched.toLocaleString()}</td>
+                      <td className={`py-2 pr-4 ${s.reviewRequired > 0 ? "font-semibold text-ld-amber" : "text-ld-muted"}`}>
+                        {s.reviewRequired.toLocaleString()}
+                      </td>
+                      <td className="py-2 pr-4 text-ld-cyan">{s.newCandidates.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -126,7 +165,7 @@ export default function PricingDashboardPage() {
                   <div>
                     <span className="font-semibold text-ld-white">{u.filename}</span>{" "}
                     <span className="text-ld-muted">
-                      · {u.uploadType} · {u.totalRows} rows · {new Date(u.startedAt).toLocaleString()}
+                      · {u.uploadType} · {new Date(u.startedAt).toLocaleString()}
                     </span>
                   </div>
                   <div className="flex items-center gap-3 text-xs">
