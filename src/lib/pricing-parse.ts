@@ -231,6 +231,28 @@ export function isLikelyProductRow(row: string[], columnMap: SupplierColumnMappi
   return true;
 }
 
+/** Strict numeric-cell parsing — the WHOLE cell (after stripping common
+ *  currency symbols/codes, thousands separators, and whitespace) must
+ *  look like a plain number, not just contain digits somewhere. This is
+ *  deliberately stricter than "extract any digits found" — a real
+ *  product description often contains numbers too ("...100 ml FR"),
+ *  and accepting those as a price is exactly what let a swapped
+ *  Price/Description mapping slip past validation undetected (confirmed
+ *  directly: extracting digits from a description text still produced
+ *  plausible-looking prices). A real price cell like " $79.00 " or
+ *  "160.00" reduces cleanly to a bare number; a sentence never does. */
+function parseNumericCell(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed
+    .replace(/[$€£₹]/g, "")
+    .replace(/\b(usd|aed|eur|gbp|sar|qar)\b/gi, "")
+    .replace(/,/g, "")
+    .trim();
+  if (!/^-?\d+(\.\d+)?$/.test(cleaned)) return null;
+  return parseFloat(cleaned);
+}
+
 /** Applies a confirmed mapping to raw data rows -> normalized
  *  SupplierRawRow[], filtering out non-product rows first. Missing/
  *  unmapped fields default sensibly (empty string, null quantity, "USD"
@@ -244,14 +266,14 @@ export function applyColumnMapping(
   const productRows = rows.filter((row) => isLikelyProductRow(row, columnMap, headerSignature));
 
   return productRows.map((row) => {
-    const priceRaw = cell(row, columnMap.price).replace(/[^0-9.\-]/g, "");
-    const qtyRaw = cell(row, columnMap.quantity).replace(/[^0-9.\-]/g, "");
+    const price = parseNumericCell(cell(row, columnMap.price));
+    const quantity = parseNumericCell(cell(row, columnMap.quantity));
     return {
       supplierSku: cell(row, columnMap.supplierSku),
       description: cell(row, columnMap.description),
       brand: cell(row, columnMap.brand),
-      quantity: qtyRaw ? Math.round(parseFloat(qtyRaw)) : null,
-      price: priceRaw ? parseFloat(priceRaw) : 0,
+      quantity: quantity !== null ? Math.round(quantity) : null,
+      price: price ?? 0,
       currency: cell(row, columnMap.currency).toUpperCase() || "USD",
       upc: cell(row, columnMap.upc),
       ean: cell(row, columnMap.ean),
@@ -285,7 +307,12 @@ export function computeSanityChecks(rows: SupplierRawRow[]): SanityCheckResult {
     return { ok: false, totalRows: 0, priceValidRatio: 0, descriptionValidRatio: 0, warnings: ["No product rows were found with this mapping — check the header row and column choices."] };
   }
   const priceValid = rows.filter((r) => r.price > 0).length;
-  const descValid = rows.filter((r) => r.description.trim().length > 2).length;
+  // A real description has actual words in it — requiring letters (not
+  // just length) is what catches a Description column actually pointing
+  // at a barcode/SKU column: a 13-digit barcode string is "long" but has
+  // zero letters, confirmed directly as the gap that let a swapped
+  // Price/Description mapping pass validation undetected before this.
+  const descValid = rows.filter((r) => r.description.trim().length > 2 && /[a-zA-Z]{2,}/.test(r.description)).length;
   const priceRatio = priceValid / total;
   const descRatio = descValid / total;
 
