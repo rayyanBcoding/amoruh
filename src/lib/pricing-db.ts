@@ -1,6 +1,8 @@
 import { redis } from "./kv";
 import type {
+  MatchReviewBucket,
   MatchReviewItem,
+  MatchReviewSummary,
   OfferComparisonRow,
   ProductOfferComparison,
   ReviewStatus,
@@ -391,41 +393,133 @@ export async function getProductOfferComparison(productId: string): Promise<Prod
   return { productId, actionable, nonActionable, bestPrice: actionable[0] ?? null };
 }
 
-/** Enumerates every supplier's current generation for the Match Review
- *  queue + dashboard counts. Bounded by supplier count (small at this
- *  business's scale) x that supplier's catalog size. */
-export async function getAllCurrentOffers(): Promise<{ supplierId: string; offer: SupplierOfferCurrent }[]> {
-  const suppliers = await getSuppliers();
-  const results: { supplierId: string; offer: SupplierOfferCurrent }[] = [];
-  for (const s of suppliers) {
-    const offers = await getCommittedOffers(s.id);
-    for (const offer of Object.values(offers)) {
-      results.push({ supplierId: s.id, offer });
-    }
-  }
-  return results;
+// ---------------------------------------------------------------------
+// Match Review — operates ONLY on currently-listed offers.
+//
+// A full upload's candidate generation legitimately retains every
+// offerKey a previous generation had, flipping untouched ones to
+// currentlyListed: false rather than deleting them (see the commit
+// model above) — that's what makes "No Longer Listed" possible. A
+// delisted offer is real history/audit data, never an operational
+// concern: it must never contribute to Matched, Review Required, or
+// New Product Candidate counts, no matter what reviewStatus it was
+// left with. Every function below filters `currentlyListed !== false`
+// before classifying anything — this is the fix for a real incident
+// where a flat, unfiltered count made "we don't carry this yet" look
+// identical to "needs a human decision" (11,654 shown as one urgent
+// queue, when only 399 were genuine matches/conflicts).
+// ---------------------------------------------------------------------
+
+const MATCHED_STATUSES: ReviewStatus[] = ["auto_matched", "confirmed"];
+const REVIEW_REQUIRED_STATUSES: ReviewStatus[] = ["needs_review", "alias_conflict", "barcode_conflict"];
+
+function bucketOf(status: ReviewStatus): MatchReviewBucket | "ignored" | null {
+  if (MATCHED_STATUSES.includes(status)) return "matched";
+  if (REVIEW_REQUIRED_STATUSES.includes(status)) return "review_required";
+  if (status === "new_candidate") return "new_candidates";
+  if (status === "ignored") return "ignored";
+  return null;
 }
 
-export async function getMatchReviewQueue(): Promise<MatchReviewItem[]> {
-  const all = await getAllCurrentOffers();
+/** The literal per-supplier diagnostic breakdown: currently-listed vs.
+ *  no-longer-listed record counts, then the three operational buckets
+ *  computed only from the currently-listed set. One HGETALL per
+ *  supplier (small supplier count at this business's scale) — same
+ *  cost as the query this replaces, just classified correctly. */
+export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
   const suppliers = await getSuppliers();
-  const supplierById = new Map(suppliers.map((s) => [s.id, s]));
-  const REVIEW_STATUSES: ReviewStatus[] = ["needs_review", "new_candidate", "alias_conflict", "barcode_conflict"];
+  const bySupplier: MatchReviewSummary["bySupplier"] = [];
+  let matched = 0;
+  let reviewRequired = 0;
+  let newCandidates = 0;
+  let ignored = 0;
 
-  return all
-    .filter(({ offer }) => REVIEW_STATUSES.includes(offer.reviewStatus))
-    .map(({ supplierId, offer }) => ({
-      supplierId,
-      supplierName: supplierById.get(supplierId)?.name ?? "Unknown Supplier",
-      offerKey: offer.offerKey,
-      description: offer.description,
-      brand: offer.brand,
-      price: offer.price,
-      currency: offer.currency,
-      upc: offer.upc,
-      reviewStatus: offer.reviewStatus,
-      matchConfidence: offer.matchConfidence,
-      candidateProductId: offer.candidateProductId,
-      candidateLabel: null,
-    }));
+  for (const s of suppliers) {
+    const offers = Object.values(await getCommittedOffers(s.id));
+    const listed = offers.filter((o) => o.currentlyListed !== false);
+    const noLongerListed = offers.length - listed.length;
+
+    let sMatched = 0;
+    let sReview = 0;
+    let sCandidates = 0;
+    let sIgnored = 0;
+    for (const o of listed) {
+      const bucket = bucketOf(o.reviewStatus);
+      if (bucket === "matched") sMatched++;
+      else if (bucket === "review_required") sReview++;
+      else if (bucket === "new_candidates") sCandidates++;
+      else if (bucket === "ignored") sIgnored++;
+    }
+
+    bySupplier.push({
+      supplierId: s.id,
+      supplierName: s.name,
+      currentlyListed: listed.length,
+      noLongerListed,
+      matched: sMatched,
+      reviewRequired: sReview,
+      newCandidates: sCandidates,
+      ignored: sIgnored,
+    });
+    matched += sMatched;
+    reviewRequired += sReview;
+    newCandidates += sCandidates;
+    ignored += sIgnored;
+  }
+
+  return { matched, reviewRequired, newCandidates, ignored, bySupplier };
+}
+
+/** Paginated, filterable items for one Match Review tab — serves all
+ *  three buckets through the same function so there's one query path,
+ *  not three. Never serializes more than `limit` items regardless of
+ *  how large the bucket is (New Product Candidates can be thousands). */
+export async function getMatchReviewItems(params: {
+  bucket: MatchReviewBucket;
+  supplierId?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ items: MatchReviewItem[]; total: number }> {
+  const { bucket, supplierId, search, limit = 50, offset = 0 } = params;
+  const suppliers = await getSuppliers();
+  const relevantSuppliers = supplierId ? suppliers.filter((s) => s.id === supplierId) : suppliers;
+  const bucketStatuses = bucket === "matched" ? MATCHED_STATUSES : bucket === "review_required" ? REVIEW_REQUIRED_STATUSES : (["new_candidate"] as ReviewStatus[]);
+  const searchLower = search?.trim().toLowerCase();
+
+  const matching: MatchReviewItem[] = [];
+  for (const s of relevantSuppliers) {
+    const offers = Object.values(await getCommittedOffers(s.id));
+    for (const o of offers) {
+      if (o.currentlyListed === false) continue;
+      if (!bucketStatuses.includes(o.reviewStatus)) continue;
+      if (
+        searchLower &&
+        !o.description.toLowerCase().includes(searchLower) &&
+        !o.brand.toLowerCase().includes(searchLower) &&
+        !o.supplierSku.toLowerCase().includes(searchLower)
+      ) {
+        continue;
+      }
+      matching.push({
+        supplierId: s.id,
+        supplierName: s.name,
+        offerKey: o.offerKey,
+        description: o.description,
+        brand: o.brand,
+        price: o.price,
+        currency: o.currency,
+        quantity: o.quantity,
+        upc: o.upc,
+        reviewStatus: o.reviewStatus,
+        matchConfidence: o.matchConfidence,
+        candidateProductId: o.candidateProductId,
+        candidateLabel: null,
+      });
+    }
+  }
+
+  const total = matching.length;
+  const items = matching.slice(offset, offset + limit);
+  return { items, total };
 }

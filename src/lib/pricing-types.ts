@@ -147,12 +147,37 @@ export interface MatchReviewItem {
   brand: string;
   price: number;
   currency: string;
+  quantity: number | null;
   upc: string;
   reviewStatus: ReviewStatus;
   matchConfidence: number | null;
   /** Best-guess candidate for a one-click confirm — never auto-applied. */
   candidateProductId: string | null;
   candidateLabel: string | null;
+}
+
+/** The three operational buckets a CURRENTLY LISTED offer can fall
+ *  into — a delisted offer (currentlyListed: false) is excluded from
+ *  all of them entirely, see getMatchReviewSummary. */
+export type MatchReviewBucket = "review_required" | "new_candidates" | "matched";
+
+export interface MatchReviewSupplierBreakdown {
+  supplierId: string;
+  supplierName: string;
+  currentlyListed: number;
+  noLongerListed: number;
+  matched: number;
+  reviewRequired: number;
+  newCandidates: number;
+  ignored: number;
+}
+
+export interface MatchReviewSummary {
+  matched: number;
+  reviewRequired: number;
+  newCandidates: number;
+  ignored: number;
+  bySupplier: MatchReviewSupplierBreakdown[];
 }
 
 /** One master product's current price comparison across every supplier
