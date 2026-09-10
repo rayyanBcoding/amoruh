@@ -39,7 +39,8 @@ export function CurrentProductPanel({
   financials: CurrentProductFinancialsView | null;
   hasQueue: boolean;
 }) {
-  const { nextItem, noSale, recordSale } = useLiveSession();
+  const { mode, nextItem, noSale, recordSale } = useLiveSession();
+  const isTest = mode === "test";
   const [busy, setBusy] = useState<string | null>(null);
   const [showRecordSale, setShowRecordSale] = useState(false);
 
@@ -69,8 +70,8 @@ export function CurrentProductPanel({
         : "Cost";
 
   return (
-    <div className="glass-panel relative overflow-hidden rounded-2xl">
-      <div className="absolute inset-x-0 top-0 h-1 bg-ld-purple" />
+    <div className={`glass-panel relative overflow-hidden rounded-2xl ${isTest ? "ring-2 ring-ld-amber/60" : ""}`}>
+      <div className={`absolute inset-x-0 top-0 h-1 ${isTest ? "bg-ld-amber" : "bg-ld-purple"}`} />
 
       <AnimatePresence mode="wait">
         <motion.div
@@ -82,10 +83,17 @@ export function CurrentProductPanel({
           className="p-6 lg:p-8"
         >
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-ld-red/15 px-3 py-1 text-xs font-bold uppercase tracking-widest text-ld-red ring-1 ring-inset ring-ld-red/40">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ld-red" />
-              Current Product
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-ld-red/15 px-3 py-1 text-xs font-bold uppercase tracking-widest text-ld-red ring-1 ring-inset ring-ld-red/40">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ld-red" />
+                Current Product
+              </span>
+              {isTest && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-ld-amber/15 px-3 py-1 text-xs font-bold uppercase tracking-widest text-ld-amber ring-1 ring-inset ring-ld-amber/40">
+                  🧪 Simulated
+                </span>
+              )}
+            </div>
             <AuthenticBadge authentic={product.authentic} />
           </div>
 
@@ -102,7 +110,11 @@ export function CurrentProductPanel({
               </div>
 
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <Stat label="Inventory" value={`${product.inventory} units`} accent={product.inventory <= 3 ? "text-ld-red" : undefined} />
+                <Stat
+                  label={isTest ? "Simulated Inventory" : "Inventory"}
+                  value={`${product.inventory} units`}
+                  accent={product.inventory <= 3 ? "text-ld-red" : undefined}
+                />
                 <Stat label="Shelf Location" value={product.shelf || "—"} />
                 <Stat label="Projection" value={product.projection || "—"} />
                 <Stat label="Longevity" value={product.longevity || "—"} />

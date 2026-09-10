@@ -1,6 +1,7 @@
 import { redis } from "./kv";
 import { getProduct, patchState } from "./db";
 import { getLotsWithRemaining, newId } from "./intake-db";
+import { claimActiveSession, REAL_ACTIVE_KEY } from "./live-mode-guard";
 import { computeWeightedAverageLandedCost } from "./intake-costing";
 import {
   cancelSale as cancelSaleRecord,
@@ -39,7 +40,10 @@ import { defaultSellingConfig } from "./live-types";
 // ---------------------------------------------------------------------
 
 const KEYS = {
-  activeSessionId: "amoruh:live:active_session_id",
+  // Same literal `claimActiveSession` (live-mode-guard.ts) uses as
+  // REAL_ACTIVE_KEY — imported rather than duplicated so there's one
+  // source of truth for it.
+  activeSessionId: REAL_ACTIVE_KEY,
   session: (id: string) => `amoruh:live:session:${id}`,
   sessionsIndex: "amoruh:live:sessions_index",
   sessionState: (id: string) => `amoruh:live:session_state:${id}`,
@@ -54,31 +58,10 @@ function defaultSessionState(sessionId: string): LiveSessionState {
 // Session lifecycle
 // ---------------------------------------------------------------------
 
-// KEYS[1] active_session_id pointer
-// KEYS[2] session key
-// KEYS[3] sessions_index zset
-// KEYS[4] session_state key
-// ARGV[1] sessionId
-// ARGV[2] new session (JSON)
-// ARGV[3] score (startedAt ms)
-// ARGV[4] new session_state (JSON)
-//
-// SETNX-shaped: if a session is already active, this makes NO writes and
-// returns its id — the caller treats that as "resumed," never an error.
-// Two tabs racing here can't both create a session: only the one whose
-// script runs first ever sees KEYS[1] unset.
-const START_LIVE_SCRIPT = `
-local current = redis.call('GET', KEYS[1])
-if current then
-  return current
-end
-redis.call('SET', KEYS[1], ARGV[1])
-redis.call('SET', KEYS[2], ARGV[2])
-redis.call('ZADD', KEYS[3], ARGV[3], ARGV[1])
-redis.call('SET', KEYS[4], ARGV[4])
-return ARGV[1]
-`;
-
+// Claiming the pointer, writing the session/state/index, and refusing a
+// competing Test Live are now all one atomic step — see
+// claimActiveSession() in live-mode-guard.ts for why a plain "GET the
+// test pointer, then SETNX my own" would race.
 export async function startLiveSession(name: string | undefined, operator: string): Promise<LiveSession> {
   const id = newId("live");
   const startedAt = new Date().toISOString();
@@ -92,13 +75,24 @@ export async function startLiveSession(name: string | undefined, operator: strin
   };
   const state = defaultSessionState(id);
 
-  const keys = [KEYS.activeSessionId, KEYS.session(id), KEYS.sessionsIndex, KEYS.sessionState(id)];
-  const args = [id, JSON.stringify(session), String(Date.now()), JSON.stringify(state)];
+  const result = await claimActiveSession({
+    mode: "real",
+    sessionKey: KEYS.session(id),
+    sessionsIndexKey: KEYS.sessionsIndex,
+    sessionStateKey: KEYS.sessionState(id),
+    sessionId: id,
+    sessionJSON: JSON.stringify(session),
+    score: String(Date.now()),
+    stateJSON: JSON.stringify(state),
+  });
 
-  const resultId = await redis.eval<(string | number)[], string>(START_LIVE_SCRIPT, keys, args);
-  const resolved = await getSession(resultId);
-  if (!resolved) throw new Error("Failed to start or resume a Live Session.");
-  return resolved;
+  if (result.claimed) return session;
+  if ("existingSessionId" in result) {
+    const resolved = await getSession(result.existingSessionId);
+    if (!resolved) throw new Error("Failed to resume the active Live Session.");
+    return resolved;
+  }
+  throw new Error("A Test Live is currently active — end it before starting a real Live.");
 }
 
 function defaultSessionName(startedAtIso: string): string {

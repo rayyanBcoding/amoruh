@@ -10,7 +10,15 @@ import { formatCurrency } from "@/lib/format";
 // customer-safe allowlist (see toTVProduct/TVProduct in src/lib/tv.ts) —
 // this component only ever receives fields that are safe to put on a
 // screen the audience can see, never the full Product object.
-export function TVStage({ product, flashDeal }: { product: TVProduct | null; flashDeal: FlashDeal }) {
+export function TVStage({
+  product,
+  flashDeal,
+  isTest = false,
+}: {
+  product: TVProduct | null;
+  flashDeal: FlashDeal;
+  isTest?: boolean;
+}) {
   const livePrice = product
     ? flashDeal.active
       ? Math.round(product.lootPrice * (1 - flashDeal.discountPercent / 100))
@@ -20,6 +28,13 @@ export function TVStage({ product, flashDeal }: { product: TVProduct | null; fla
 
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-ld-bg">
+      {isTest && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-start justify-center">
+          <div className="mt-6 rounded-full border-2 border-dashed border-ld-amber bg-ld-amber/15 px-8 py-2 font-display text-xl font-extrabold uppercase tracking-[0.3em] text-ld-amber backdrop-blur-sm">
+            🧪 Test Broadcast — Not Live
+          </div>
+        </div>
+      )}
       <header className="relative z-10 flex items-center justify-between px-14 pt-10">
         <Logo size="lg" href={null} />
         <AnimatePresence>
