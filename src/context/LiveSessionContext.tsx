@@ -6,26 +6,27 @@ import type { LivePresentation, LiveSession, LiveSessionStats, SellingConfig } f
 import type { SaleRecord } from "@/lib/sales-analytics";
 
 // ---------------------------------------------------------------------
-// Go Live's own data source — deliberately separate from
-// LiveStateContext (the pre-existing global-snapshot context every other
-// page still uses). Editing that context in place to also carry session
-// data would destabilize every page that calls useLiveState() for its
-// own unrelated SSE snapshot. This context instead polls the one
-// composite endpoint (/api/live/session/active) that fully restores the
-// Go Live screen — active session, current product + its operator-only
-// financials, queue, recent sales/no-sales, live stats, selling config —
-// so a refresh or reconnect mid-session is always safe (server-backed,
-// nothing lives only in React state).
+// Go Live's data source — mode-aware since Test Live Mode. `mode` only
+// ever changes which URL PREFIX every fetch uses (/api/live/... vs
+// /api/live/test/...); every method name, request shape, and response
+// shape is identical between the two, so every presentational component
+// (ScannerPanel, QueuePanel, SearchPanel, RecentSalesPanel,
+// RecordSaleModal, SessionStatsBar) keeps working unmodified regardless
+// of which mode is mounted — only CurrentProductPanel (for the TEST MODE
+// banner) and the page shell (for the End Test Live control) read `mode`
+// off this context directly.
 //
-// V1 uses plain polling, not SSE — a Go Live operator's OWN actions
-// already refetch immediately after every mutation (see runAction
-// below), so polling is purely the multi-tab/backstop freshness
-// mechanism, and a few seconds of staleness there is unnoticeable
-// mid-auction. Building a second SSE channel just for this isn't
-// justified yet — see the approved plan's stated simplifications.
+// This provider is only ever mounted once a session (real or test)
+// already exists — see golive/page.tsx, which checks /api/live/status
+// first and renders GoLiveEntryChoice (no provider at all) when neither
+// is active. Polling here is a backstop/multi-tab-freshness mechanism,
+// not the primary update path — every action already refetches
+// immediately after it completes.
 // ---------------------------------------------------------------------
 
 const POLL_INTERVAL_MS = 4000;
+
+export type LiveMode = "real" | "test";
 
 export interface RecentSaleView {
   presentation: LivePresentation;
@@ -49,7 +50,9 @@ interface ActiveSnapshot {
   queue?: Product[];
   recent?: RecentSaleView[];
   stats?: LiveSessionStats;
-  sellingConfig: SellingConfig;
+  /** Only ever present in real mode — Test Mode has no editable selling
+   *  config of its own (Break-Even still reads the real one read-only). */
+  sellingConfig?: SellingConfig;
 }
 
 interface ActionResult {
@@ -58,13 +61,24 @@ interface ActionResult {
   notFound?: boolean;
 }
 
+export interface EndSessionResult extends ActionResult {
+  /** Test mode only. True only when disposition:"discard" was requested
+   *  AND cleanup actually completed — never assume discard succeeded
+   *  just because `ok` is true. */
+  discarded?: boolean;
+  /** Set when a discard's cleanup step failed after the session was
+   *  already (successfully) ended — show this message verbatim, never
+   *  report "Discarded." */
+  cleanupError?: string;
+}
+
 interface LiveSessionContextValue {
+  mode: LiveMode;
   data: ActiveSnapshot | null;
   loading: boolean;
   lastError: string | null;
   refresh: () => Promise<void>;
-  startSession: (name?: string, operator?: string) => Promise<ActionResult>;
-  endSession: (operator?: string) => Promise<ActionResult>;
+  endSession: (operator?: string, disposition?: "discard" | "keep") => Promise<EndSessionResult>;
   scanBarcode: (code: string, operator?: string) => Promise<ActionResult>;
   selectProduct: (productId: string, operator?: string) => Promise<ActionResult>;
   addToQueue: (productId: string) => Promise<ActionResult>;
@@ -75,6 +89,8 @@ interface LiveSessionContextValue {
   noSale: (productId: string, operator?: string) => Promise<ActionResult>;
   cancelSale: (saleId: string, operator?: string) => Promise<ActionResult>;
   correctSale: (saleId: string, newPrice: number, operator?: string) => Promise<ActionResult>;
+  /** Real mode only — no-op-shaped for test mode callers, but nothing
+   *  in test mode ever renders the control that calls this. */
   updateSellingConfig: (patch: Partial<SellingConfig>, operator?: string) => Promise<ActionResult>;
 }
 
@@ -84,6 +100,14 @@ function newIdempotencyKey(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `k_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+/** `/api/live/...` in real mode, `/api/live/test/...` in test mode — the
+ *  ONE place that decides which storage namespace a request reaches.
+ *  `/session/...` paths need the segment inserted after `live`, not
+ *  appended, since the real routes live at `/api/live/session/...` too. */
+function apiPath(mode: LiveMode, suffix: string): string {
+  return mode === "test" ? `/api/live/test${suffix}` : `/api/live${suffix}`;
 }
 
 async function postJson(url: string, body?: unknown): Promise<{ ok: boolean; data: unknown; error?: string; notFound?: boolean }> {
@@ -103,7 +127,7 @@ async function postJson(url: string, body?: unknown): Promise<{ ok: boolean; dat
   }
 }
 
-export function LiveSessionProvider({ children }: { children: React.ReactNode }) {
+export function LiveSessionProvider({ mode = "real", children }: { mode?: LiveMode; children: React.ReactNode }) {
   const [data, setData] = useState<ActiveSnapshot | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const refreshingRef = useRef(false);
@@ -112,7 +136,7 @@ export function LiveSessionProvider({ children }: { children: React.ReactNode })
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     try {
-      const res = await fetch("/api/live/session/active", { cache: "no-store" });
+      const res = await fetch(apiPath(mode, "/session/active"), { cache: "no-store" });
       if (res.ok) {
         const payload = (await res.json()) as ActiveSnapshot;
         setData(payload);
@@ -122,7 +146,7 @@ export function LiveSessionProvider({ children }: { children: React.ReactNode })
     } finally {
       refreshingRef.current = false;
     }
-  }, []);
+  }, [mode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,7 +163,7 @@ export function LiveSessionProvider({ children }: { children: React.ReactNode })
   }, [refresh]);
 
   const runAction = useCallback(
-    async (fn: () => Promise<{ ok: boolean; error?: string; notFound?: boolean }>) => {
+    async <T extends ActionResult>(fn: () => Promise<T>): Promise<T> => {
       const result = await fn();
       setLastError(result.ok ? null : result.error ?? "Something went wrong.");
       await refresh();
@@ -148,111 +172,103 @@ export function LiveSessionProvider({ children }: { children: React.ReactNode })
     [refresh]
   );
 
-  const startSession = useCallback(
-    (name?: string, operator?: string) =>
-      runAction(async () => {
-        const { ok, error } = await postJson("/api/live/session/start", { name, operator });
-        return { ok, error };
-      }),
-    [runAction]
-  );
-
   const endSession = useCallback(
-    (operator?: string) =>
-      runAction(async () => {
+    (operator?: string, disposition?: "discard" | "keep") =>
+      runAction(async (): Promise<EndSessionResult> => {
         const sessionId = data?.session?.id;
         if (!sessionId) return { ok: false, error: "No active session." };
-        const { ok, error } = await postJson("/api/live/session/end", { sessionId, operator });
-        return { ok, error };
+        const { ok, data: responseData, error } = await postJson(apiPath(mode, "/session/end"), { sessionId, operator, disposition });
+        const body = (responseData ?? {}) as { discarded?: boolean; cleanupError?: string };
+        return { ok, error, discarded: body.discarded, cleanupError: body.cleanupError };
       }),
-    [runAction, data?.session?.id]
+    [runAction, data?.session?.id, mode]
   );
 
   const scanBarcode = useCallback(
     (code: string, operator?: string) =>
       runAction(async () => {
-        const { ok, error, notFound } = await postJson("/api/live/scan", { barcode: code, operator });
+        const { ok, error, notFound } = await postJson(apiPath(mode, "/scan"), { barcode: code, operator });
         return { ok, error, notFound };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const selectProduct = useCallback(
     (productId: string, operator?: string) =>
       runAction(async () => {
-        const { ok, error } = await postJson("/api/live/select", { productId, operator });
+        const { ok, error } = await postJson(apiPath(mode, "/select"), { productId, operator });
         return { ok, error };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const addToQueue = useCallback(
     (productId: string) =>
       runAction(async () => {
-        const { ok, error } = await postJson("/api/live/queue", { productId, action: "add" });
+        const { ok, error } = await postJson(apiPath(mode, "/queue"), { productId, action: "add" });
         return { ok, error };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const removeFromQueue = useCallback(
     (productId: string) =>
       runAction(async () => {
-        const { ok, error } = await postJson("/api/live/queue", { productId, action: "remove" });
+        const { ok, error } = await postJson(apiPath(mode, "/queue"), { productId, action: "remove" });
         return { ok, error };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const reorderQueue = useCallback(
     (queueIds: string[]) =>
       runAction(async () => {
-        const { ok, error } = await postJson("/api/live/queue", { action: "reorder", queueIds });
+        const { ok, error } = await postJson(apiPath(mode, "/queue"), { action: "reorder", queueIds });
         return { ok, error };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const nextItem = useCallback(
     () =>
       runAction(async () => {
-        const { ok, error } = await postJson("/api/live/next");
+        const { ok, error } = await postJson(apiPath(mode, "/next"));
         return { ok, error };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const recordSale = useCallback(
     (input: { productId: string; quantity: number; winningBid: number; operator?: string }) =>
       runAction(async () => {
-        const { ok, error } = await postJson("/api/live/record-sale", { ...input, idempotencyKey: newIdempotencyKey() });
+        const { ok, error } = await postJson(apiPath(mode, "/record-sale"), { ...input, idempotencyKey: newIdempotencyKey() });
         return { ok, error };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const noSale = useCallback(
     (productId: string, operator?: string) =>
       runAction(async () => {
-        const { ok, error } = await postJson("/api/live/no-sale", { productId, operator, idempotencyKey: newIdempotencyKey() });
+        const { ok, error } = await postJson(apiPath(mode, "/no-sale"), { productId, operator, idempotencyKey: newIdempotencyKey() });
         return { ok, error };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const cancelSale = useCallback(
     (saleId: string, operator?: string) =>
       runAction(async () => {
-        const { ok, error } = await postJson("/api/live/cancel-sale", { saleId, operator, idempotencyKey: newIdempotencyKey() });
+        const { ok, error } = await postJson(apiPath(mode, "/cancel-sale"), { saleId, operator, idempotencyKey: newIdempotencyKey() });
         return { ok, error };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const correctSale = useCallback(
     (saleId: string, newPrice: number, operator?: string) =>
       runAction(async () => {
-        const { ok, error } = await postJson("/api/live/correct-sale", {
+        const { ok, error } = await postJson(apiPath(mode, "/correct-sale"), {
           saleId,
           newPrice,
           operator,
@@ -260,12 +276,13 @@ export function LiveSessionProvider({ children }: { children: React.ReactNode })
         });
         return { ok, error };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const updateSellingConfig = useCallback(
     (patch: Partial<SellingConfig>, operator?: string) =>
       runAction(async () => {
+        if (mode === "test") return { ok: false, error: "Selling config isn't editable from Test Mode." };
         const res = await fetch("/api/live/selling-config", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -274,16 +291,16 @@ export function LiveSessionProvider({ children }: { children: React.ReactNode })
         const payload = await res.json().catch(() => ({}));
         return { ok: res.ok, error: payload?.error };
       }),
-    [runAction]
+    [runAction, mode]
   );
 
   const value = useMemo<LiveSessionContextValue>(
     () => ({
+      mode,
       data,
       loading: data === null,
       lastError,
       refresh,
-      startSession,
       endSession,
       scanBarcode,
       selectProduct,
@@ -298,10 +315,10 @@ export function LiveSessionProvider({ children }: { children: React.ReactNode })
       updateSellingConfig,
     }),
     [
+      mode,
       data,
       lastError,
       refresh,
-      startSession,
       endSession,
       scanBarcode,
       selectProduct,

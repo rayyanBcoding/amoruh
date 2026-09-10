@@ -25,6 +25,7 @@ const POLL_INTERVAL_MS = 2500;
 export default function TVDisplayPage() {
   const [product, setProduct] = useState<TVProduct | null>(null);
   const [flashDeal, setFlashDeal] = useState<FlashDeal>(defaultFlashDeal());
+  const [isTest, setIsTest] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export default function TVDisplayPage() {
         if (cancelled) return;
         setProduct(data.product ?? null);
         if (data.flashDeal) setFlashDeal(data.flashDeal);
+        setIsTest(Boolean(data.isTest));
         setLoading(false);
       } catch {
         // A single failed poll isn't worth flashing an error on a TV —
@@ -63,5 +65,5 @@ export default function TVDisplayPage() {
     );
   }
 
-  return <TVStage product={product} flashDeal={flashDeal} />;
+  return <TVStage product={product} flashDeal={flashDeal} isTest={isTest} />;
 }
