@@ -518,9 +518,18 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
     throw new SalesError("Winning bid must be zero or greater.");
   }
 
+  // The idempotency marker (and every other value a Lua script `return`s
+  // or `SET`s here) is kept a bare id string on purpose, never a
+  // JSON-shaped value — Upstash's client auto-deserializes any stored/
+  // returned value that parses as JSON, so a marker written as
+  // JSON.stringify({...}) round-trips back as an already-parsed object,
+  // not the string this code expects. Reconstructing the full result
+  // from the canonical SaleRecord (which IS meant to be read as an
+  // object) avoids that trap entirely.
   const fastReplay = await checkIdempotencyFast(input.idempotencyKey);
   if (fastReplay) {
-    return JSON.parse(fastReplay) as RecordSaleResult;
+    const replayedSale = await getSaleRecordById(fastReplay);
+    if (replayedSale) return { saleId: replayedSale.id, presentationId: replayedSale.presentationId ?? "" };
   }
 
   for (let attempt = 0; attempt < MAX_CONFLICT_RETRIES; attempt++) {
@@ -608,7 +617,6 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
 
     const currentGlobalVersion = await getVersion();
     const timestampMs = Date.now();
-    const result: RecordSaleResult = { saleId, presentationId };
 
     const keys = [
       idempotencyKeyOf(input.idempotencyKey),
@@ -624,7 +632,7 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
       presentationsBySessionZsetKey(input.liveSessionId),
     ];
     const args = [
-      JSON.stringify(result),
+      saleId, // bare idempotency marker — see comment above
       expectedVersion,
       String(Number(expectedVersion) + 1),
       JSON.stringify(updatedProducts),
@@ -643,7 +651,10 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
     if (evalResult === "CONFLICT") {
       continue;
     }
-    return JSON.parse(evalResult) as RecordSaleResult;
+    // evalResult is just the bare saleId (ARGV[1]) on success or replay —
+    // both cases resolve to the sale/presentation ids this attempt itself
+    // computed.
+    return { saleId, presentationId };
   }
 
   throw new SalesError("Someone else just updated this product — please try again.", 409);

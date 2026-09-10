@@ -153,6 +153,13 @@ export async function patchSessionState(
 // the active pointer in the SAME script as the status flip, so a crash
 // mid-way can never leave "ended" with the pointer still aimed at it, or
 // vice versa.
+// Returns a bare status word, never the session JSON itself — Upstash's
+// client auto-deserializes any returned value that parses as JSON, so a
+// script returning the full session object would come back to the JS
+// caller already-parsed into an object, not the string this code used to
+// (wrongly) JSON.parse() again. The caller already has (or can re-fetch)
+// the actual session data; the script's only job is the atomic
+// status-flip + pointer-clear.
 const END_LIVE_SCRIPT = `
 local raw = redis.call('GET', KEYS[2])
 if not raw then
@@ -160,14 +167,14 @@ if not raw then
 end
 local session = cjson.decode(raw)
 if session.status == 'ended' then
-  return raw
+  return 'ALREADY_ENDED'
 end
 redis.call('SET', KEYS[2], ARGV[2])
 local current = redis.call('GET', KEYS[1])
 if current == ARGV[1] then
   redis.call('DEL', KEYS[1])
 end
-return ARGV[2]
+return 'OK'
 `;
 
 export async function endLiveSession(sessionId: string): Promise<LiveSession> {
@@ -180,7 +187,11 @@ export async function endLiveSession(sessionId: string): Promise<LiveSession> {
 
   const result = await redis.eval<(string | number)[], string>(END_LIVE_SCRIPT, keys, args);
   if (result === "NOT_FOUND") throw new Error("Live Session not found.");
-  return JSON.parse(result) as LiveSession;
+  if (result === "ALREADY_ENDED") {
+    const latest = await getSession(sessionId);
+    return latest ?? updated;
+  }
+  return updated;
 }
 
 /** Newest-first session history for the Entry Screen / Live History list. */
