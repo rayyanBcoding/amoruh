@@ -300,6 +300,7 @@ async function buildReceiveWrites(params: {
       quantityDelta: actualQty,
       reason: params.method === "receive_all" ? "po_receive_all" : "po_receiving",
       receivingEventId: eventId,
+      saleId: null,
       operator: params.operator?.trim() || "Unknown",
       timestamp,
     };
@@ -555,6 +556,7 @@ export async function receiveAll(input: ReceiveAllInput): Promise<ReceiveAllResu
           quantityDelta: actualQty,
           reason: "po_receive_all",
           receivingEventId: eventId,
+          saleId: null,
           operator: input.operator?.trim() || "Unknown",
           timestamp,
         },

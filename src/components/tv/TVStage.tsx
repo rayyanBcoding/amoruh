@@ -1,15 +1,16 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import type { LiveSnapshot } from "@/lib/types";
+import type { TVProduct } from "@/lib/live-types";
+import type { FlashDeal } from "@/lib/types";
 import { Logo } from "@/components/Logo";
 import { formatCurrency } from "@/lib/format";
-import { getFragranceNotes } from "@/lib/fragrance-notes";
 
-export function TVStage({ snapshot }: { snapshot: LiveSnapshot }) {
-  const product = snapshot.currentProduct;
-  const flashDeal = snapshot.flashDeal;
-
+// Pure customer-facing display. `product` is ALREADY the explicit
+// customer-safe allowlist (see toTVProduct/TVProduct in src/lib/tv.ts) —
+// this component only ever receives fields that are safe to put on a
+// screen the audience can see, never the full Product object.
+export function TVStage({ product, flashDeal }: { product: TVProduct | null; flashDeal: FlashDeal }) {
   const livePrice = product
     ? flashDeal.active
       ? Math.round(product.lootPrice * (1 - flashDeal.discountPercent / 100))
@@ -111,7 +112,7 @@ export function TVStage({ snapshot }: { snapshot: LiveSnapshot }) {
                       Fragrance Notes
                     </p>
                     <p className="mt-1 text-lg font-semibold text-ld-white">
-                      {getFragranceNotes(product).join(", ")}
+                      {product.fragranceNotes.join(", ")}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-ld-border bg-ld-bg-card p-5">

@@ -211,7 +211,8 @@ export type InventoryTransactionReason =
   | "po_receive_all"
   | "po_unexpected_item"
   | "sale"
-  | "manual_adjustment";
+  | "manual_adjustment"
+  | "sale_reversal";
 
 /** Append-only ledger entry for one inventory movement against one lot.
  *  quantityDelta is signed: positive = added to the lot, negative = consumed. */
@@ -224,6 +225,11 @@ export interface InventoryTransaction {
   quantityDelta: number;
   reason: InventoryTransactionReason;
   receivingEventId: string | null;
+  /** Set for `reason: "sale"` and `"sale_reversal"` — the SaleRecord this
+   *  movement belongs to. Lets cancelSale() find every transaction a sale
+   *  created (it may span multiple lots) without a Redis scan — see
+   *  sales-analytics.ts. Null for every other reason. */
+  saleId: string | null;
   operator: string;
   timestamp: string;
 }
