@@ -9,6 +9,7 @@ import { ConnectionDot } from "./ConnectionDot";
 
 const LINKS = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/golive", label: "Go Live" },
   { href: "/inventory", label: "Inventory" },
   { href: "/intake", label: "Inventory Intake" },
   { href: "/pricing", label: "Pricing / Ordering" },
