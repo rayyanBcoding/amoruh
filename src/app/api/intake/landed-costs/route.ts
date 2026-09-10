@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAllProductIdsWithLots, getLotsWithRemaining } from "@/lib/intake-db";
-import { computeWeightedAverageLandedCost } from "@/lib/intake-costing";
+import { getLandedCostByProduct } from "@/lib/intake-db";
 
 export const dynamic = "force-dynamic";
 
@@ -10,28 +9,18 @@ export const dynamic = "force-dynamic";
 // entry here has no lot history yet and the caller should fall back to
 // Product.cost, shown distinctly as a legacy cost rather than an equal,
 // authoritative landed cost.
+//
+// Delegates to the shared getLandedCostByProduct() (intake-db.ts) — same
+// logic as before, now also shared with Dashboard's lot-accurate
+// Inventory Cost Value. This route's own response shape is unchanged
+// (weightedAvgLandedCost/totalRemaining); it just doesn't surface the
+// newer totalRemainingValue field that Dashboard needs, since no
+// existing caller of this route uses it.
 export async function GET() {
-  const productIds = await getAllProductIdsWithLots();
-
-  const entries = await Promise.all(
-    productIds.map(async (productId) => {
-      const lots = await getLotsWithRemaining(productId);
-      const weightedAvgLandedCost = computeWeightedAverageLandedCost(lots);
-      const totalRemaining = lots.reduce((sum, l) => sum + l.remaining, 0);
-      return [productId, { weightedAvgLandedCost, totalRemaining }] as const;
-    })
-  );
-
+  const byProduct = await getLandedCostByProduct();
   const result: Record<string, { weightedAvgLandedCost: number | null; totalRemaining: number }> = {};
-  for (const [productId, value] of entries) {
-    // Only surface products that actually have remaining stock in a lot —
-    // a product whose lots are all fully depleted has no "current" landed
-    // cost to report and should fall back to Legacy Cost same as one with
-    // no lots at all.
-    if (value.weightedAvgLandedCost !== null) {
-      result[productId] = value;
-    }
+  for (const [productId, entry] of Object.entries(byProduct)) {
+    result[productId] = { weightedAvgLandedCost: entry.weightedAvgLandedCost, totalRemaining: entry.totalRemaining };
   }
-
   return NextResponse.json(result);
 }

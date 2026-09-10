@@ -1,5 +1,5 @@
 import { redis } from "./kv";
-import { computeCostBreakdown } from "./intake-costing";
+import { computeCostBreakdown, computeWeightedAverageLandedCost } from "./intake-costing";
 import type {
   InventoryLot,
   InventoryLotWithRemaining,
@@ -326,4 +326,47 @@ export async function getLotsWithRemaining(productId: string): Promise<Inventory
         cost,
       };
     });
+}
+
+export interface LandedCostEntry {
+  weightedAvgLandedCost: number | null;
+  totalRemaining: number;
+  /** Σ(lot.remaining × lot.cost.landed) across this product's lots — the
+   *  exact numerator `computeWeightedAverageLandedCost` divides by
+   *  `totalRemaining` to get the average, kept here undivided so a caller
+   *  valuing INVENTORY (Dashboard) sums real lot value, not
+   *  `Product.inventory × average`, which can disagree with the lot
+   *  ledger whenever the two sources have drifted (e.g. a manual
+   *  adjustment touched one but not the other). */
+  totalRemainingValue: number;
+}
+
+/** Weighted-average landed cost AND raw remaining lot value, per product
+ *  — the shared logic behind api/intake/landed-costs (Inventory table)
+ *  and Dashboard's lot-accurate Inventory Cost Value. Only includes
+ *  products with at least one lot that still has remaining stock. */
+export async function getLandedCostByProduct(): Promise<Record<string, LandedCostEntry>> {
+  const productIds = await getAllProductIdsWithLots();
+
+  const entries = await Promise.all(
+    productIds.map(async (productId) => {
+      const lots = await getLotsWithRemaining(productId);
+      const weightedAvgLandedCost = computeWeightedAverageLandedCost(lots);
+      const totalRemaining = lots.reduce((sum, l) => sum + l.remaining, 0);
+      const totalRemainingValue = lots.reduce((sum, l) => sum + l.remaining * l.cost.landed, 0);
+      return [productId, { weightedAvgLandedCost, totalRemaining, totalRemainingValue }] as const;
+    })
+  );
+
+  const result: Record<string, LandedCostEntry> = {};
+  for (const [productId, value] of entries) {
+    // Only surface products that actually have remaining stock in a lot —
+    // a product whose lots are all fully depleted has no "current" landed
+    // cost to report and should fall back to Legacy Cost same as one with
+    // no lots at all.
+    if (value.weightedAvgLandedCost !== null) {
+      result[productId] = value;
+    }
+  }
+  return result;
 }
