@@ -10,7 +10,13 @@ import { formatCurrency } from "@/lib/format";
 import { displayStatus } from "@/lib/product-status";
 
 type SortKey = "brand" | "name" | "inventory" | "landedCost" | "avgSalePrice";
-type FilterKey = "all" | "active" | "sold_out" | "archived";
+type FilterKey = "all" | "active" | "sold_out" | "archived" | "low_stock";
+
+// Matches Dashboard's Low Stock definition (dashboard-db.ts's
+// LOW_STOCK_THRESHOLD) — kept as a literal here rather than a shared
+// import since this is purely a display filter, not a computation Go
+// Live or Dashboard depend on.
+const LOW_STOCK_THRESHOLD = 3;
 
 interface LandedCostInfo {
   weightedAvgLandedCost: number | null;
@@ -24,6 +30,7 @@ interface SalesSummaryInfo {
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "active", label: "Active" },
+  { key: "low_stock", label: "Low Stock" },
   { key: "sold_out", label: "Sold Out" },
   { key: "archived", label: "Archived" },
 ];
@@ -90,11 +97,11 @@ function QuickInventory({ product }: { product: Product }) {
   );
 }
 
-export function InventoryTable({ products }: { products: Product[] }) {
+export function InventoryTable({ products, initialFilter }: { products: Product[]; initialFilter?: FilterKey }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("brand");
-  const [filter, setFilter] = useState<FilterKey>("all");
+  const [filter, setFilter] = useState<FilterKey>(initialFilter ?? "all");
   const [landedCosts, setLandedCosts] = useState<Record<string, LandedCostInfo>>({});
   const [salesSummary, setSalesSummary] = useState<Record<string, SalesSummaryInfo>>({});
 
@@ -127,7 +134,11 @@ export function InventoryTable({ products }: { products: Product[] }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const base =
-      filter === "all" ? rows.filter((r) => r.status !== "archived") : rows.filter((r) => r.status === filter);
+      filter === "all"
+        ? rows.filter((r) => r.status !== "archived")
+        : filter === "low_stock"
+          ? rows.filter((r) => r.status !== "archived" && r.product.inventory > 0 && r.product.inventory <= LOW_STOCK_THRESHOLD)
+          : rows.filter((r) => r.status === filter);
     const searched = !q
       ? base
       : base.filter(

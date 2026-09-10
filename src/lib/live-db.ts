@@ -202,6 +202,22 @@ export async function getRecentSessions(limit = 20): Promise<LiveSession[]> {
   return sessions.filter((s): s is LiveSession => s !== null);
 }
 
+/** Dashboard's "Last Live" card — the most recently ENDED session,
+ *  period. Deliberately independent of any analytics timeframe filter
+ *  and never the currently-active session (an in-progress Live is Go
+ *  Live's own concern, surfaced separately as a "Live Now" indicator —
+ *  see the approved Dashboard plan). Walks recent history until it finds
+ *  one that's actually ended, so an active session never masks the true
+ *  last-completed one. */
+export async function getLastCompletedSession(): Promise<LiveSession | null> {
+  const ids = (await redis.zrange(KEYS.sessionsIndex, 0, 19, { rev: true })) as string[];
+  for (const id of ids) {
+    const session = await getSession(id);
+    if (session && session.status === "ended") return session;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------
 // Current product / TV compatibility hook
 //
@@ -300,7 +316,7 @@ export async function getPresentationsForSession(sessionId: string, limit = 200)
  *  BOTH the sold and no-sale buckets entirely (see the approved plan's
  *  sell-through definition: a cancellation is treated as if the auction
  *  attempt itself never resolved, not as a fabricated "no sale"). */
-function isEffectivelySold(view: SessionPresentationView): boolean {
+export function isEffectivelySold(view: SessionPresentationView): boolean {
   return view.presentation.outcome === "sold" && view.sale !== null && view.sale.status === "completed";
 }
 
