@@ -1,106 +1,16 @@
-import { createProduct, getProducts } from "./db";
+import { getProducts } from "./db";
 import { getCurrentOffer, getAliasesForSupplier, newId, resolveOfferManually } from "./pricing-db";
-import type { Product } from "./types";
-import type { SupplierAlias } from "./pricing-types";
 
 // ---------------------------------------------------------------------
-// Server-side create-and-link for Match Review's "Create Product"
-// action — mirrors intake-product-linking.ts's createAndLinkProductForLine
-// exactly: create the product, force inventory: 0, then link + write the
-// alias, all in one request, so there's never a "created but not linked"
-// gap. This is the createUrl CreateProductModal's Save button points at.
-// ---------------------------------------------------------------------
-
-export interface CreateAndLinkOfferResult {
-  status: "created" | "linked_existing" | "failed";
-  productId?: string;
-  product?: Product;
-  error?: string;
-}
-
-export async function createAndLinkProductForOffer(
-  supplierId: string,
-  offerKey: string,
-  productOverrides?: Partial<Product>
-): Promise<CreateAndLinkOfferResult> {
-  const offer = await getCurrentOffer(supplierId, offerKey);
-  if (!offer) return { status: "failed", error: "This supplier offer no longer exists." };
-
-  // Already resolved — a retry/double-click is a no-op, same idempotent-
-  // by-revalidation shape as the Intake version.
-  if (offer.productId) {
-    const products = await getProducts();
-    const product = products.find((p) => p.id === offer.productId);
-    if (product) return { status: "linked_existing", productId: product.id, product };
-  }
-
-  const products = await getProducts();
-  const upc = (productOverrides?.barcode ?? offer.upc ?? offer.ean ?? "").trim();
-  const fallbackSku = `NEW-${offerKey.replace(/[^a-zA-Z0-9]/g, "").slice(-8).toUpperCase()}`;
-  const candidateSku = (productOverrides?.sku ?? upc ?? fallbackSku).trim();
-  const candidateBarcode = (productOverrides?.barcode ?? upc ?? candidateSku).trim();
-
-  const exactMatch = products.find(
-    (p) =>
-      (candidateBarcode && p.barcode.toUpperCase() === candidateBarcode.toUpperCase()) ||
-      p.sku.toUpperCase() === candidateSku.toUpperCase()
-  );
-
-  let product: Product;
-  if (exactMatch) {
-    product = exactMatch;
-  } else {
-    const spec: Partial<Product> = {
-      sku: candidateSku,
-      barcode: candidateBarcode,
-      brand: offer.brand,
-      name: offer.description,
-      description: offer.description,
-      cost: offer.price,
-      status: "draft",
-      ...productOverrides,
-      // Creating the master catalog record must never add inventory —
-      // that only ever happens through Order Intake receiving.
-      inventory: 0,
-    };
-    try {
-      product = await createProduct(spec);
-    } catch (err) {
-      return { status: "failed", error: err instanceof Error ? err.message : "Could not create this product." };
-    }
-  }
-
-  const existingAliases = await getAliasesForSupplier(supplierId);
-  const alreadyAliased = existingAliases.some((a) => a.offerKey === offerKey && a.productId === product.id);
-  const newAliases: SupplierAlias[] = alreadyAliased
-    ? existingAliases
-    : [
-        ...existingAliases,
-        {
-          id: newId("alias"),
-          supplierId,
-          offerKey,
-          productId: product.id,
-          createdAt: new Date().toISOString(),
-          source: "match_review",
-        },
-      ];
-
-  await resolveOfferManually({
-    supplierId,
-    offerKey,
-    updatedOffer: { ...offer, productId: product.id, candidateProductId: product.id, matchType: "manual", reviewStatus: "confirmed" },
-    newAliases,
-    offersByProductOps: [{ op: "SADD", productId: product.id, member: `${supplierId}::${offerKey}` }],
-  });
-
-  return { status: exactMatch ? "linked_existing" : "created", productId: product.id, product };
-}
-
-// ---------------------------------------------------------------------
-// Match Review's other actions — link to an existing product, unlink,
-// ignore. Each is one small resolveOfferManually call (offer field +
-// alias list + offers_by_product index, all together).
+// Match Review's REAL-catalog LINKING actions — link to an existing
+// product you already carry, unlink, or ignore. Each is one small
+// resolveOfferManually call (offer field + alias list +
+// offers_by_product index, all together). Pricing/Ordering deliberately
+// has NO path here (or anywhere else) that creates a new real Product —
+// see pricing-reference-linking.ts for "Track for Pricing" / "Link to
+// tracked item," which create/link a PricingReferenceProduct instead. A
+// real Product is only ever created by Inventory Intake receiving or an
+// intentional manual "Add Product" for stock actually owned.
 // ---------------------------------------------------------------------
 
 export async function linkOfferToProduct(
