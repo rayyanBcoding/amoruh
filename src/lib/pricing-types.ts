@@ -55,6 +55,14 @@ export interface SupplierOfferSnapshot {
   matchType: OfferMatchType;
   matchConfidence: number | null;
   reviewStatus: ReviewStatus;
+  /** A Pricing/Ordering-only tracked item this offer has been linked to
+   *  for cross-supplier price comparison — see PricingReferenceProduct.
+   *  Completely independent of productId/reviewStatus: an offer can be
+   *  "new_candidate" (genuinely not in the real Inventory catalog) AND
+   *  have a referenceProductId at the same time. Never a real Product;
+   *  Pricing/Ordering can no longer create one from an unmatched
+   *  listing. */
+  referenceProductId: string | null;
   /** Original currency + price, never overwritten (rule #4). */
   currency: string;
   price: number;
@@ -89,6 +97,11 @@ export interface SupplierOfferCurrent {
   matchType: OfferMatchType;
   matchConfidence: number | null;
   reviewStatus: ReviewStatus;
+  /** See the identical field on SupplierOfferSnapshot — carried forward
+   *  copy-forward-style across every re-upload of this offerKey, same as
+   *  productId, so re-uploading a supplier's sheet never silently wipes
+   *  out a tracked link an operator set. */
+  referenceProductId: string | null;
   /** false once a FULL upload completes without this offerKey present.
    *  Never deleted — kept for "No Longer Listed" display + history. */
   currentlyListed: boolean;
@@ -154,6 +167,7 @@ export interface MatchReviewItem {
   /** Best-guess candidate for a one-click confirm — never auto-applied. */
   candidateProductId: string | null;
   candidateLabel: string | null;
+  referenceProductId: string | null;
 }
 
 /** The three operational buckets a CURRENTLY LISTED offer can fall
@@ -169,6 +183,13 @@ export interface MatchReviewSupplierBreakdown {
   matched: number;
   reviewRequired: number;
   newCandidates: number;
+  /** Sub-split of newCandidates by whether an operator has already
+   *  attached a PricingReferenceProduct — a tracked item has been
+   *  reviewed and organized, so it shouldn't inflate "still need
+   *  attention." newCandidatesUntracked + newCandidatesTracked ===
+   *  newCandidates always. */
+  newCandidatesUntracked: number;
+  newCandidatesTracked: number;
   ignored: number;
 }
 
@@ -176,8 +197,34 @@ export interface MatchReviewSummary {
   matched: number;
   reviewRequired: number;
   newCandidates: number;
+  newCandidatesUntracked: number;
+  newCandidatesTracked: number;
   ignored: number;
   bySupplier: MatchReviewSupplierBreakdown[];
+}
+
+/** A Pricing/Ordering-only tracked item — lets an operator name/price-
+ *  compare something across suppliers without ever creating a real
+ *  Inventory Product. Never read by Dashboard, Go Live, Inventory, or TV;
+ *  a real Product is only ever created by Inventory Intake receiving or
+ *  an intentional manual "Add Product" for stock actually owned. Carries
+ *  the same structured identity the matching engine extracts for real
+ *  products (see extractAttributes in pricing-matching.ts) so it's ready
+ *  for cross-supplier comparison without another migration later — auto-
+ *  matching against these is NOT built this pass; linking is manual. */
+export interface PricingReferenceProduct {
+  id: string;
+  brand: string;
+  name: string;
+  description: string;
+  sizeMl: number | null;
+  concentration: string | null;
+  isTester: boolean;
+  isGiftSet: boolean;
+  upc: string;
+  ean: string;
+  createdAt: string;
+  createdBy: string;
 }
 
 /** One master product's current price comparison across every supplier

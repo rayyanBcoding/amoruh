@@ -4,6 +4,7 @@ import type {
   MatchReviewItem,
   MatchReviewSummary,
   OfferComparisonRow,
+  PricingReferenceProduct,
   ProductOfferComparison,
   ReviewStatus,
   SupplierAlias,
@@ -48,6 +49,10 @@ const KEYS = {
   offerHistory: (supplierId: string, offerKey: string) => `amoruh:pricing:offer_history:${supplierId}:${offerKey}`,
   aliases: (supplierId: string) => `amoruh:pricing:aliases:${supplierId}`,
   offersByProduct: (productId: string) => `amoruh:pricing:offers_by_product:${productId}`,
+  referenceProduct: (id: string) => `amoruh:pricing:reference_product:${id}`,
+  referenceProductsIndex: "amoruh:pricing:reference_products_index",
+  referenceProductByUpc: (upc: string) => `amoruh:pricing:reference_product_by_upc:${upc}`,
+  referenceProductByEan: (ean: string) => `amoruh:pricing:reference_product_by_ean:${ean}`,
 } as const;
 
 export function newId(prefix: string): string {
@@ -320,6 +325,109 @@ export async function getAliasesForSupplier(supplierId: string): Promise<Supplie
 }
 
 // ---------------------------------------------------------------------
+// Reference products — Pricing/Ordering's OWN tracked items, never the
+// real Product catalog. Keyed/indexed, not a flat array: supplier
+// PROFILES are a handful of records (a flat array is fine there), but
+// this collection can realistically reach the thousands — a whole
+// supplier catalog's worth — so every write touches only its own record
+// key + a small, bounded set of index entries, never a shared blob that
+// has to be read-and-rewritten whole on every create. Same
+// "one-key-per-record + zset index" shape already proven out for Live
+// sessions and Pricing generations, and the exact scaling mistake
+// (`KEYS` over a pattern that grows with row count) already fixed once
+// in this codebase for offer snapshots is avoided the same way here:
+// every read below is a bounded ZRANGE or a direct key GET, never KEYS.
+// ---------------------------------------------------------------------
+
+export async function getReferenceProduct(id: string): Promise<PricingReferenceProduct | null> {
+  return (await redis.get<PricingReferenceProduct>(KEYS.referenceProduct(id))) ?? null;
+}
+
+export async function getReferenceProductByUpc(upc: string): Promise<PricingReferenceProduct | null> {
+  if (!upc) return null;
+  const id = await redis.get<string>(KEYS.referenceProductByUpc(upc));
+  return id ? getReferenceProduct(id) : null;
+}
+
+export async function getReferenceProductByEan(ean: string): Promise<PricingReferenceProduct | null> {
+  if (!ean) return null;
+  const id = await redis.get<string>(KEYS.referenceProductByEan(ean));
+  return id ? getReferenceProduct(id) : null;
+}
+
+export async function createReferenceProduct(
+  input: Omit<PricingReferenceProduct, "id" | "createdAt">
+): Promise<PricingReferenceProduct> {
+  const product: PricingReferenceProduct = {
+    ...input,
+    id: newId("refprod"),
+    createdAt: new Date().toISOString(),
+  };
+  await Promise.all([
+    redis.set(KEYS.referenceProduct(product.id), product),
+    redis.zadd(KEYS.referenceProductsIndex, { score: Date.now(), member: product.id }),
+    product.upc ? redis.set(KEYS.referenceProductByUpc(product.upc), product.id) : Promise.resolve(),
+    product.ean ? redis.set(KEYS.referenceProductByEan(product.ean), product.id) : Promise.resolve(),
+  ]);
+  return product;
+}
+
+/** Newest-first page of the index — bounded, never a full-collection
+ *  read. */
+export async function getReferenceProducts(params: { limit?: number; cursor?: number } = {}): Promise<{
+  items: PricingReferenceProduct[];
+  nextCursor: number | null;
+}> {
+  const limit = params.limit ?? 50;
+  const cursor = params.cursor ?? 0;
+  const ids = (await redis.zrange(KEYS.referenceProductsIndex, cursor, cursor + limit - 1, { rev: true })) as string[];
+  const items = (await Promise.all(ids.map(getReferenceProduct))).filter((p): p is PricingReferenceProduct => p !== null);
+  const nextCursor = ids.length === limit ? cursor + limit : null;
+  return { items, nextCursor };
+}
+
+const REFERENCE_SEARCH_PAGE_SIZE = 200;
+// Protection against a pathological collection with zero matches, NOT a
+// definition of search scope — a real collection (even "thousands" of
+// listings) is scanned to completion well under this. A reference
+// product created long ago must be exactly as findable as one created
+// moments ago; this must never silently become "search the newest N."
+const REFERENCE_SEARCH_MAX_SCANNED = 20000;
+
+/** Exact UPC/EAN hit first (O(1)); otherwise pages the FULL index in
+ *  bounded chunks, checking brand/name/description/upc/ean/concentration,
+ *  until `limit` matches are found or the index is exhausted. */
+export async function searchReferenceProducts(query: string, limit = 20): Promise<PricingReferenceProduct[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const [byUpc, byEan] = await Promise.all([getReferenceProductByUpc(trimmed), getReferenceProductByEan(trimmed)]);
+  if (byUpc) return [byUpc];
+  if (byEan) return [byEan];
+
+  const q = trimmed.toLowerCase();
+  const results: PricingReferenceProduct[] = [];
+  let cursor = 0;
+  let scanned = 0;
+  while (results.length < limit && scanned < REFERENCE_SEARCH_MAX_SCANNED) {
+    const ids = (await redis.zrange(KEYS.referenceProductsIndex, cursor, cursor + REFERENCE_SEARCH_PAGE_SIZE - 1)) as string[];
+    if (ids.length === 0) break; // index exhausted
+    const records = await Promise.all(ids.map(getReferenceProduct));
+    for (const r of records) {
+      if (!r) continue;
+      const haystack = `${r.brand} ${r.name} ${r.description} ${r.upc} ${r.ean} ${r.concentration ?? ""}`.toLowerCase();
+      if (haystack.includes(q)) {
+        results.push(r);
+        if (results.length >= limit) break;
+      }
+    }
+    scanned += ids.length;
+    cursor += REFERENCE_SEARCH_PAGE_SIZE;
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------
 // Reads — always resolve through the current committed generation.
 // ---------------------------------------------------------------------
 
@@ -432,6 +540,8 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
   let matched = 0;
   let reviewRequired = 0;
   let newCandidates = 0;
+  let newCandidatesUntracked = 0;
+  let newCandidatesTracked = 0;
   let ignored = 0;
 
   for (const s of suppliers) {
@@ -442,13 +552,18 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
     let sMatched = 0;
     let sReview = 0;
     let sCandidates = 0;
+    let sCandidatesUntracked = 0;
+    let sCandidatesTracked = 0;
     let sIgnored = 0;
     for (const o of listed) {
       const bucket = bucketOf(o.reviewStatus);
       if (bucket === "matched") sMatched++;
       else if (bucket === "review_required") sReview++;
-      else if (bucket === "new_candidates") sCandidates++;
-      else if (bucket === "ignored") sIgnored++;
+      else if (bucket === "new_candidates") {
+        sCandidates++;
+        if (o.referenceProductId) sCandidatesTracked++;
+        else sCandidatesUntracked++;
+      } else if (bucket === "ignored") sIgnored++;
     }
 
     bySupplier.push({
@@ -459,15 +574,19 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
       matched: sMatched,
       reviewRequired: sReview,
       newCandidates: sCandidates,
+      newCandidatesUntracked: sCandidatesUntracked,
+      newCandidatesTracked: sCandidatesTracked,
       ignored: sIgnored,
     });
     matched += sMatched;
     reviewRequired += sReview;
     newCandidates += sCandidates;
+    newCandidatesUntracked += sCandidatesUntracked;
+    newCandidatesTracked += sCandidatesTracked;
     ignored += sIgnored;
   }
 
-  return { matched, reviewRequired, newCandidates, ignored, bySupplier };
+  return { matched, reviewRequired, newCandidates, newCandidatesUntracked, newCandidatesTracked, ignored, bySupplier };
 }
 
 /** Paginated, filterable items for one Match Review tab — serves all
@@ -478,10 +597,13 @@ export async function getMatchReviewItems(params: {
   bucket: MatchReviewBucket;
   supplierId?: string;
   search?: string;
+  /** Only meaningful for bucket "new_candidates" — filters by whether a
+   *  PricingReferenceProduct is already attached. Omitted = both. */
+  tracked?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<{ items: MatchReviewItem[]; total: number }> {
-  const { bucket, supplierId, search, limit = 50, offset = 0 } = params;
+  const { bucket, supplierId, search, tracked, limit = 50, offset = 0 } = params;
   const suppliers = await getSuppliers();
   const relevantSuppliers = supplierId ? suppliers.filter((s) => s.id === supplierId) : suppliers;
   const bucketStatuses = bucket === "matched" ? MATCHED_STATUSES : bucket === "review_required" ? REVIEW_REQUIRED_STATUSES : (["new_candidate"] as ReviewStatus[]);
@@ -493,6 +615,10 @@ export async function getMatchReviewItems(params: {
     for (const o of offers) {
       if (o.currentlyListed === false) continue;
       if (!bucketStatuses.includes(o.reviewStatus)) continue;
+      if (bucket === "new_candidates" && tracked !== undefined) {
+        const isTracked = Boolean(o.referenceProductId);
+        if (isTracked !== tracked) continue;
+      }
       if (
         searchLower &&
         !o.description.toLowerCase().includes(searchLower) &&
@@ -515,6 +641,7 @@ export async function getMatchReviewItems(params: {
         matchConfidence: o.matchConfidence,
         candidateProductId: o.candidateProductId,
         candidateLabel: null,
+        referenceProductId: o.referenceProductId,
       });
     }
   }

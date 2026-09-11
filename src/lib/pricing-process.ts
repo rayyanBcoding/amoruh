@@ -157,6 +157,7 @@ export async function processSupplierUpload(input: {
 
       const rate = await getUsdRate(row.currency);
       const priceUsd = convertToUsd(row.price, rate?.rate ?? null);
+      const previous = candidateOffers[offerKey];
 
       snapshots.push({
         id: newId("offersnap"),
@@ -170,6 +171,7 @@ export async function processSupplierUpload(input: {
         matchType: match.matchType,
         matchConfidence: match.matchConfidence,
         reviewStatus: match.reviewStatus,
+        referenceProductId: previous?.referenceProductId ?? null,
         currency: row.currency,
         price: row.price,
         fxRateAtUpload: rate?.rate ?? null,
@@ -179,7 +181,6 @@ export async function processSupplierUpload(input: {
       });
 
       touchedKeys.add(offerKey);
-      const previous = candidateOffers[offerKey];
       const nextOffer: SupplierOfferCurrent = {
         supplierId: input.supplierId,
         offerKey,
@@ -199,6 +200,11 @@ export async function processSupplierUpload(input: {
         matchType: match.matchType,
         matchConfidence: match.matchConfidence,
         reviewStatus: match.reviewStatus,
+        // Carried forward exactly like productId — re-uploading a
+        // supplier's sheet must never silently wipe out a tracked link
+        // an operator set via "Track for Pricing" / "Link to tracked
+        // item" on a prior generation.
+        referenceProductId: previous?.referenceProductId ?? null,
         currentlyListed: true,
         lastUploadId: upload.id,
         uploadedAt: nowIso,
