@@ -29,7 +29,7 @@ export async function checkPODeleteEligibility(poId: string): Promise<{ eligible
     reasons.push(`${events.length} receiving event${events.length === 1 ? "" : "s"} recorded against this PO.`);
   }
   if (lots.length > 0) {
-    reasons.push(`${lots.length} inventory lot${lots.length === 1 ? "" : "s"} were created from this PO.`);
+    reasons.push(`${lots.length} inventory lot${lots.length === 1 ? " was" : "s were"} created from this PO.`);
   }
   const transactions = allTransactions.filter((t) => t.poId === poId);
   if (transactions.length > 0) {
