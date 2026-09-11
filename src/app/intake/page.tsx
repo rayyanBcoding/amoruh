@@ -12,6 +12,7 @@ const GROUPS: { title: string; statuses: PurchaseOrder["status"][] }[] = [
   { title: "Open", statuses: ["awaiting_delivery"] },
   { title: "Partially Received", statuses: ["partially_received"] },
   { title: "Completed", statuses: ["received", "closed"] },
+  { title: "Canceled", statuses: ["canceled"] },
 ];
 
 function POCard({ po }: { po: PurchaseOrder }) {

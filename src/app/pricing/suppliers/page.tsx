@@ -11,6 +11,7 @@ export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const load = () => {
     fetch("/api/pricing/suppliers")
@@ -41,7 +42,13 @@ export default function SuppliersPage() {
     <div className="min-h-screen">
       <Nav />
       <main className="mx-auto max-w-[900px] px-6 py-6">
-        <h1 className="mb-6 font-display text-2xl font-extrabold text-ld-white lg:text-3xl">Suppliers</h1>
+        <div className="mb-6 flex items-center justify-between">
+          <h1 className="font-display text-2xl font-extrabold text-ld-white lg:text-3xl">Suppliers</h1>
+          <label className="flex items-center gap-2 text-sm text-ld-muted">
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+            Show archived
+          </label>
+        </div>
 
         <div className="glass-panel mb-6 flex gap-3 rounded-2xl p-5">
           <input
@@ -57,22 +64,35 @@ export default function SuppliersPage() {
         </div>
 
         <div className="space-y-2">
-          {suppliers.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => router.push(`/pricing/suppliers/${s.id}`)}
-              className="glass-panel flex w-full items-center justify-between rounded-xl px-5 py-4 text-left hover:bg-ld-bg-elevated"
-            >
-              <div>
-                <p className="font-semibold text-ld-white">{s.name}</p>
-                <p className="text-xs text-ld-muted">
-                  {[s.country, s.defaultCurrency, s.orderingMethod].filter(Boolean).join(" · ") || "No profile details yet"}
-                </p>
-              </div>
-              <span className="text-ld-purple">→</span>
-            </button>
-          ))}
+          {suppliers
+            .filter((s) => showArchived || s.status !== "archived")
+            .map((s) => (
+              <button
+                key={s.id}
+                onClick={() => router.push(`/pricing/suppliers/${s.id}`)}
+                className="glass-panel flex w-full items-center justify-between rounded-xl px-5 py-4 text-left hover:bg-ld-bg-elevated"
+              >
+                <div>
+                  <p className="font-semibold text-ld-white">
+                    {s.name}
+                    {s.status === "archived" && (
+                      <span className="ml-2 rounded-full bg-ld-border/40 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-ld-muted">
+                        Archived
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-ld-muted">
+                    {[s.country, s.defaultCurrency, s.orderingMethod].filter(Boolean).join(" · ") || "No profile details yet"}
+                  </p>
+                </div>
+                <span className="text-ld-purple">→</span>
+              </button>
+            ))}
           {suppliers.length === 0 && <p className="text-sm text-ld-muted">No suppliers yet — add one above.</p>}
+          {suppliers.length > 0 &&
+            suppliers.filter((s) => showArchived || s.status !== "archived").length === 0 && (
+              <p className="text-sm text-ld-muted">No active suppliers — check &ldquo;Show archived&rdquo; above.</p>
+            )}
         </div>
       </main>
     </div>

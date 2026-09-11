@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
+import { ConfirmDangerAction } from "@/components/ConfirmDangerAction";
 import { POStatusBadge, LineStatusBadge, MatchBadge } from "@/components/intake/IntakeBadges";
 import { CreateProductModal } from "@/components/intake/CreateProductModal";
 import { formatCurrency, formatDate } from "@/lib/format";
@@ -27,6 +28,7 @@ interface Detail {
 
 export default function PODetailPage() {
   const params = useParams<{ poId: string }>();
+  const router = useRouter();
   const [detail, setDetail] = useState<Detail | null | undefined>(undefined);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +37,8 @@ export default function PODetailPage() {
   const [modalLineId, setModalLineId] = useState<string | null>(null);
   const [bulkCreating, setBulkCreating] = useState(false);
   const [bulkResult, setBulkResult] = useState<BulkCreateResultSummary | null>(null);
+  const [canceling, setCanceling] = useState(false);
+  const [deleteEligibility, setDeleteEligibility] = useState<{ eligible: boolean; reasons: string[] } | null>(null);
 
   const load = useCallback(() => {
     fetch(`/api/intake/pos/${params.poId}`)
@@ -44,6 +48,10 @@ export default function PODetailPage() {
         if (data) setShippingInput(String(data.po.shippingCost ?? 0));
       })
       .catch(() => setDetail(null));
+    fetch(`/api/intake/pos/${params.poId}/delete-eligibility`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => data && setDeleteEligibility(data))
+      .catch(() => {});
   }, [params.poId]);
 
   useEffect(() => {
@@ -128,6 +136,50 @@ export default function PODetailPage() {
     if (res.ok) load();
   };
 
+  // Preserves the PO, its lines, and any receiving history exactly as
+  // they are — never reverses inventory already received. If stock was
+  // received incorrectly, that's a job for the Inventory table's own
+  // adjustment control, not this action.
+  const cancelPO = async () => {
+    if (
+      !window.confirm(
+        "Cancel this PO? It will be preserved for the record along with any receiving history already on it — no inventory already received will be reversed."
+      )
+    ) {
+      return;
+    }
+    setCanceling(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/intake/pos/${params.poId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "canceled" }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? "Could not cancel this PO.");
+      }
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not cancel this PO.");
+    } finally {
+      setCanceling(false);
+    }
+  };
+
+  const deletePOPermanently = async () => {
+    setError(null);
+    const res = await fetch(`/api/intake/pos/${params.poId}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(data?.error ?? "Could not delete this purchase order.");
+      if (data?.reasons) setDeleteEligibility({ eligible: false, reasons: data.reasons });
+      return;
+    }
+    router.push("/intake");
+  };
+
   const productById = new Map(products.map((p) => [p.id, p]));
   const existingProductIds = new Set(products.map((p) => p.id));
   const reviewSummary = detail ? computePOReviewSummary(detail.lines, existingProductIds) : null;
@@ -198,7 +250,7 @@ export default function PODetailPage() {
                     </Button>
                   </a>
                 )}
-                {detail.po.status !== "closed" && (
+                {detail.po.status !== "closed" && detail.po.status !== "canceled" && (
                   <>
                     <Link href={`/intake/${params.poId}/receive`}>
                       <Button variant="primary" size="md">
@@ -207,6 +259,9 @@ export default function PODetailPage() {
                     </Link>
                     <Button variant="ghost" size="md" onClick={reviewClose}>
                       Review / Close PO
+                    </Button>
+                    <Button variant="outline" size="md" disabled={canceling} onClick={cancelPO}>
+                      {canceling ? "Canceling…" : "Cancel PO"}
                     </Button>
                   </>
                 )}
@@ -243,7 +298,7 @@ export default function PODetailPage() {
                     accent={readyToCreateCount > 0 ? "text-ld-cyan" : undefined}
                   />
                 </div>
-                {readyToCreateCount > 0 && detail.po.status !== "closed" && (
+                {readyToCreateCount > 0 && detail.po.status !== "closed" && detail.po.status !== "canceled" && (
                   <Button variant="cyan" size="md" disabled={bulkCreating} onClick={runBulkCreate}>
                     {bulkCreating ? "Creating…" : `Create ${readyToCreateCount} New Product${readyToCreateCount === 1 ? "" : "s"}`}
                   </Button>
@@ -357,6 +412,21 @@ export default function PODetailPage() {
                 </table>
               </div>
             </div>
+
+            <div className="glass-panel mt-6 rounded-2xl p-5">
+              <h2 className="mb-4 font-display text-lg font-bold text-ld-white">Danger Zone</h2>
+              {deleteEligibility === null ? (
+                <p className="text-sm text-ld-muted">Checking delete eligibility…</p>
+              ) : (
+                <ConfirmDangerAction
+                  label="Delete Permanently"
+                  confirmMessage={`Permanently delete PO "${detail.po.poNumber}"? This cannot be undone.`}
+                  blockedReasons={deleteEligibility.eligible ? undefined : deleteEligibility.reasons}
+                  blockedAlternativeLabel="Cancel PO"
+                  onConfirm={deletePOPermanently}
+                />
+              )}
+            </div>
           </>
         )}
       </main>
@@ -415,11 +485,11 @@ function FreightSummary({
             step="0.01"
             value={shippingInput}
             onChange={(e) => setShippingInput(e.target.value)}
-            disabled={po.status === "closed"}
+            disabled={po.status === "closed" || po.status === "canceled"}
             className="w-40 rounded-lg border border-ld-border bg-ld-bg-elevated px-3 py-2 text-ld-white outline-none focus:border-ld-purple disabled:opacity-50"
           />
         </div>
-        {po.status !== "closed" && (
+        {po.status !== "closed" && po.status !== "canceled" && (
           <Button variant="outline" size="md" disabled={saving} onClick={onSave}>
             {saving ? "Saving…" : "Save"}
           </Button>

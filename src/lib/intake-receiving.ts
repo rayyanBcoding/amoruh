@@ -105,7 +105,10 @@ function growOrCreateLot(
 }
 
 function recomputePOStatus(po: PurchaseOrder, totalReceivedQty: number, totalExpectedQty: number): PurchaseOrder["status"] {
-  if (po.status === "closed") return "closed";
+  // "closed" and "canceled" are both manually-set terminal states — never
+  // auto-revert either one. See the identical lock in
+  // recomputePOFromLines (intake-db.ts).
+  if (po.status === "closed" || po.status === "canceled") return po.status;
   if (totalReceivedQty === 0) return "awaiting_delivery";
   if (totalReceivedQty >= totalExpectedQty) return "received";
   return "partially_received";
@@ -171,7 +174,9 @@ export async function receiveAgainstLine(input: ReceiveInput): Promise<Receiving
 
   const [po, lines, products] = await Promise.all([getPO(input.poId), getPOLines(input.poId), getProducts()]);
   if (!po) throw new ReceivingError("Purchase order not found.", 404);
-  if (po.status === "closed") throw new ReceivingError("This PO is closed and can't receive more inventory.");
+  if (po.status === "closed" || po.status === "canceled") {
+    throw new ReceivingError(`This PO is ${po.status} and can't receive more inventory.`);
+  }
 
   const lineIdx = lines.findIndex((l) => l.id === input.poLineId);
   if (lineIdx === -1) throw new ReceivingError("Line not found on this PO.", 404);
@@ -394,7 +399,7 @@ export async function receiveUnexpectedItem(input: ReceiveUnexpectedInput): Prom
 
   const [po, lines, products] = await Promise.all([getPO(input.poId), getPOLines(input.poId), getProducts()]);
   if (!po) throw new ReceivingError("Purchase order not found.", 404);
-  if (po.status === "closed") throw new ReceivingError("This PO is closed.");
+  if (po.status === "closed" || po.status === "canceled") throw new ReceivingError(`This PO is ${po.status}.`);
 
   const product = products.find((p) => p.id === input.productId);
   if (!product) throw new ReceivingError("Product not found.", 404);
@@ -484,7 +489,7 @@ export async function receiveAll(input: ReceiveAllInput): Promise<ReceiveAllResu
 
   const [po, lines, products] = await Promise.all([getPO(input.poId), getPOLines(input.poId), getProducts()]);
   if (!po) throw new ReceivingError("Purchase order not found.", 404);
-  if (po.status === "closed") throw new ReceivingError("This PO is closed.");
+  if (po.status === "closed" || po.status === "canceled") throw new ReceivingError(`This PO is ${po.status}.`);
 
   // A line only counts as confirmed if its productId is set AND that
   // product still exists — a stale/dangling productId (the product it

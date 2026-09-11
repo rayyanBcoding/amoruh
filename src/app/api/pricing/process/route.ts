@@ -46,6 +46,12 @@ export async function POST(req: Request) {
 
   const supplier = await getSupplier(body.supplierId);
   if (!supplier) return NextResponse.json({ error: "Supplier not found." }, { status: 404 });
+  if (supplier.status === "archived") {
+    return NextResponse.json(
+      { error: `Supplier "${supplier.name}" is archived — restore it before uploading a new price list.` },
+      { status: 409 }
+    );
+  }
 
   // Persist the confirmed triple as the remembered mapping — this IS
   // the same object being applied below, not a separate copy that could
