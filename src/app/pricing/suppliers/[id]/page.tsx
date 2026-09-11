@@ -1,11 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState, use } from "react";
+import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
+import { ConfirmDangerAction } from "@/components/ConfirmDangerAction";
 import type { Supplier, SupplierColumnMapping } from "@/lib/intake-types";
 import type { SupplierPriceUpload, SupplierRawRow } from "@/lib/pricing-types";
+
+const EDITABLE_FIELDS: [keyof Supplier, string, string?][] = [
+  ["name", "Supplier Name"],
+  ["contactPerson", "Contact Name"],
+  ["email", "Email"],
+  ["whatsapp", "Phone / WhatsApp"],
+  ["website", "Website"],
+  ["country", "Country"],
+  ["defaultCurrency", "Currency"],
+  ["notes", "Notes (also used for payment / ordering notes)"],
+];
 
 type Stage = "idle" | "uploading" | "mapping" | "preview" | "processing" | "done";
 
@@ -43,12 +56,19 @@ function columnLabel(col: ColumnPreview | undefined): string {
 
 export default function SupplierDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [uploads, setUploads] = useState<SupplierPriceUpload[]>([]);
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState<Partial<Supplier>>({});
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [deleteEligibility, setDeleteEligibility] = useState<{ eligible: boolean; reasons: string[] } | null>(null);
 
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [filename, setFilename] = useState("");
@@ -77,9 +97,82 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
         }
       })
       .catch(() => {});
+    fetch(`/api/pricing/suppliers/${id}/delete-eligibility`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => data && setDeleteEligibility(data))
+      .catch(() => {});
   };
 
   useEffect(load, [id]);
+
+  const startEdit = () => {
+    if (!supplier) return;
+    setEditForm({
+      name: supplier.name,
+      contactPerson: supplier.contactPerson ?? "",
+      email: supplier.email ?? "",
+      whatsapp: supplier.whatsapp ?? "",
+      website: supplier.website ?? "",
+      country: supplier.country ?? "",
+      defaultCurrency: supplier.defaultCurrency ?? "",
+      notes: supplier.notes ?? "",
+      orderingMethod: supplier.orderingMethod,
+    });
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    setSavingEdit(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/pricing/suppliers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Could not save changes.");
+      setSupplier(data);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save changes.");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const toggleArchive = async () => {
+    if (!supplier) return;
+    const nextStatus = supplier.status === "archived" ? "active" : "archived";
+    setArchiving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/pricing/suppliers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Could not update status.");
+      setSupplier(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update status.");
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const deleteSupplierPermanently = async () => {
+    setError(null);
+    const res = await fetch(`/api/pricing/suppliers/${id}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(data?.error ?? "Could not delete this supplier.");
+      if (data?.reasons) setDeleteEligibility({ eligible: false, reasons: data.reasons });
+      return;
+    }
+    router.push("/pricing/suppliers");
+  };
 
   const columnAt = (idx: number | undefined) => columns.find((c) => c.index === idx);
 
@@ -247,12 +340,81 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
     <div className="min-h-screen">
       <Nav />
       <main className="mx-auto max-w-[1100px] px-6 py-6">
-        <h1 className="mb-1 font-display text-2xl font-extrabold text-ld-white lg:text-3xl">{supplier.name}</h1>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="font-display text-2xl font-extrabold text-ld-white lg:text-3xl">
+            {supplier.name}
+            {supplier.status === "archived" && (
+              <span className="ml-3 rounded-full bg-ld-border/40 px-2.5 py-1 align-middle text-xs font-semibold uppercase tracking-wide text-ld-muted">
+                Archived
+              </span>
+            )}
+          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="md" onClick={startEdit}>
+              Edit
+            </Button>
+            <Button variant="outline" size="md" disabled={archiving} onClick={toggleArchive}>
+              {archiving ? "Saving…" : supplier.status === "archived" ? "Restore Supplier" : "Archive Supplier"}
+            </Button>
+          </div>
+        </div>
         <p className="mb-6 text-sm text-ld-muted">
           {[supplier.country, supplier.defaultCurrency, supplier.orderingMethod].filter(Boolean).join(" · ") || "No profile details yet"}
         </p>
 
         {error && <div className="glass-panel mb-6 rounded-xl border border-ld-red/30 p-4 text-sm text-ld-red">{error}</div>}
+
+        {editing && (
+          <div className="glass-panel mb-6 rounded-2xl p-5">
+            <h2 className="mb-4 font-display text-lg font-bold text-ld-white">Edit Supplier</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {EDITABLE_FIELDS.map(([field, label]) => (
+                <div key={field}>
+                  <label className="mb-1 block text-[11px] font-bold uppercase tracking-widest text-ld-muted">{label}</label>
+                  <input
+                    value={(editForm[field] as string) ?? ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, [field]: e.target.value }))}
+                    className="w-full rounded-lg border border-ld-border bg-ld-bg-elevated px-3 py-2 text-sm text-ld-white outline-none focus:border-ld-purple"
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="mb-1 block text-[11px] font-bold uppercase tracking-widest text-ld-muted">Ordering Method</label>
+                <select
+                  value={editForm.orderingMethod ?? ""}
+                  onChange={(e) =>
+                    setEditForm((f) => ({
+                      ...f,
+                      orderingMethod: (e.target.value || undefined) as Supplier["orderingMethod"],
+                    }))
+                  }
+                  className="w-full rounded-lg border border-ld-border bg-ld-bg-elevated px-3 py-2 text-sm text-ld-white outline-none focus:border-ld-purple"
+                >
+                  <option value="">— None —</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="email">Email</option>
+                  <option value="portal">Portal</option>
+                  <option value="excel">Excel</option>
+                  <option value="phone_agent">Phone Agent</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="ghost" disabled={savingEdit} onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" disabled={savingEdit} onClick={saveEdit}>
+                {savingEdit ? "Saving…" : "Save Changes"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {supplier.status === "archived" && (
+          <div className="glass-panel mb-6 rounded-2xl border border-ld-amber/30 bg-ld-amber/10 p-4 text-sm text-ld-amber">
+            This supplier is archived — it won&apos;t accept new price-list uploads or purchase orders until restored.
+          </div>
+        )}
 
         <div className="glass-panel mb-6 rounded-2xl p-5">
           <h2 className="mb-4 font-display text-lg font-bold text-ld-white">Upload Price List</h2>
@@ -264,6 +426,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 className="hidden"
+                disabled={supplier.status === "archived"}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) void handleFile(file);
@@ -271,7 +434,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                 }}
               />
               <p className="mb-4 text-sm text-ld-muted">Upload this supplier&apos;s Excel or CSV price list.</p>
-              <Button variant="primary" size="lg" onClick={() => inputRef.current?.click()}>
+              <Button variant="primary" size="lg" disabled={supplier.status === "archived"} onClick={() => inputRef.current?.click()}>
                 Choose File
               </Button>
             </div>
@@ -494,6 +657,21 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                 </div>
               ))}
             </div>
+          )}
+        </div>
+
+        <div className="glass-panel mt-6 rounded-2xl p-5">
+          <h2 className="mb-4 font-display text-lg font-bold text-ld-white">Danger Zone</h2>
+          {deleteEligibility === null ? (
+            <p className="text-sm text-ld-muted">Checking delete eligibility…</p>
+          ) : (
+            <ConfirmDangerAction
+              label="Delete Permanently"
+              confirmMessage={`Permanently delete supplier "${supplier.name}"? This cannot be undone.`}
+              blockedReasons={deleteEligibility.eligible ? undefined : deleteEligibility.reasons}
+              blockedAlternativeLabel="Archive Supplier"
+              onConfirm={deleteSupplierPermanently}
+            />
           )}
         </div>
       </main>

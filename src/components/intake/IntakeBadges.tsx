@@ -6,6 +6,7 @@ const PO_STATUS_STYLES: Record<POStatus, string> = {
   partially_received: "bg-ld-cyan/15 text-ld-cyan ring-ld-cyan/40",
   received: "bg-ld-green/15 text-ld-green ring-ld-green/40",
   closed: "bg-ld-border/40 text-ld-muted ring-ld-border",
+  canceled: "bg-ld-red/15 text-ld-red ring-ld-red/40",
 };
 
 const PO_STATUS_LABELS: Record<POStatus, string> = {
@@ -13,6 +14,7 @@ const PO_STATUS_LABELS: Record<POStatus, string> = {
   partially_received: "Partially Received",
   received: "Received",
   closed: "Closed",
+  canceled: "Canceled",
 };
 
 export function POStatusBadge({ status }: { status: POStatus }) {

@@ -1,3 +1,4 @@
+import { del } from "@vercel/blob";
 import { redis } from "./kv";
 import { computeCostBreakdown, computeWeightedAverageLandedCost } from "./intake-costing";
 import type {
@@ -84,6 +85,20 @@ export async function updateSupplier(id: string, patch: Partial<Supplier>): Prom
   return suppliers[idx];
 }
 
+/** Hard-deletes a supplier. The caller (the DELETE route) is responsible
+ *  for re-verifying eligibility immediately before calling this — never
+ *  trust a prior GET /delete-eligibility result — since this function
+ *  itself does no reference checking. A supplier with any uploads,
+ *  committed offers, aliases, or POs must never reach here; Archive is
+ *  the safe alternative for those (see updateSupplier above). */
+export async function deleteSupplier(id: string): Promise<boolean> {
+  const suppliers = await getSuppliers();
+  const next = suppliers.filter((s) => s.id !== id);
+  if (next.length === suppliers.length) return false;
+  await redis.set(KEYS.suppliers, next);
+  return true;
+}
+
 // ---------------------------------------------------------------------
 // Purchase Orders
 // ---------------------------------------------------------------------
@@ -135,6 +150,38 @@ async function createInvoiceDocument(blobUrl: string, filename: string, poId: st
   return doc;
 }
 
+/** Hard-deletes an InvoiceDocument record and — only when no OTHER
+ *  document shares the same blobUrl — the underlying Vercel Blob file
+ *  itself. Every InvoiceDocument is created 1:1 with its owning PO right
+ *  here in this file (createInvoiceDocument is called from exactly one
+ *  place, createPOFromReview, with a freshly-uploaded blobUrl) and never
+ *  re-linked to a second PO anywhere in the codebase, so this should
+ *  always be exclusive — the shared-URL check is defense in depth, not
+ *  an expected case. Never deletes a blob that might still be
+ *  referenced by another document. Only called from deletePO, which has
+ *  already re-verified the PO is eligible for hard delete. */
+async function deleteInvoiceDocument(id: string): Promise<void> {
+  const docs = await getInvoiceDocuments();
+  const doc = docs.find((d) => d.id === id);
+  if (!doc) return;
+
+  const sharedByAnotherDoc = docs.some((d) => d.id !== id && d.blobUrl === doc.blobUrl);
+  if (!sharedByAnotherDoc) {
+    try {
+      await del(doc.blobUrl);
+    } catch (err) {
+      // Best-effort — an already-missing/unreachable blob shouldn't block
+      // deleting the PO's own records.
+      console.error(`deleteInvoiceDocument: failed to delete blob for document ${id}`, err);
+    }
+  }
+
+  await redis.set(
+    KEYS.documents,
+    docs.filter((d) => d.id !== id)
+  );
+}
+
 // ---------------------------------------------------------------------
 // Creating a PO from a confirmed Review screen — the point where an
 // ExtractedPO + human-confirmed matches become real, persisted records.
@@ -152,6 +199,11 @@ export async function createPOFromReview(input: {
 }): Promise<PurchaseOrder> {
   const { extracted, lines, resolvedProductIds, blobUrl, filename } = input;
   const supplier = await getOrCreateSupplier(extracted.supplierName);
+  if (supplier.status === "archived") {
+    throw new Error(
+      `Supplier "${supplier.name}" is archived — restore it, or correct the supplier name on this PO, before creating it.`
+    );
+  }
 
   const poId = newId("po");
   const now = new Date().toISOString();
@@ -235,8 +287,12 @@ export async function recomputePOFromLines(poId: string): Promise<PurchaseOrder 
   const totalExpectedQty = lines.reduce((sum, l) => sum + l.expectedQty, 0);
   const totalReceivedQty = lines.reduce((sum, l) => sum + l.receivedQty, 0);
 
+  // "closed" and "canceled" are both manually-set terminal states — never
+  // auto-revert either one just because line totals were recomputed
+  // (e.g. after a late line-match). See recomputePOStatus in
+  // intake-receiving.ts for the identical lock on the receiving path.
   let status: POStatus = pos[idx].status;
-  if (status !== "closed") {
+  if (status !== "closed" && status !== "canceled") {
     if (totalReceivedQty === 0) status = "awaiting_delivery";
     else if (totalReceivedQty >= totalExpectedQty) status = "received";
     else status = "partially_received";
@@ -245,6 +301,27 @@ export async function recomputePOFromLines(poId: string): Promise<PurchaseOrder 
   pos[idx] = { ...pos[idx], totalExpectedQty, totalReceivedQty, lineCount: lines.length, status };
   await savePOs(pos);
   return pos[idx];
+}
+
+/** Hard-deletes a PO that has never been touched by receiving. The
+ *  caller (the DELETE route) is responsible for re-verifying eligibility
+ *  immediately before calling this — never trust a prior GET
+ *  /delete-eligibility result — since this function itself does no
+ *  reference checking. Removes the PO, its lines key, and its invoice
+ *  document (+ underlying blob file — see deleteInvoiceDocument). A PO
+ *  with any receiving history must never reach here; Cancel PO is the
+ *  safe alternative for those. */
+export async function deletePO(poId: string): Promise<boolean> {
+  const pos = await getPOs();
+  const po = pos.find((p) => p.id === poId);
+  if (!po) return false;
+
+  if (po.invoiceDocumentId) {
+    await deleteInvoiceDocument(po.invoiceDocumentId);
+  }
+  await redis.del(KEYS.poLines(poId));
+  await savePOs(pos.filter((p) => p.id !== poId));
+  return true;
 }
 
 function numberOrZero(value: unknown): number {
@@ -270,6 +347,17 @@ export async function getAllProductIdsWithLots(): Promise<string[]> {
   const lotKeys = await redis.keys("amoruh:intake:lots:*");
   const prefix = "amoruh:intake:lots:";
   return lotKeys.map((k) => k.slice(prefix.length));
+}
+
+/** Every InventoryLot that originated from this PO, across every product
+ *  it shipped — used only by the PO delete-eligibility check. Hard
+ *  delete is only ever offered for a PO with zero receiving history, so
+ *  this scan (mirroring getAllProductIdsWithLots's own approach) is rare
+ *  and small, never a hot path. */
+export async function getLotsForPO(poId: string): Promise<InventoryLot[]> {
+  const productIds = await getAllProductIdsWithLots();
+  const allLots = await Promise.all(productIds.map(getLotsForProduct));
+  return allLots.flat().filter((lot) => lot.poId === poId);
 }
 
 // ---------------------------------------------------------------------

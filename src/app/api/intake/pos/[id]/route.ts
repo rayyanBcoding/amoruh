@@ -7,7 +7,9 @@ import {
   savePOLines,
   updatePOStatus,
   updatePOShippingCost,
+  deletePO,
 } from "@/lib/intake-db";
+import { checkPODeleteEligibility } from "@/lib/po-delete";
 import type { POStatus } from "@/lib/intake-types";
 
 export const dynamic = "force-dynamic";
@@ -68,4 +70,27 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const updated = await recomputePOFromLines(id);
   return NextResponse.json({ po: updated });
+}
+
+// DELETE /api/intake/pos/[id] — hard delete. Re-runs the exact same
+// eligibility check the GET .../delete-eligibility route offers as a
+// preview — never trusts that a client-side confirm already checked it.
+// Blocked (409, with reasons) whenever the PO has ANY receiving history;
+// Cancel PO (PATCH { status: "canceled" }) is the safe alternative for
+// those. See src/lib/po-delete.ts for exactly what's checked.
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const po = await getPO(id);
+  if (!po) return NextResponse.json({ error: "Purchase order not found." }, { status: 404 });
+
+  const { eligible, reasons } = await checkPODeleteEligibility(id);
+  if (!eligible) {
+    return NextResponse.json(
+      { error: "This PO has receiving history and can't be permanently deleted. Cancel it instead.", reasons },
+      { status: 409 }
+    );
+  }
+
+  await deletePO(id);
+  return NextResponse.json({ ok: true });
 }

@@ -10,7 +10,14 @@ export type POStatus =
   | "awaiting_delivery"
   | "partially_received"
   | "received"
-  | "closed";
+  | "closed"
+  /** Manually canceled — preserves the PO, its lines, and any receiving
+   *  history exactly as-is; never auto-reverted by recomputePOFromLines
+   *  or recomputePOStatus (both explicitly lock it, same as "closed"),
+   *  and receiving is blocked against it the same way it already is for
+   *  "closed". Does NOT reverse any inventory already received — see
+   *  the "Cancel PO" UI copy in src/app/intake/[poId]/page.tsx. */
+  | "canceled";
 
 export type POLineStatus =
   | "pending"
@@ -77,6 +84,11 @@ export interface Supplier {
   /** Pre-selected (but always still editable) choice on the upload
    *  screen — most suppliers consistently send one or the other. */
   defaultUploadType?: "full" | "partial";
+  /** Undefined/"active" is the default — most suppliers never set this
+   *  explicitly. "archived" hides the supplier from the default list
+   *  view and blocks new uploads/POs against it until restored; it is
+   *  never inferred from anything else (no auto-archiving). */
+  status?: "active" | "archived";
 }
 
 export interface InvoiceDocument {
