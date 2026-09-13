@@ -12,6 +12,7 @@ export default function SuppliersPage() {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [possibleDuplicate, setPossibleDuplicate] = useState<{ id: string; name: string } | null>(null);
 
   const load = () => {
     fetch("/api/pricing/suppliers")
@@ -22,17 +23,22 @@ export default function SuppliersPage() {
 
   useEffect(load, []);
 
-  const createSupplier = async () => {
+  const createSupplier = async (confirmCreateAnyway = false) => {
     if (!newName.trim()) return;
     setCreating(true);
+    setPossibleDuplicate(null);
     try {
       const res = await fetch("/api/pricing/suppliers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName }),
+        body: JSON.stringify({ name: newName, confirmCreateAnyway }),
       });
-      const supplier = await res.json();
-      if (res.ok) router.push(`/pricing/suppliers/${supplier.id}`);
+      const data = await res.json();
+      if (res.status === 409 && data.possibleDuplicate) {
+        setPossibleDuplicate(data.possibleDuplicate);
+        return;
+      }
+      if (res.ok) router.push(`/pricing/suppliers/${data.id}`);
     } finally {
       setCreating(false);
     }
@@ -50,17 +56,37 @@ export default function SuppliersPage() {
           </label>
         </div>
 
-        <div className="glass-panel mb-6 flex gap-3 rounded-2xl p-5">
-          <input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && createSupplier()}
-            placeholder="New supplier name (e.g. Jizan)"
-            className="flex-1 rounded-xl border border-ld-border bg-ld-bg-elevated px-4 py-2.5 text-sm text-ld-white placeholder:text-ld-muted/60 outline-none focus:border-ld-purple"
-          />
-          <Button variant="primary" disabled={creating || !newName.trim()} onClick={createSupplier}>
-            {creating ? "Creating…" : "Add Supplier"}
-          </Button>
+        <div className="glass-panel mb-6 rounded-2xl p-5">
+          <div className="flex gap-3">
+            <input
+              value={newName}
+              onChange={(e) => {
+                setNewName(e.target.value);
+                setPossibleDuplicate(null);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && createSupplier()}
+              placeholder="New supplier name (e.g. Jizan)"
+              className="flex-1 rounded-xl border border-ld-border bg-ld-bg-elevated px-4 py-2.5 text-sm text-ld-white placeholder:text-ld-muted/60 outline-none focus:border-ld-purple"
+            />
+            <Button variant="primary" disabled={creating || !newName.trim()} onClick={() => createSupplier()}>
+              {creating ? "Creating…" : "Add Supplier"}
+            </Button>
+          </div>
+          {possibleDuplicate && (
+            <div className="mt-3 rounded-xl border border-ld-amber/30 bg-ld-amber/10 p-4 text-sm">
+              <p className="mb-2 font-semibold text-ld-amber">
+                Possible existing supplier: {possibleDuplicate.name}
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="md" onClick={() => router.push(`/pricing/suppliers/${possibleDuplicate.id}`)}>
+                  Use Existing Supplier
+                </Button>
+                <Button variant="ghost" size="md" disabled={creating} onClick={() => createSupplier(true)}>
+                  Create New Supplier Anyway
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="space-y-2">
