@@ -43,7 +43,7 @@ interface MatchPreviewSummary {
   matchedReferenceProduct: number;
   proposedNewMasterProducts: number;
   requiresReview: number;
-  unsupported: number;
+  nonProductRows: number;
 }
 
 interface ImportAnomalyAssessment {
@@ -631,12 +631,12 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                     What This Upload Would Do (matching-level, before you commit)
                   </p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                    <PreviewStat label="Valid Product Rows" value={matchPreview.totalRows} />
-                    <PreviewStat label="Matched Existing Product" value={matchPreview.matchedProduct} accent="text-ld-green" />
-                    <PreviewStat label="Matched Master Product" value={matchPreview.matchedReferenceProduct} accent="text-ld-cyan" />
-                    <PreviewStat label="Proposed New Master Products" value={matchPreview.proposedNewMasterProducts} accent="text-ld-purple" />
+                    <PreviewStat label="Total Rows" value={matchPreview.totalRows} />
+                    <PreviewStat label="Linked to Existing Product" value={matchPreview.matchedProduct} accent="text-ld-green" />
+                    <PreviewStat label="Linked to Existing Master Product" value={matchPreview.matchedReferenceProduct} accent="text-ld-cyan" />
+                    <PreviewStat label="New Master Products (Auto-Created)" value={matchPreview.proposedNewMasterProducts} accent="text-ld-purple" />
                     <PreviewStat label="Requires Review" value={matchPreview.requiresReview} accent="text-ld-amber" />
-                    <PreviewStat label="Unsupported / Non-Product" value={matchPreview.unsupported} />
+                    <PreviewStat label="Non-Product Rows (Skipped)" value={matchPreview.nonProductRows} />
                   </div>
                 </div>
               )}
@@ -678,9 +678,15 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
             <div className="space-y-3">
               <p className="text-sm text-ld-white">
                 Processed <span className="font-semibold">{result.totalRows}</span> rows —{" "}
-                <span className="font-semibold text-ld-green">{result.autoMatched} auto-matched</span>,{" "}
-                <span className="font-semibold text-ld-amber">{result.needsReview} need review</span>,{" "}
-                <span className="font-semibold text-ld-cyan">{result.newCandidates} new candidates</span>.
+                <span className="font-semibold text-ld-green">{result.autoMatched} linked to existing products</span>,{" "}
+                <span className="font-semibold text-ld-purple">{result.autoCreated} new Master Products created</span>,{" "}
+                <span className="font-semibold text-ld-amber">{result.needsReview} genuine ambiguities sent to review</span>
+                {result.notAProduct > 0 && (
+                  <>
+                    , <span className="font-semibold text-ld-muted">{result.notAProduct} non-product rows skipped</span>
+                  </>
+                )}
+                .
               </p>
               <Button variant="outline" onClick={reset}>
                 Upload Another File

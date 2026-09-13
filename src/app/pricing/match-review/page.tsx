@@ -11,9 +11,13 @@ import type { Product } from "@/lib/types";
 
 const PAGE_SIZE = 50;
 
+// No "New Product Candidates" tab — "no existing match" resolves into
+// one of these two at processing time (see pricing-process.ts). A
+// structurally-complete row auto-creates and lands in Matched
+// immediately; anything genuinely ambiguous or incomplete lands here in
+// Review Required, with the exact same Track/Link actions either way.
 const TABS: { key: MatchReviewBucket; label: string }[] = [
   { key: "review_required", label: "Review Required" },
-  { key: "new_candidates", label: "New Product Candidates" },
   { key: "matched", label: "Matched" },
 ];
 
@@ -84,7 +88,6 @@ function LinkTrackedItemSearch({ onPick, disabled }: { onPick: (referenceProduct
 
 export default function MatchReviewPage() {
   const [bucket, setBucket] = useState<MatchReviewBucket>("review_required");
-  const [tracked, setTracked] = useState(false); // sub-view within new_candidates
   const [search, setSearch] = useState("");
   const [items, setItems] = useState<MatchReviewItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -108,7 +111,6 @@ export default function MatchReviewPage() {
     Promise.resolve().then(() => setLoading(true));
     const params = new URLSearchParams({ bucket, offset: String(offset), limit: String(PAGE_SIZE) });
     if (search.trim()) params.set("search", search.trim());
-    if (bucket === "new_candidates") params.set("tracked", String(tracked));
     fetch(`/api/pricing/match-review?${params}`)
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
       .then(({ ok, data }) => {
@@ -125,7 +127,7 @@ export default function MatchReviewPage() {
   useEffect(() => {
     loadPage(0, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bucket, tracked]);
+  }, [bucket]);
 
   useEffect(() => {
     fetch("/api/products")
@@ -214,9 +216,6 @@ export default function MatchReviewPage() {
                 <span className="text-ld-green">{s.matched} matched</span>
                 {" · "}
                 <span className={s.reviewRequired > 0 ? "font-semibold text-ld-amber" : ""}>{s.reviewRequired} review</span>
-                {" · "}
-                <span className="text-ld-cyan">{s.newCandidatesUntracked.toLocaleString()} new</span>
-                {s.newCandidatesTracked > 0 && <span className="text-ld-muted"> ({s.newCandidatesTracked.toLocaleString()} tracked)</span>}
               </span>
             ))}
           </div>
@@ -224,20 +223,11 @@ export default function MatchReviewPage() {
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
           {TABS.map((t) => {
-            const count = summary
-              ? t.key === "review_required"
-                ? summary.reviewRequired
-                : t.key === "new_candidates"
-                  ? summary.newCandidatesUntracked
-                  : summary.matched
-              : null;
+            const count = summary ? (t.key === "review_required" ? summary.reviewRequired : summary.matched) : null;
             return (
               <button
                 key={t.key}
-                onClick={() => {
-                  setBucket(t.key);
-                  setTracked(false);
-                }}
+                onClick={() => setBucket(t.key)}
                 className={`rounded-lg px-4 py-2 text-sm font-semibold ${bucket === t.key ? "bg-ld-purple text-ld-white" : "bg-ld-bg-elevated text-ld-muted hover:text-ld-white"}`}
               >
                 {t.label}
@@ -246,29 +236,6 @@ export default function MatchReviewPage() {
             );
           })}
         </div>
-
-        {bucket === "new_candidates" && (
-          <>
-            <div className="mb-4 flex gap-1">
-              <button
-                onClick={() => setTracked(false)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-bold uppercase tracking-wide ${!tracked ? "bg-ld-cyan/20 text-ld-cyan" : "text-ld-muted hover:text-ld-white"}`}
-              >
-                Untracked{summary && ` (${summary.newCandidatesUntracked.toLocaleString()})`}
-              </button>
-              <button
-                onClick={() => setTracked(true)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-bold uppercase tracking-wide ${tracked ? "bg-ld-cyan/20 text-ld-cyan" : "text-ld-muted hover:text-ld-white"}`}
-              >
-                📎 Tracked for Pricing{summary && ` (${summary.newCandidatesTracked.toLocaleString()})`}
-              </button>
-            </div>
-            <p className="mb-4 text-sm text-ld-muted">
-              These supplier listings simply don&apos;t match anything in your catalog yet — not urgent, nothing to decide. Track
-              one for pricing to name it and compare it across suppliers, without ever adding it to Inventory.
-            </p>
-          </>
-        )}
 
         <div className="mb-4 flex gap-2">
           <input
@@ -363,32 +330,6 @@ export default function MatchReviewPage() {
                         </Button>
                       </div>
                     </>
-                  )}
-
-                  {bucket === "new_candidates" && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <select
-                        disabled={busy}
-                        value=""
-                        onChange={(e) => e.target.value && resolve(item, { action: "link", productId: e.target.value })}
-                        className="rounded-lg border border-ld-border bg-ld-bg-elevated px-3 py-2 text-xs text-ld-white outline-none focus:border-ld-purple"
-                      >
-                        <option value="">Link to Existing Inventory Product…</option>
-                        {products.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.sku} — {p.brand} {p.name} ({p.size})
-                          </option>
-                        ))}
-                      </select>
-                      {!trackedLabel && (
-                        <>
-                          <Button variant="outline" size="md" disabled={busy} onClick={() => setTrackModalFor(item)}>
-                            📎 Track for Pricing
-                          </Button>
-                          <LinkTrackedItemSearch disabled={busy} onPick={(refId) => linkTrackedItem(item, refId)} />
-                        </>
-                      )}
-                    </div>
                   )}
                 </div>
               );

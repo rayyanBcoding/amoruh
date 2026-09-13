@@ -5,6 +5,18 @@
 // "MasterProduct" table. See src/lib/pricing-db.ts for the
 // generation/commit storage model these types are read/written through.
 
+// Phase 1 operating-model correction: "no existing match" is NOT itself
+// a review state. A structurally-complete row auto-creates its Master
+// Product and is "matched" immediately, same as any other row — see
+// pricing-process.ts. Every legitimate row ends up in exactly one of
+// two places: matched, or needs_review because the exact SKU is
+// genuinely ambiguous/incomplete. "new_candidate" is kept in this union
+// ONLY as legacy technical debt for pre-migration historical data — no
+// code path should assign it to a NEW row going forward, and it is
+// invisible everywhere in Match Review (see pricing-db.ts's bucketOf)
+// until the one-time backlog migration reclassifies it into one of the
+// two real states. Remove it from this union entirely once that
+// migration has run and no committed offer anywhere still carries it.
 export type ReviewStatus =
   | "auto_matched"
   | "needs_review"
@@ -12,7 +24,13 @@ export type ReviewStatus =
   | "alias_conflict"
   | "barcode_conflict"
   | "confirmed"
-  | "ignored";
+  | "ignored"
+  /** Not a real product row at all — a header, note, total/subtotal/
+   *  shipping line, or blank/category row that survived parsing. Never
+   *  shown in Match Review, never auto-created, never counted toward
+   *  any operational bucket — see isValidProductRow (pricing-matching.ts)
+   *  and the nonProductRows import-summary count. */
+  | "not_a_product";
 
 export type OfferMatchType =
   | "alias"
@@ -170,9 +188,26 @@ export interface SupplierPriceUpload {
   seq: number;
   totalRows: number;
   processedRows: number;
+  /** Linked to an ALREADY-EXISTING Master Product or real Product —
+   *  excludes rows that resolved by auto-creating a brand-new one (see
+   *  autoCreated) even though both are the SAME reviewStatus
+   *  ("auto_matched") on the offer itself; this split is audit-only. */
   autoMatched: number;
+  /** A brand-new Master Product was auto-created for this row — an
+   *  expected, routine outcome of onboarding new supplier catalog, never
+   *  an error or a queue. Audit-only, same reasoning as autoMatched. */
+  autoCreated: number;
   needsReview: number;
+  /** @deprecated Legacy pre-correction field — a row with no existing
+   *  match used to sit here indefinitely regardless of whether it was a
+   *  complete, auto-createable SKU. Always 0 for uploads processed under
+   *  the corrected model (every row now resolves to autoMatched/
+   *  autoCreated/needsReview/notAProduct); kept only so historical
+   *  upload records remain readable. */
   newCandidates: number;
+  /** A header/note/total/shipping/blank/category row — not a real
+   *  product at all. Never enters Match Review, never auto-created. */
+  notAProduct: number;
   startedAt: string;
   completedAt: string | null;
   error: string | null;
@@ -219,10 +254,13 @@ export interface MatchReviewItem {
   referenceProductId: string | null;
 }
 
-/** The three operational buckets a CURRENTLY LISTED offer can fall
- *  into — a delisted offer (currentlyListed: false) is excluded from
- *  all of them entirely, see getMatchReviewSummary. */
-export type MatchReviewBucket = "review_required" | "new_candidates" | "matched";
+/** The two operational buckets a CURRENTLY LISTED offer can fall into —
+ *  "no existing match" is not itself a bucket; it resolves immediately
+ *  into one of these two (see pricing-process.ts). A delisted offer
+ *  (currentlyListed: false) is excluded from both entirely, as is a
+ *  legacy "new_candidate" or "not_a_product" row — see getMatchReview-
+ *  Summary/bucketOf. */
+export type MatchReviewBucket = "review_required" | "matched";
 
 export interface MatchReviewSupplierBreakdown {
   supplierId: string;
@@ -237,14 +275,6 @@ export interface MatchReviewSupplierBreakdown {
   matchedCarried: number;
   matchedReferenceOnly: number;
   reviewRequired: number;
-  newCandidates: number;
-  /** Sub-split of newCandidates by whether an operator has already
-   *  attached a PricingReferenceProduct — a tracked item has been
-   *  reviewed and organized, so it shouldn't inflate "still need
-   *  attention." newCandidatesUntracked + newCandidatesTracked ===
-   *  newCandidates always. */
-  newCandidatesUntracked: number;
-  newCandidatesTracked: number;
   ignored: number;
 }
 
@@ -253,9 +283,6 @@ export interface MatchReviewSummary {
   matchedCarried: number;
   matchedReferenceOnly: number;
   reviewRequired: number;
-  newCandidates: number;
-  newCandidatesUntracked: number;
-  newCandidatesTracked: number;
   ignored: number;
   bySupplier: MatchReviewSupplierBreakdown[];
 }
