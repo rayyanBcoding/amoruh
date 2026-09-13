@@ -5,10 +5,13 @@ const REVIEW_STYLES: Record<ReviewStatus, string> = {
   auto_matched: "bg-ld-green/15 text-ld-green ring-ld-green/40",
   confirmed: "bg-ld-green/15 text-ld-green ring-ld-green/40",
   needs_review: "bg-ld-amber/15 text-ld-amber ring-ld-amber/40",
+  // Legacy pre-migration state — not a normal operational value, never
+  // shown in Match Review, kept only so this Record stays exhaustive.
   new_candidate: "bg-ld-cyan/15 text-ld-cyan ring-ld-cyan/40",
   alias_conflict: "bg-ld-red/15 text-ld-red ring-ld-red/40",
   barcode_conflict: "bg-ld-red/15 text-ld-red ring-ld-red/40",
   ignored: "bg-ld-border/40 text-ld-muted ring-ld-border",
+  not_a_product: "bg-ld-border/40 text-ld-muted ring-ld-border",
 };
 
 const REVIEW_LABELS: Record<ReviewStatus, string> = {
@@ -19,6 +22,7 @@ const REVIEW_LABELS: Record<ReviewStatus, string> = {
   alias_conflict: "Alias Conflict — Review Required",
   barcode_conflict: "Barcode Conflict — Review Required",
   ignored: "Ignored",
+  not_a_product: "Not a Product",
 };
 
 export function ReviewStatusBadge({ status, confidence }: { status: ReviewStatus; confidence?: number | null }) {

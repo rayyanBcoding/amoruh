@@ -21,6 +21,7 @@ import {
   computeIdentitySignature,
   deriveOfferKey,
   extractAttributes,
+  isValidProductRow,
   matchSupplierRow,
   findPreviousBySupplierItemIdentity,
   type MatchPreviewSummary,
@@ -160,12 +161,79 @@ export async function processSupplierUpload(input: {
     const offersByReferenceProductOps: OffersByReferenceProductOp[] = [];
     const snapshots: SupplierOfferSnapshot[] = [];
     let autoMatched = 0;
+    let autoCreated = 0;
     let needsReview = 0;
-    let newCandidates = 0;
+    const newCandidates = 0; // legacy — always 0 under the corrected model, see SupplierPriceUpload's own doc comment
+    let notAProduct = 0;
     const nowIso = new Date().toISOString();
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
+
+      // Non-product rows (headers/notes/totals/shipping/blank/category
+      // lines) are classified BEFORE any matching runs — they never
+      // enter Match Review, are never auto-created, and only ever show
+      // up as the nonProductRows import-summary count. Still recorded
+      // as a snapshot for audit ("here's exactly why row 47 was
+      // skipped"), same as every other row.
+      if (!isValidProductRow(row)) {
+        const offerKey = deriveOfferKey(row.supplierSku, row.description);
+        notAProduct++;
+        snapshots.push({
+          id: newId("offersnap"),
+          uploadId: upload.id,
+          rowIndex: i,
+          supplierId: input.supplierId,
+          offerKey,
+          raw: row,
+          productId: null,
+          candidateProductId: null,
+          candidateReferenceProductId: null,
+          matchType: "unmatched",
+          matchConfidence: null,
+          reviewStatus: "not_a_product",
+          referenceProductId: null,
+          rejectedCandidateProductIds: [],
+          currency: row.currency,
+          price: row.price,
+          fxRateAtUpload: null,
+          fxRateTimestamp: null,
+          priceUsdAtUpload: null,
+          uploadedAt: nowIso,
+        });
+        touchedKeys.add(offerKey);
+        candidateOffers[offerKey] = {
+          supplierId: input.supplierId,
+          offerKey,
+          supplierSku: row.supplierSku,
+          description: row.description,
+          brand: row.brand,
+          quantity: row.quantity,
+          currency: row.currency,
+          price: row.price,
+          fxRateAtUpload: null,
+          fxRateTimestamp: null,
+          priceUsdAtUpload: null,
+          upc: row.upc,
+          ean: row.ean,
+          productId: null,
+          candidateProductId: null,
+          candidateReferenceProductId: null,
+          matchType: "unmatched",
+          matchConfidence: null,
+          reviewStatus: "not_a_product",
+          referenceProductId: null,
+          rejectedCandidateProductIds: [],
+          currentlyListed: true,
+          lastUploadId: upload.id,
+          uploadedAt: nowIso,
+        };
+        if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
+          await updateUploadProgress(upload.id, { processedRows: i + 1 });
+        }
+        continue;
+      }
+
       const offerKey = deriveOfferKey(row.supplierSku, row.description);
       const aliasesSoFar = existingAliases.concat(newAliases);
       const match = matchSupplierRow(
@@ -250,85 +318,112 @@ export async function processSupplierUpload(input: {
       // produced the current candidate, so it catches a rejected product
       // resurfacing via either the normal match or the identity fallback.
       // Blocks only this specific productId — a different candidate (via
-      // a stronger real signal, e.g. a UPC now present) is unaffected
-      // since finalReviewStatus is only ever downgraded here, never used
-      // to suppress an actual confirmed productId (needs_review never
-      // carries one — see rejectSuggestedCandidate's own comment).
+      // a stronger real signal, e.g. a UPC now present) is unaffected.
+      // The row STAYS needs_review with the candidate cleared (never
+      // demoted to "new_candidate" limbo — there is no such limbo under
+      // the corrected model): a rejected guess doesn't resolve the
+      // underlying ambiguity, it just means "not that one," so the row
+      // is still exactly what it was — a genuine Match Review item — an
+      // operator can search/link/track it manually, or a stronger signal
+      // on a later upload can resolve it automatically.
       const rejectedIds = previous?.rejectedCandidateProductIds ?? [];
       if (finalCandidateProductId && rejectedIds.includes(finalCandidateProductId)) {
         finalCandidateProductId = null;
-        if (finalReviewStatus === "needs_review") finalReviewStatus = "new_candidate";
         finalMatchConfidence = null;
       }
 
-      // Auto-creation — plan §5. Only for a row that is, after every
-      // carry-forward above, a genuine fresh "nothing matched" AND that
-      // doesn't already carry a tracked Master Product from a prior
-      // "Track for Pricing" (finalReferenceProductId set means an
-      // operator already made a deliberate tracking decision for this
-      // exact supplier item; auto-creating a second, different Master
-      // Product for it would silently override that). checkAutoCreate-
-      // Eligibility enforces structural completeness (brand + core name +
-      // size + concentration-or-explicit-non-fragrance-form) — an
-      // ambiguous row (e.g. "DIOR SAUVAGE 100ML", no concentration
-      // stated) never auto-creates.
-      if (finalReviewStatus === "new_candidate" && !finalReferenceProductId) {
-        const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, row.brand);
-        const eligibility = checkAutoCreateEligibility(rowAttrs);
-        if (eligibility.eligible) {
-          const signature = computeIdentitySignature(rowAttrs);
-          const getOrCreateResult = await getOrCreateReferenceProductByIdentity(
-            { upc: row.upc.trim(), ean: row.ean.trim(), signature },
-            {
-              brand: row.brand.trim(),
-              name: row.description.trim(),
-              description: row.description.trim(),
-              sizeMl: rowAttrs.sizeMl,
-              concentration: rowAttrs.concentration,
-              isTester: rowAttrs.isTester,
-              isGiftSet: rowAttrs.isGiftSet,
-              isRefill: rowAttrs.isRefill,
-              productForm: rowAttrs.productForm,
-              upc: row.upc.trim(),
-              ean: row.ean.trim(),
-              productId: null,
-              createdBy: "auto_import",
-              creationMethod: "auto_import",
-              createdFromSupplierId: input.supplierId,
-              createdFromUploadId: upload.id,
-              createdFromOfferKey: offerKey,
-            }
-          );
-
-          if (getOrCreateResult.status === "conflict") {
-            // UPC/EAN and the structural signature disagree on which
-            // existing Master Product this is — never auto-picked,
-            // merged, or auto-linked. Route to needs_review with every
-            // conflicting identity shown for a human to resolve.
+      // Corrected operating model: "no existing match" is never itself
+      // an end state. Every row that reaches here (matchSupplierRow
+      // found nothing) resolves immediately into exactly one of three
+      // real outcomes — no purgatory in between:
+      //
+      //  1. Already tracked (finalReferenceProductId set from a prior
+      //     "Track for Pricing" on an earlier generation) — that was
+      //     already a deliberate human identity decision; it's matched,
+      //     full stop, not left sitting unresolved just because this
+      //     row's own auto-creation branch never ran for it.
+      //  2. Structurally complete (checkAutoCreateEligibility passes) —
+      //     auto-create the Master Product and attach the offer. This is
+      //     expected, routine catalog growth, never an error or a queue.
+      //  3. Genuinely incomplete/ambiguous (e.g. "DIOR SAUVAGE 100ML",
+      //     no concentration stated, no authoritative UPC) — Match
+      //     Review, because the exact SKU truly cannot be determined
+      //     yet. Auto-creating here would lock in a guess.
+      if (finalReviewStatus === "new_candidate") {
+        if (finalReferenceProductId) {
+          finalReviewStatus = "auto_matched";
+          finalMatchType = "manual";
+          finalMatchConfidence = 1;
+          finalCandidateProductId = null;
+          finalCandidateReferenceProductId = null;
+          finalCompetingCandidates = undefined;
+        } else {
+          const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, row.brand);
+          const eligibility = checkAutoCreateEligibility(rowAttrs);
+          if (!eligibility.eligible) {
+            // Genuine ambiguity/incompleteness — a real Match Review
+            // case, not "new_candidate" limbo.
             finalReviewStatus = "needs_review";
             finalMatchType = "unmatched";
             finalMatchConfidence = null;
             finalCandidateProductId = null;
             finalCandidateReferenceProductId = null;
-            finalCompetingCandidates = getOrCreateResult.ids.map((id) => ({ productId: null, referenceProductId: id }));
-          } else {
-            finalReferenceProductId = getOrCreateResult.id;
-            finalReviewStatus = "auto_matched";
-            finalMatchType = "auto_created";
-            finalMatchConfidence = 1;
-            finalCandidateProductId = null;
-            finalCandidateReferenceProductId = null;
             finalCompetingCandidates = undefined;
-            // Make this visible to every LATER row in this same upload —
-            // whether genuinely brand-new or reused from an existing
-            // record — so a repeat of the same physical item later in
-            // this file takes the normal exact-match path instead of
-            // hitting get-or-create a second time for no reason.
-            if (getOrCreateResult.status === "created") {
-              referenceProducts.push(getOrCreateResult.product);
+          } else {
+            const signature = computeIdentitySignature(rowAttrs);
+            const getOrCreateResult = await getOrCreateReferenceProductByIdentity(
+              { upc: row.upc.trim(), ean: row.ean.trim(), signature },
+              {
+                brand: row.brand.trim(),
+                name: row.description.trim(),
+                description: row.description.trim(),
+                sizeMl: rowAttrs.sizeMl,
+                concentration: rowAttrs.concentration,
+                isTester: rowAttrs.isTester,
+                isGiftSet: rowAttrs.isGiftSet,
+                isRefill: rowAttrs.isRefill,
+                productForm: rowAttrs.productForm,
+                upc: row.upc.trim(),
+                ean: row.ean.trim(),
+                productId: null,
+                createdBy: "auto_import",
+                creationMethod: "auto_import",
+                createdFromSupplierId: input.supplierId,
+                createdFromUploadId: upload.id,
+                createdFromOfferKey: offerKey,
+              }
+            );
+
+            if (getOrCreateResult.status === "conflict") {
+              // UPC/EAN and the structural signature disagree on which
+              // existing Master Product this is — never auto-picked,
+              // merged, or auto-linked. Route to needs_review with every
+              // conflicting identity shown for a human to resolve.
+              finalReviewStatus = "needs_review";
+              finalMatchType = "unmatched";
+              finalMatchConfidence = null;
+              finalCandidateProductId = null;
+              finalCandidateReferenceProductId = null;
+              finalCompetingCandidates = getOrCreateResult.ids.map((id) => ({ productId: null, referenceProductId: id }));
             } else {
-              const reused = await getReferenceProduct(getOrCreateResult.id);
-              if (reused) referenceProducts.push(reused);
+              finalReferenceProductId = getOrCreateResult.id;
+              finalReviewStatus = "auto_matched";
+              finalMatchType = "auto_created";
+              finalMatchConfidence = 1;
+              finalCandidateProductId = null;
+              finalCandidateReferenceProductId = null;
+              finalCompetingCandidates = undefined;
+              // Make this visible to every LATER row in this same upload
+              // — whether genuinely brand-new or reused from an existing
+              // record — so a repeat of the same physical item later in
+              // this file takes the normal exact-match path instead of
+              // hitting get-or-create a second time for no reason.
+              if (getOrCreateResult.status === "created") {
+                referenceProducts.push(getOrCreateResult.product);
+              } else {
+                const reused = await getReferenceProduct(getOrCreateResult.id);
+                if (reused) referenceProducts.push(reused);
+              }
             }
           }
         }
@@ -461,9 +556,18 @@ export async function processSupplierUpload(input: {
         });
       }
 
-      if (finalReviewStatus === "auto_matched") autoMatched++;
-      else if (finalReviewStatus === "new_candidate") newCandidates++;
-      else if (finalReviewStatus !== "ignored") needsReview++; // needs_review, alias_conflict, barcode_conflict — "ignored" is deliberately none of these three
+      // "new_candidate" is provably unreachable here — every path above
+      // that could produce it reassigns finalReviewStatus to
+      // auto_matched/needs_review before this point (TypeScript's own
+      // control-flow narrowing confirms it); newCandidates therefore
+      // stays 0 for every upload processed under the corrected model,
+      // exactly as its own deprecated doc comment says.
+      if (finalReviewStatus === "auto_matched") {
+        if (finalMatchType === "auto_created") autoCreated++;
+        else autoMatched++;
+      } else if (finalReviewStatus !== "ignored") {
+        needsReview++; // needs_review, alias_conflict, barcode_conflict — "ignored" is deliberately none of these three
+      }
 
       if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
         await updateUploadProgress(upload.id, { processedRows: i + 1 });
@@ -490,8 +594,10 @@ export async function processSupplierUpload(input: {
       status: "completed",
       processedRows: rows.length,
       autoMatched,
+      autoCreated,
       needsReview,
       newCandidates,
+      notAProduct,
       completedAt: new Date().toISOString(),
     };
 
@@ -531,51 +637,55 @@ export async function processSupplierUpload(input: {
 // Import safety — the second line of defense the new auto-creation
 // feature specifically needs, on top of the EXISTING header/mapping
 // sanity checks (verifyHeaderSignature/computeSanityChecks, unchanged).
-// Never a flat row-count-drop percentage: compares this preview's own
-// "unknown item" rate against THIS SAME SUPPLIER's own most recent
-// completed upload — a supplier whose file structure or matching
-// context looks materially different from their own history is what
-// this flags, not an arbitrary universal threshold.
+// Never a flat row-count-drop percentage, and — corrected — never keyed
+// off the "new items" rate at all: with every new distributor, thousands
+// of products may legitimately enter AMORUH for the first time, and
+// that is expected, routine catalog growth, never suspicious by itself.
+// What IS worth a caution is a jump in the genuinely-AMBIGUOUS rate
+// (requiresReview) relative to THIS SAME SUPPLIER's own history — that's
+// the signal a broken mapping (a shifted column, a garbled description)
+// actually produces, not "lots of new SKUs."
 // ---------------------------------------------------------------------
 
 export interface ImportAnomalyAssessment {
   flagged: boolean;
   message: string | null;
-  currentUnknownRate: number;
-  priorUnknownRate: number | null;
+  currentReviewRate: number;
+  priorReviewRate: number | null;
 }
 
-/** "Unknown" = proposed-new-Master-Product + unsupported — rows this
- *  upload has no existing structural identity for at all. Compared
- *  against the prior rate from the same supplier's most recent
- *  COMPLETED upload (skips failed/in-progress ones — those never
- *  reflect a real matched baseline). No prior completed upload (a
- *  supplier's very first file) means there is no baseline to compare
- *  against, so this never blocks a first upload. */
+/** Compares this preview's requiresReview rate against the prior rate
+ *  from the same supplier's most recent COMPLETED upload (skips failed/
+ *  in-progress ones — those never reflect a real matched baseline). No
+ *  prior completed upload (a supplier's very first file) means there is
+ *  no baseline to compare against, so this never blocks a first upload
+ *  — nor does a high proposedNewMasterProducts rate ever flag anything,
+ *  by design. */
 export function assessImportAnomalyRisk(preview: MatchPreviewSummary, priorUploads: SupplierPriceUpload[]): ImportAnomalyAssessment {
-  const currentUnknownRate = preview.totalRows > 0 ? (preview.proposedNewMasterProducts + preview.unsupported) / preview.totalRows : 0;
+  const currentReviewRate = preview.totalRows > 0 ? preview.requiresReview / preview.totalRows : 0;
 
   const mostRecentCompleted = priorUploads
     .filter((u) => u.status === "completed" && u.totalRows > 0)
     .sort((a, b) => b.seq - a.seq)[0];
   if (!mostRecentCompleted) {
-    return { flagged: false, message: null, currentUnknownRate, priorUnknownRate: null };
+    return { flagged: false, message: null, currentReviewRate, priorReviewRate: null };
   }
 
-  const priorUnknownRate = mostRecentCompleted.newCandidates / mostRecentCompleted.totalRows;
+  const priorReviewRate = mostRecentCompleted.needsReview / mostRecentCompleted.totalRows;
 
   // Flag only a genuine jump, not routine variance — more than double
   // the prior rate AND the prior rate wasn't already high (a supplier
-  // who's always mostly "new" doesn't get flagged every single time).
-  const flagged = priorUnknownRate < 0.5 && currentUnknownRate > priorUnknownRate * 2 && currentUnknownRate - priorUnknownRate > 0.1;
+  // whose catalog is always mostly ambiguous doesn't get flagged every
+  // single time).
+  const flagged = priorReviewRate < 0.5 && currentReviewRate > priorReviewRate * 2 && currentReviewRate - priorReviewRate > 0.1;
 
   const message = flagged
-    ? `This file proposes ${Math.round(currentUnknownRate * 100)}% brand-new/unmatched items (${
-        preview.proposedNewMasterProducts + preview.unsupported
-      } of ${preview.totalRows} rows) — this supplier's last completed upload was only ${Math.round(priorUnknownRate * 100)}% new (${
-        mostRecentCompleted.newCandidates
+    ? `This file proposes ${Math.round(currentReviewRate * 100)}% genuinely ambiguous/incomplete items requiring review (${
+        preview.requiresReview
+      } of ${preview.totalRows} rows) — this supplier's last completed upload was only ${Math.round(priorReviewRate * 100)}% ambiguous (${
+        mostRecentCompleted.needsReview
       } of ${mostRecentCompleted.totalRows}). Confirm this file is actually from this supplier and the mapping is correct before continuing.`
     : null;
 
-  return { flagged, message, currentUnknownRate, priorUnknownRate };
+  return { flagged, message, currentReviewRate, priorReviewRate };
 }

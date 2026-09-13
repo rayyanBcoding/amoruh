@@ -818,12 +818,44 @@ export function matchSupplierRow(
 }
 
 // ---------------------------------------------------------------------
+// Non-product row classification — headers, notes, totals/subtotals,
+// shipping/freight terms, blank or category rows that occasionally
+// survive spreadsheet parsing. Checked BEFORE any matching runs: these
+// never enter Match Review, are never auto-created, and never count
+// toward any operational bucket — only the nonProductRows import-
+// summary tally reflects them (see pricing-process.ts). Deliberately
+// conservative — a real product row must never be misclassified here,
+// so only rows with essentially no product signal at all are excluded;
+// anything genuinely uncertain is left for the matcher to judge as a
+// normal row instead.
+// ---------------------------------------------------------------------
+
+const NON_PRODUCT_LINE_PATTERN =
+  /^(sub)?total\b|^grand\s*total\b|^shipping\b|^freight\b|^handling\b|^discount\b|^\(?tax\)?\b|^vat\b|^terms?\b|^notes?:?\s*$|^page\s+\d+\b|^continued\b/i;
+
+export function isValidProductRow(row: { description: string }): boolean {
+  const desc = row.description.trim();
+  if (!desc) return false;
+  if (!/[a-zA-Z]{2,}/.test(desc)) return false; // no real word content at all — e.g. a stray number/barcode row
+  if (NON_PRODUCT_LINE_PATTERN.test(desc)) return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------
 // Import safety — plan's "Import safety" section. A read-only dry-match
 // pass over PARSED rows (never over raw upload rows) against the
 // current catalog/aliases/Master Products, extending the Preview step
 // rather than a third UI step. Never writes anything — the caller
 // (parse-preview route) already never writes; this is purely additive
 // classification of what processing WOULD do.
+//
+// Reflects the corrected operating model: "no existing match" is never
+// itself an outcome — a structurally-complete row would auto-create
+// (proposedNewMasterProducts); an incomplete/ambiguous one would go to
+// requiresReview, exactly like a genuine multi-candidate conflict. There
+// is no third "unsupported new item" bucket — only genuinely non-product
+// rows (nonProductRows) are set aside separately, and they're excluded
+// before matching even runs.
 // ---------------------------------------------------------------------
 
 export interface MatchPreviewSummary {
@@ -831,14 +863,15 @@ export interface MatchPreviewSummary {
   matchedProduct: number;
   matchedReferenceProduct: number;
   proposedNewMasterProducts: number;
+  /** Genuinely can't determine the exact SKU yet — a multi-candidate
+   *  conflict, OR a row too incomplete/ambiguous to safely auto-create
+   *  (e.g. concentration unstated for a fragrance). Both land in
+   *  Match Review identically once processed for real. */
   requiresReview: number;
-  /** A genuine "nothing matched, and not even structurally complete
-   *  enough to auto-create" row — e.g. no brand recognized at all, or a
-   *  fragrance whose concentration is unstated. Distinct from
-   *  requiresReview (which DOES have a specific competing candidate or
-   *  conflict to show); this is the honest "we can't say anything about
-   *  this row yet" bucket. */
-  unsupported: number;
+  /** Not a real product row — a header/note/total/shipping/blank/
+   *  category line. Classified BEFORE matching runs; never counted
+   *  toward requiresReview or proposedNewMasterProducts. */
+  nonProductRows: number;
 }
 
 export function computeMatchPreview(
@@ -851,7 +884,7 @@ export function computeMatchPreview(
   let matchedReferenceProduct = 0;
   let proposedNewMasterProducts = 0;
   let requiresReview = 0;
-  let unsupported = 0;
+  let nonProductRows = 0;
 
   // A local, in-memory-only "would auto-create" pool — mirrors the real
   // upload's own mutable in-import list (plan §4/§5b) so a genuine
@@ -862,6 +895,11 @@ export function computeMatchPreview(
   let previewIdSeq = 0;
 
   for (const row of rows) {
+    if (!isValidProductRow(row)) {
+      nonProductRows++;
+      continue;
+    }
+
     const offerKey = deriveOfferKey(row.supplierSku, row.description);
     const match = matchSupplierRow({ offerKey, ...row }, products, aliases, previewPool);
 
@@ -874,7 +912,9 @@ export function computeMatchPreview(
       const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, row.brand);
       const eligibility = checkAutoCreateEligibility(rowAttrs);
       if (!eligibility.eligible) {
-        unsupported++;
+        // Incomplete/ambiguous — this is a genuine Match Review case,
+        // not a separate "unsupported" limbo.
+        requiresReview++;
         continue;
       }
       proposedNewMasterProducts++;
@@ -905,7 +945,7 @@ export function computeMatchPreview(
     requiresReview++;
   }
 
-  return { totalRows: rows.length, matchedProduct, matchedReferenceProduct, proposedNewMasterProducts, requiresReview, unsupported };
+  return { totalRows: rows.length, matchedProduct, matchedReferenceProduct, proposedNewMasterProducts, requiresReview, nonProductRows };
 }
 
 // ---------------------------------------------------------------------

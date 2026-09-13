@@ -105,8 +105,10 @@ export async function createUpload(input: {
     totalRows: input.totalRows,
     processedRows: 0,
     autoMatched: 0,
+    autoCreated: 0,
     needsReview: 0,
     newCandidates: 0,
+    notAProduct: 0,
     startedAt: new Date().toISOString(),
     completedAt: null,
     error: null,
@@ -768,13 +770,23 @@ export async function getReferenceProductOfferComparison(referenceProductId: str
 // currentlyListed: false rather than deleting them (see the commit
 // model above) — that's what makes "No Longer Listed" possible. A
 // delisted offer is real history/audit data, never an operational
-// concern: it must never contribute to Matched, Review Required, or
-// New Product Candidate counts, no matter what reviewStatus it was
-// left with. Every function below filters `currentlyListed !== false`
-// before classifying anything — this is the fix for a real incident
-// where a flat, unfiltered count made "we don't carry this yet" look
-// identical to "needs a human decision" (11,654 shown as one urgent
-// queue, when only 399 were genuine matches/conflicts).
+// concern: it must never contribute to Matched or Review Required
+// counts, no matter what reviewStatus it was left with. Every function
+// below filters `currentlyListed !== false` before classifying anything
+// — this is the fix for a real incident where a flat, unfiltered count
+// made "we don't carry this yet" look identical to "needs a human
+// decision" (11,654 shown as one urgent queue, when only 399 were
+// genuine matches/conflicts).
+//
+// Operating-model correction: there is no "New Product Candidate"
+// bucket. "no existing match" resolves immediately, at processing time,
+// into either matched (auto-created) or review_required (genuinely
+// ambiguous/incomplete) — see pricing-process.ts. A legacy
+// "new_candidate" row (pre-correction historical data, not yet migrated)
+// and a "not_a_product" row (never a real product at all) are both
+// deliberately invisible here — neither is counted, listed, or
+// actionable through Match Review; the one-time backlog migration is
+// what reclassifies the former into a real bucket.
 // ---------------------------------------------------------------------
 
 const MATCHED_STATUSES: ReviewStatus[] = ["auto_matched", "confirmed"];
@@ -783,13 +795,12 @@ const REVIEW_REQUIRED_STATUSES: ReviewStatus[] = ["needs_review", "alias_conflic
 function bucketOf(status: ReviewStatus): MatchReviewBucket | "ignored" | null {
   if (MATCHED_STATUSES.includes(status)) return "matched";
   if (REVIEW_REQUIRED_STATUSES.includes(status)) return "review_required";
-  if (status === "new_candidate") return "new_candidates";
   if (status === "ignored") return "ignored";
   return null;
 }
 
 /** The literal per-supplier diagnostic breakdown: currently-listed vs.
- *  no-longer-listed record counts, then the three operational buckets
+ *  no-longer-listed record counts, then the two operational buckets
  *  computed only from the currently-listed set. One HGETALL per
  *  supplier (small supplier count at this business's scale) — same
  *  cost as the query this replaces, just classified correctly. */
@@ -800,9 +811,6 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
   let matchedCarried = 0;
   let matchedReferenceOnly = 0;
   let reviewRequired = 0;
-  let newCandidates = 0;
-  let newCandidatesUntracked = 0;
-  let newCandidatesTracked = 0;
   let ignored = 0;
 
   for (const s of suppliers) {
@@ -814,9 +822,6 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
     let sMatchedCarried = 0;
     let sMatchedReferenceOnly = 0;
     let sReview = 0;
-    let sCandidates = 0;
-    let sCandidatesUntracked = 0;
-    let sCandidatesTracked = 0;
     let sIgnored = 0;
     for (const o of listed) {
       const bucket = bucketOf(o.reviewStatus);
@@ -829,11 +834,7 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
         if (o.productId) sMatchedCarried++;
         else sMatchedReferenceOnly++;
       } else if (bucket === "review_required") sReview++;
-      else if (bucket === "new_candidates") {
-        sCandidates++;
-        if (o.referenceProductId) sCandidatesTracked++;
-        else sCandidatesUntracked++;
-      } else if (bucket === "ignored") sIgnored++;
+      else if (bucket === "ignored") sIgnored++;
     }
 
     bySupplier.push({
@@ -845,52 +846,33 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
       matchedCarried: sMatchedCarried,
       matchedReferenceOnly: sMatchedReferenceOnly,
       reviewRequired: sReview,
-      newCandidates: sCandidates,
-      newCandidatesUntracked: sCandidatesUntracked,
-      newCandidatesTracked: sCandidatesTracked,
       ignored: sIgnored,
     });
     matched += sMatched;
     matchedCarried += sMatchedCarried;
     matchedReferenceOnly += sMatchedReferenceOnly;
     reviewRequired += sReview;
-    newCandidates += sCandidates;
-    newCandidatesUntracked += sCandidatesUntracked;
-    newCandidatesTracked += sCandidatesTracked;
     ignored += sIgnored;
   }
 
-  return {
-    matched,
-    matchedCarried,
-    matchedReferenceOnly,
-    reviewRequired,
-    newCandidates,
-    newCandidatesUntracked,
-    newCandidatesTracked,
-    ignored,
-    bySupplier,
-  };
+  return { matched, matchedCarried, matchedReferenceOnly, reviewRequired, ignored, bySupplier };
 }
 
-/** Paginated, filterable items for one Match Review tab — serves all
- *  three buckets through the same function so there's one query path,
- *  not three. Never serializes more than `limit` items regardless of
- *  how large the bucket is (New Product Candidates can be thousands). */
+/** Paginated, filterable items for one Match Review tab — serves both
+ *  buckets through the same function so there's one query path, not
+ *  two. Never serializes more than `limit` items regardless of how
+ *  large the bucket is. */
 export async function getMatchReviewItems(params: {
   bucket: MatchReviewBucket;
   supplierId?: string;
   search?: string;
-  /** Only meaningful for bucket "new_candidates" — filters by whether a
-   *  PricingReferenceProduct is already attached. Omitted = both. */
-  tracked?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<{ items: MatchReviewItem[]; total: number }> {
-  const { bucket, supplierId, search, tracked, limit = 50, offset = 0 } = params;
+  const { bucket, supplierId, search, limit = 50, offset = 0 } = params;
   const suppliers = await getSuppliers();
   const relevantSuppliers = supplierId ? suppliers.filter((s) => s.id === supplierId) : suppliers;
-  const bucketStatuses = bucket === "matched" ? MATCHED_STATUSES : bucket === "review_required" ? REVIEW_REQUIRED_STATUSES : (["new_candidate"] as ReviewStatus[]);
+  const bucketStatuses = bucket === "matched" ? MATCHED_STATUSES : REVIEW_REQUIRED_STATUSES;
   const searchLower = search?.trim().toLowerCase();
 
   const matching: MatchReviewItem[] = [];
@@ -899,10 +881,6 @@ export async function getMatchReviewItems(params: {
     for (const o of offers) {
       if (o.currentlyListed === false) continue;
       if (!bucketStatuses.includes(o.reviewStatus)) continue;
-      if (bucket === "new_candidates" && tracked !== undefined) {
-        const isTracked = Boolean(o.referenceProductId);
-        if (isTracked !== tracked) continue;
-      }
       if (
         searchLower &&
         !o.description.toLowerCase().includes(searchLower) &&

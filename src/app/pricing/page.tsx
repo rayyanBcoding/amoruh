@@ -13,12 +13,14 @@ interface SupplierBreakdown {
   noLongerListed: number;
   matched: number;
   reviewRequired: number;
-  newCandidates: number;
   ignored: number;
 }
 
 interface DashboardData {
   uploadsToday: number;
+  /** Rolling count of Master Products auto-created across the recent
+   *  uploads shown — an audit figure, never a call to action. */
+  recentAutoCreated: number;
   recentUploads: {
     id: string;
     supplierId: string;
@@ -27,12 +29,13 @@ interface DashboardData {
     uploadType: string;
     totalRows: number;
     autoMatched: number;
+    autoCreated: number;
     needsReview: number;
-    newCandidates: number;
+    notAProduct: number;
     startedAt: string;
     isLive: boolean;
   }[];
-  matchReview: { reviewRequired: number; newCandidates: number; matched: number; bySupplier: SupplierBreakdown[] };
+  matchReview: { reviewRequired: number; matched: number; bySupplier: SupplierBreakdown[] };
   supplierCount: number;
 }
 
@@ -159,7 +162,9 @@ export default function PricingDashboardPage() {
             value={data?.matchReview.reviewRequired ?? "—"}
             accent={data && data.matchReview.reviewRequired > 0 ? "text-ld-amber" : undefined}
           />
-          <StatCard label="New Product Candidates" value={data?.matchReview.newCandidates ?? "—"} accent="text-ld-cyan" />
+          {/* Audit-only — how many Master Products routine catalog growth
+              created recently, never a queue or a call to action. */}
+          <StatCard label="Master Products Auto-Created" value={data?.recentAutoCreated ?? "—"} accent="text-ld-purple" />
           <StatCard label="Matched" value={data?.matchReview.matched ?? "—"} accent="text-ld-green" />
         </div>
 
@@ -175,7 +180,6 @@ export default function PricingDashboardPage() {
                     <th className="py-1 pr-4">No Longer Listed</th>
                     <th className="py-1 pr-4">Matched</th>
                     <th className="py-1 pr-4">Review Required</th>
-                    <th className="py-1 pr-4">New Candidates</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -188,7 +192,6 @@ export default function PricingDashboardPage() {
                       <td className={`py-2 pr-4 ${s.reviewRequired > 0 ? "font-semibold text-ld-amber" : "text-ld-muted"}`}>
                         {s.reviewRequired.toLocaleString()}
                       </td>
-                      <td className="py-2 pr-4 text-ld-cyan">{s.newCandidates.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -213,8 +216,9 @@ export default function PricingDashboardPage() {
                   </div>
                   <div className="flex items-center gap-3 text-xs">
                     <span className="text-ld-green">{u.autoMatched} matched</span>
+                    <span className="text-ld-purple">{u.autoCreated} new</span>
                     <span className={u.needsReview > 0 ? "font-semibold text-ld-amber" : "text-ld-muted"}>{u.needsReview} review</span>
-                    <span className="text-ld-cyan">{u.newCandidates} new</span>
+                    {u.notAProduct > 0 && <span className="text-ld-muted">{u.notAProduct} skipped</span>}
                     <span
                       className={
                         u.status === "failed"

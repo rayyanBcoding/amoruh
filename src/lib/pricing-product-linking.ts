@@ -79,13 +79,18 @@ export async function unlinkOffer(supplierId: string, offerKey: string): Promise
  *  productId yet (matchSupplierRow only ever sets candidateProductId for
  *  this bucket) — refuse if it does, since that means it's actually
  *  confirmed and unlinkOffer is the right action instead. Clears the
- *  guess and returns the row to a clean new_candidate, preserving
- *  referenceProductId (a tracked item stays tracked) and every other
- *  field untouched. Never touches offers_by_product — nothing was ever
- *  added there for an unconfirmed candidate. Records the rejection in
- *  rejectedCandidateProductIds so pricing-process.ts's carry-forward
- *  never re-suggests this exact product for this exact supplier item
- *  again, while leaving every other candidate free to surface normally. */
+ *  guess but the row STAYS needs_review — there is no "new_candidate"
+ *  limbo to fall back into under the corrected operating model: a
+ *  rejected guess doesn't resolve the underlying ambiguity, it just
+ *  means "not that one," so the item is still exactly what it was — a
+ *  genuine Match Review case an operator can search/link/track
+ *  manually. Preserves referenceProductId (a tracked item stays
+ *  tracked) and every other field untouched. Never touches
+ *  offers_by_product — nothing was ever added there for an unconfirmed
+ *  candidate. Records the rejection in rejectedCandidateProductIds so
+ *  pricing-process.ts's carry-forward never re-suggests this exact
+ *  product for this exact supplier item again, while leaving every
+ *  other candidate free to surface normally. */
 export async function rejectSuggestedCandidate(
   supplierId: string,
   offerKey: string,
@@ -108,7 +113,7 @@ export async function rejectSuggestedCandidate(
       candidateProductId: null,
       matchType: "unmatched",
       matchConfidence: null,
-      reviewStatus: "new_candidate",
+      reviewStatus: "needs_review",
       rejectedCandidateProductIds: [...rejectedSet],
     },
     newAliases: await getAliasesForSupplier(supplierId),
