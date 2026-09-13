@@ -63,6 +63,13 @@ export interface SupplierOfferSnapshot {
    *  Pricing/Ordering can no longer create one from an unmatched
    *  listing. */
   referenceProductId: string | null;
+  /** Real-catalog candidates an operator has explicitly rejected via
+   *  "No — Not a Match" for THIS exact supplier item — see the identical
+   *  field on SupplierOfferCurrent for why this exists and how it's
+   *  carried forward. Recorded here too so the permanent history shows
+   *  exactly what was rejected and when. Optional/defaults to empty —
+   *  additive, most snapshots never have one. */
+  rejectedCandidateProductIds?: string[];
   /** Original currency + price, never overwritten (rule #4). */
   currency: string;
   price: number;
@@ -102,6 +109,15 @@ export interface SupplierOfferCurrent {
    *  productId, so re-uploading a supplier's sheet never silently wipes
    *  out a tracked link an operator set. */
   referenceProductId: string | null;
+  /** Real-catalog candidates an operator has explicitly rejected via
+   *  "No — Not a Match" for THIS exact supplier item ("this suggested
+   *  product is wrong," distinct from Ignore's "I don't want to review
+   *  this item at all"). Carried forward copy-forward-style exactly like
+   *  referenceProductId — never reset by a re-upload — so a rejected
+   *  candidate is never re-suggested for this offerKey. Blocks ONLY the
+   *  exact rejected productId(s); a different candidate (for the same or
+   *  a different offerKey) is unaffected. Optional/defaults to empty. */
+  rejectedCandidateProductIds?: string[];
   /** false once a FULL upload completes without this offerKey present.
    *  Never deleted — kept for "No Longer Listed" display + history. */
   currentlyListed: boolean;

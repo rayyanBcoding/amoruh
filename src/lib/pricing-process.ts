@@ -210,6 +210,23 @@ export async function processSupplierUpload(input: {
         finalMatchConfidence = previous.matchConfidence;
       }
 
+      // "No — Not a Match" carry-forward: an operator explicitly rejected
+      // THIS exact candidate for THIS exact supplier item before — never
+      // re-suggest it. Applied last, on top of whichever branch above
+      // produced the current candidate, so it catches a rejected product
+      // resurfacing via either the normal match or the identity fallback.
+      // Blocks only this specific productId — a different candidate (via
+      // a stronger real signal, e.g. a UPC now present) is unaffected
+      // since finalReviewStatus is only ever downgraded here, never used
+      // to suppress an actual confirmed productId (needs_review never
+      // carries one — see rejectSuggestedCandidate's own comment).
+      const rejectedIds = previous?.rejectedCandidateProductIds ?? [];
+      if (finalCandidateProductId && rejectedIds.includes(finalCandidateProductId)) {
+        finalCandidateProductId = null;
+        if (finalReviewStatus === "needs_review") finalReviewStatus = "new_candidate";
+        finalMatchConfidence = null;
+      }
+
       snapshots.push({
         id: newId("offersnap"),
         uploadId: upload.id,
@@ -223,6 +240,7 @@ export async function processSupplierUpload(input: {
         matchConfidence: finalMatchConfidence,
         reviewStatus: finalReviewStatus,
         referenceProductId: previous?.referenceProductId ?? null,
+        rejectedCandidateProductIds: rejectedIds,
         currency: row.currency,
         price: row.price,
         fxRateAtUpload: rate?.rate ?? null,
@@ -256,6 +274,7 @@ export async function processSupplierUpload(input: {
         // an operator set via "Track for Pricing" / "Link to tracked
         // item" on a prior generation.
         referenceProductId: previous?.referenceProductId ?? null,
+        rejectedCandidateProductIds: rejectedIds,
         currentlyListed: true,
         lastUploadId: upload.id,
         uploadedAt: nowIso,

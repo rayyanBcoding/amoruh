@@ -72,6 +72,51 @@ export async function unlinkOffer(supplierId: string, offerKey: string): Promise
   return { ok: true };
 }
 
+/** "No — Not a Match": rejects ONLY the currently-suggested candidate on
+ *  a needs_review row — distinct from unlinkOffer (undoes an already-
+ *  CONFIRMED link) and from ignoreOffer (dismisses the whole supplier
+ *  item). By construction a needs_review offer never has a real
+ *  productId yet (matchSupplierRow only ever sets candidateProductId for
+ *  this bucket) — refuse if it does, since that means it's actually
+ *  confirmed and unlinkOffer is the right action instead. Clears the
+ *  guess and returns the row to a clean new_candidate, preserving
+ *  referenceProductId (a tracked item stays tracked) and every other
+ *  field untouched. Never touches offers_by_product — nothing was ever
+ *  added there for an unconfirmed candidate. Records the rejection in
+ *  rejectedCandidateProductIds so pricing-process.ts's carry-forward
+ *  never re-suggests this exact product for this exact supplier item
+ *  again, while leaving every other candidate free to surface normally. */
+export async function rejectSuggestedCandidate(
+  supplierId: string,
+  offerKey: string,
+  rejectedProductId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const offer = await getCurrentOffer(supplierId, offerKey);
+  if (!offer) return { ok: false, error: "This supplier offer no longer exists." };
+  if (offer.productId) {
+    return { ok: false, error: "This offer is already linked to a product — use unlink instead." };
+  }
+
+  const rejectedSet = new Set(offer.rejectedCandidateProductIds ?? []);
+  rejectedSet.add(rejectedProductId);
+
+  await resolveOfferManually({
+    supplierId,
+    offerKey,
+    updatedOffer: {
+      ...offer,
+      candidateProductId: null,
+      matchType: "unmatched",
+      matchConfidence: null,
+      reviewStatus: "new_candidate",
+      rejectedCandidateProductIds: [...rejectedSet],
+    },
+    newAliases: await getAliasesForSupplier(supplierId),
+    offersByProductOps: [],
+  });
+  return { ok: true };
+}
+
 /** Marks a listing as "not one of our products" so Match Review stops
  *  asking about it on every future upload — e.g. accessories/boxes on a
  *  supplier's sheet that will never become a master Product. */
