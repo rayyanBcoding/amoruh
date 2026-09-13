@@ -328,9 +328,14 @@ export default function MatchReviewPage() {
                       )}
                       <div className="flex flex-wrap items-center gap-2">
                         {item.candidateProductId && (
-                          <Button variant="cyan" size="md" disabled={busy} onClick={() => resolve(item, { action: "link", productId: item.candidateProductId })}>
-                            Yes — Link
-                          </Button>
+                          <>
+                            <Button variant="cyan" size="md" disabled={busy} onClick={() => resolve(item, { action: "link", productId: item.candidateProductId })}>
+                              Yes — Link
+                            </Button>
+                            <Button variant="danger" size="md" disabled={busy} onClick={() => resolve(item, { action: "reject_candidate", productId: item.candidateProductId })}>
+                              No — Not a Match
+                            </Button>
+                          </>
                         )}
                         <select
                           disabled={busy}
