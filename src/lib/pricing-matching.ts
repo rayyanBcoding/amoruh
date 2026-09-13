@@ -1,5 +1,5 @@
 import type { Product } from "./types";
-import type { OfferMatchType, ReviewStatus, SupplierAlias, SupplierOfferCurrent } from "./pricing-types";
+import type { OfferMatchType, PricingReferenceProduct, ReviewStatus, SupplierAlias, SupplierOfferCurrent } from "./pricing-types";
 import { normalize, bigramSimilarity } from "./intake-matching";
 
 // ---------------------------------------------------------------------
@@ -48,6 +48,49 @@ const CONCENTRATION_PATTERNS: [RegExp, string][] = [
 
 const TESTER_PATTERN = /\btester\b|\btstr\b|\bw\/?o\s*box\b|\bwithout\s*box\b/;
 const GIFT_SET_PATTERN = /\bgift\s*set\b|\bset\s*of\b|\bcoffret\b|\b\d\s*pc\s*set\b|\bkit\b/;
+// "refill"/"recharge" only — deliberately NOT matching "refillable" (a
+// normal bottle sold as refillable is still a standalone bottle sale,
+// not the standalone-refill-pack SKU this exists to distinguish). Word
+// boundary after "refill" already excludes "refillable" (no boundary
+// between "refill" and the following "able").
+const REFILL_PATTERN = /\brefill\b|\brecharge\b/;
+
+// Non-fragrance product forms — a hard gate everywhere this is compared
+// against anything else (see checkHardGates). "fragrance" is the
+// default for every row/product that doesn't match one of these, which
+// is exactly what keeps the gate a no-op for the overwhelming majority
+// of genuine fragrance-vs-fragrance comparisons while still closing the
+// real production incident this was built to fix: "Guess Seductive
+// Noir Body Lotion" has no recognized CONCENTRATION at all (so that gate
+// stood down) and previously matched several different EDT fragrances
+// on brand+size+text alone.
+export type ProductForm =
+  | "fragrance"
+  | "body_lotion"
+  | "deodorant"
+  | "aftershave"
+  | "body_spray"
+  | "shower_gel"
+  | "soap"
+  | "candle";
+
+const PRODUCT_FORM_PATTERNS: [RegExp, ProductForm][] = [
+  [/\bbody\s*lotion\b/, "body_lotion"],
+  [/\bafter\s*shave\b/, "aftershave"],
+  [/\bbody\s*spray\b/, "body_spray"],
+  [/\bshower\s*gel\b/, "shower_gel"],
+  [/\bdeodorant\b/, "deodorant"],
+  [/\bsoap\b/, "soap"],
+  [/\bcandle\b/, "candle"],
+];
+
+export function classifyProductForm(text: string): ProductForm {
+  const n = normalize(text);
+  for (const [pattern, form] of PRODUCT_FORM_PATTERNS) {
+    if (pattern.test(n)) return form;
+  }
+  return "fragrance";
+}
 
 export interface StructuredAttributes {
   brandToken: string;
@@ -62,6 +105,11 @@ export interface StructuredAttributes {
   concentration: string | null;
   isTester: boolean;
   isGiftSet: boolean;
+  /** Standalone refill/recharge pack vs. a normal bottle — a materially
+   *  different sellable SKU even at the same brand/size/concentration. */
+  isRefill: boolean;
+  /** "fragrance" (the default) or an explicit non-fragrance form. */
+  productForm: ProductForm;
 }
 
 export function tokenize(text: string): string[] {
@@ -122,12 +170,14 @@ export function extractAttributes(fullText: string, brand: string): StructuredAt
   const concentration = parseConcentration(fullText);
   const isTester = TESTER_PATTERN.test(normalize(fullText));
   const isGiftSet = GIFT_SET_PATTERN.test(normalize(fullText));
+  const isRefill = REFILL_PATTERN.test(normalize(fullText));
+  const productForm = classifyProductForm(fullText);
 
   const allTokens = contentTokens(fullText);
   const brandWords = new Set(tokenize(brand));
   const coreNameTokens = allTokens.filter((t) => !brandWords.has(t));
 
-  return { brandToken, allTokens, coreNameTokens, sizeMl, concentration, isTester, isGiftSet };
+  return { brandToken, allTokens, coreNameTokens, sizeMl, concentration, isTester, isGiftSet, isRefill, productForm };
 }
 
 /** Deliberately does NOT fold `p.concentration` into the text used for
@@ -147,6 +197,26 @@ export function extractProductAttributes(p: Pick<Product, "brand" | "name" | "si
   const base = extractAttributes(`${p.brand} ${p.name} ${p.size}`, p.brand);
   const concentration = parseConcentration(`${p.name} ${p.concentration}`);
   return { ...base, concentration };
+}
+
+/** Same idea as extractProductAttributes, for a Master/Reference
+ *  Product — but PREFERS the already-stored structured fields
+ *  (authoritative, resolved once at creation/track time) over
+ *  re-parsing text, which is what extractProductAttributes has to do
+ *  since real Product has no such stored fields. Only brandToken/
+ *  allTokens/coreNameTokens (needed for text-similarity comparison) are
+ *  derived from combined text. */
+export function extractReferenceProductAttributes(rp: PricingReferenceProduct): StructuredAttributes {
+  const base = extractAttributes(`${rp.brand} ${rp.name} ${rp.description}`, rp.brand);
+  return {
+    ...base,
+    sizeMl: rp.sizeMl,
+    concentration: rp.concentration,
+    isTester: rp.isTester,
+    isGiftSet: rp.isGiftSet,
+    isRefill: rp.isRefill,
+    productForm: rp.productForm as ProductForm,
+  };
 }
 
 export function tokenSetSimilarity(a: string[], b: string[]): number {
@@ -259,6 +329,14 @@ export function checkHardGates(a: StructuredAttributes, b: StructuredAttributes)
   }
   if (a.isTester !== b.isTester) return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
   if (a.isGiftSet !== b.isGiftSet) return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
+  if (a.isRefill !== b.isRefill) return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
+  // "fragrance" is the default productForm for both sides in the
+  // overwhelming majority of real comparisons, so plain equality is
+  // exactly the right gate: it's a no-op for fragrance-vs-fragrance,
+  // and fails the instant either side is an explicit, differing
+  // non-fragrance form (e.g. body lotion vs. EDT) — no separate
+  // "recognized vs. default" branching needed.
+  if (a.productForm !== b.productForm) return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
 
   const sizeBothParsed = a.sizeMl !== null && b.sizeMl !== null;
   if (sizeBothParsed && !sizesMatch(a.sizeMl as number, b.sizeMl as number)) {
@@ -318,6 +396,211 @@ export function scoreStructuredMatch(a: StructuredAttributes, b: StructuredAttri
 }
 
 // ---------------------------------------------------------------------
+// Master Product candidate pool — combines real Products and Master/
+// Reference Products into one identity space for matching, with a
+// linked pair (PricingReferenceProduct.productId set) always
+// represented ONCE, via its real Product entry, never as two separate
+// candidates that could form an artificial sibling pair with each
+// other or appear as two separate search results.
+// ---------------------------------------------------------------------
+
+export interface MasterCandidate {
+  /** Real Product id, if this candidate is (or is linked to) one. */
+  productId: string | null;
+  /** Master/Reference Product id, if this candidate has one —
+   *  independent of whether it's also physically carried. A candidate
+   *  always has at least one of these two set. */
+  referenceProductId: string | null;
+  attrs: StructuredAttributes;
+  upc: string;
+  ean: string;
+}
+
+export function buildMasterCandidatePool(products: Product[], referenceProducts: PricingReferenceProduct[]): MasterCandidate[] {
+  const linkedReferenceByProductId = new Map(referenceProducts.filter((rp) => rp.productId).map((rp) => [rp.productId as string, rp]));
+
+  const pool: MasterCandidate[] = products.map((p) => ({
+    productId: p.id,
+    referenceProductId: linkedReferenceByProductId.get(p.id)?.id ?? null,
+    attrs: extractProductAttributes(p),
+    upc: p.barcode,
+    ean: p.barcode,
+  }));
+
+  for (const rp of referenceProducts) {
+    if (rp.productId) continue; // already represented above via its linked real Product
+    pool.push({
+      productId: null,
+      referenceProductId: rp.id,
+      attrs: extractReferenceProductAttributes(rp),
+      upc: rp.upc,
+      ean: rp.ean,
+    });
+  }
+
+  return pool;
+}
+
+export interface MasterMatchResult {
+  outcome: "auto_match" | "needs_review" | "no_match";
+  winner: MasterCandidate | null;
+  /** Every competing identity, for display — populated for "needs_review"
+   *  (both the ordinary single-best-guess case and the genuine
+   *  sibling-competition case), empty otherwise. */
+  competingCandidates: MasterCandidate[];
+  confidence: number | null;
+}
+
+// A near-tie between the top two scores is treated the same as a
+// genuine structural ambiguity — text alone shouldn't quietly pick a
+// winner when the row's own wording doesn't clearly favor one flanker/
+// edition over another (e.g. "Man" scoring close to both "Man" and
+// "Man Ice"). This is judged only among candidates that already
+// survive every hard gate below — it never overrides a real variant
+// conflict, and it never fires when there's only one survivor.
+const SIBLING_SCORE_MARGIN = 0.1;
+
+/** The row-relative ambiguity rule (replaces a fixed brand/size/
+ *  concentration bucket key, which breaks on "DIOR SAUVAGE 100ML": the
+ *  three real Sauvage EDT/EDP/Parfum candidates would land in three
+ *  different buckets and the matcher could still auto-pick one).
+ *  Ambiguity is judged relative to what the incoming ROW itself
+ *  specifies, not the candidates' own labels — see pricing-matching's
+ *  header comment / the Phase 1 plan for the full reasoning. */
+export function matchAgainstMasterCandidates(rowAttrs: StructuredAttributes, pool: MasterCandidate[]): MasterMatchResult {
+  // Reuse scoreStructuredMatch (not a hand-rolled gate + raw textScore)
+  // for every candidate: checkHardGates already only enforces
+  // concentration equality when BOTH sides have a recognized value —
+  // rowAttrs.concentration === null already means the gate is silent
+  // for every candidate regardless of ITS OWN concentration, which is
+  // exactly the row-relative behavior this needs, with no separate gate
+  // logic to duplicate or drift out of sync with checkHardGates. Scoring
+  // this way also preserves the tuned confidence formula (0.05 + text
+  // * 1.3, calibrated against real production false positives) instead
+  // of comparing raw text similarity against thresholds tuned for that
+  // formula.
+  const allScored = pool.map((candidate) => ({ candidate, result: scoreStructuredMatch(rowAttrs, candidate.attrs) }));
+  const survivors = allScored.filter((s) => s.result.gate.passes);
+
+  if (survivors.length === 0) return { outcome: "no_match", winner: null, competingCandidates: [], confidence: null };
+
+  const scored = survivors
+    .map((s) => ({ candidate: s.candidate, score: s.result.confidence }))
+    .sort((a, b) => b.score - a.score);
+
+  // The row never stated a concentration, and the survivors themselves
+  // disagree on it — always needs_review, listing every survivor. A
+  // text score, however high (even identical across all of them, as in
+  // the Sauvage example), never breaks this tie: the row never supplied
+  // the information needed to.
+  if (rowAttrs.concentration === null) {
+    const distinctConcentrations = new Set(survivors.map((s) => s.candidate.attrs.concentration ?? "unstated"));
+    if (distinctConcentrations.size > 1) {
+      return {
+        outcome: "needs_review",
+        winner: null,
+        competingCandidates: survivors.map((s) => s.candidate),
+        confidence: scored[0]?.score ?? null,
+      };
+    }
+  }
+
+  const classifyTop = (top: { candidate: MasterCandidate; score: number }): MasterMatchResult => {
+    if (top.score >= AUTO_MATCH_THRESHOLD) {
+      return { outcome: "auto_match", winner: top.candidate, competingCandidates: [], confidence: top.score };
+    }
+    if (top.score >= REVIEW_THRESHOLD) {
+      return { outcome: "needs_review", winner: null, competingCandidates: [top.candidate], confidence: top.score };
+    }
+    return { outcome: "no_match", winner: null, competingCandidates: [], confidence: top.score };
+  };
+
+  if (scored.length === 1) return classifyTop(scored[0]);
+
+  // 2+ survivors even after concentration is accounted for — a core-
+  // name/flanker-level ambiguity. A clear leader still auto-matches
+  // normally; a near-tie is needs_review with every near-tied candidate
+  // shown, same "don't let text alone decide when the row is genuinely
+  // ambiguous" principle applied to the flanker axis.
+  const [top, second] = scored;
+  if (top.score - second.score < SIBLING_SCORE_MARGIN) {
+    return {
+      outcome: "needs_review",
+      winner: null,
+      competingCandidates: survivors.map((s) => s.candidate),
+      confidence: top.score,
+    };
+  }
+  return classifyTop(top);
+}
+
+// Pure format ABBREVIATIONS only — never a marketed flanker name on
+// their own (unlike "Parfum"/"Cologne"/"Elixir"/"Le Parfum," which
+// genuinely distinguish one product LINE from another and must stay
+// part of the comparable core name — see extractProductAttributes's own
+// comment on "Aventus Cologne"). Verified directly against real
+// production reference-product names (all abbreviated: "EDT"/"EDP"),
+// so this covers this business's actual supplier data; a fully spelled-
+// out "Eau de Parfum" (rare in practice here) is a deliberately accepted
+// remaining gap rather than risking a strip broad enough to also eat a
+// genuine flanker word.
+const SIGNATURE_ABBREVIATION_TOKENS = new Set(["edp", "edt", "edc"]);
+
+/** Global Master Product identity signature — every structured
+ *  dimension that determines whether two items are actually the same
+ *  sellable SKU, canonically normalized so equivalent supplier wording
+ *  produces the same signature. Deliberately excludes supplier-specific
+ *  description text and supplier SKU (this is a global identity, not a
+ *  per-supplier one). Used as the fallback exact-match pointer for
+ *  auto-creation dedup when no UPC/EAN is available — see
+ *  pricing-db.ts's get-or-create-by-identity primitive.
+ *
+ *  The core-name component strips bare EDP/EDT/EDC abbreviation tokens
+ *  before joining — attrs.concentration already normalizes those to one
+ *  bucket, so leaving the literal abbreviation word in (as
+ *  coreNameTokens correctly does for TEXT similarity, on purpose) would
+ *  otherwise make "Sauvage EDP" and "Sauvage EDT" — or "EDP" vs a fully
+ *  spelled-out "Eau de Parfum," where a stray "parfum" token survives —
+ *  diverge here even though they resolve to the same concentration
+ *  field. Never touches the shared coreNameTokens/textScore path used
+ *  by the calibrated fuzzy matcher elsewhere — this is signature-only. */
+export function computeIdentitySignature(attrs: StructuredAttributes): string {
+  const signatureCoreName = attrs.coreNameTokens.filter((t) => !SIGNATURE_ABBREVIATION_TOKENS.has(t)).join(" ");
+  return [
+    attrs.brandToken,
+    signatureCoreName,
+    attrs.sizeMl ?? "",
+    attrs.concentration ?? "",
+    attrs.productForm,
+    attrs.isTester ? "tester" : "retail",
+    attrs.isGiftSet ? "giftset" : "standalone",
+    attrs.isRefill ? "refill" : "bottle",
+  ].join("|");
+}
+
+export interface AutoCreateEligibility {
+  eligible: boolean;
+  reason?: string;
+}
+
+/** Structural completeness check for auto-creating a new Master
+ *  Product — deliberately NOT a loose "2 of N fields present" rule. A
+ *  row auto-creates only when its parsed identity is a genuinely
+ *  complete, exact sellable SKU; anything less (most notably: a
+ *  fragrance whose concentration isn't stated, e.g. "DIOR SAUVAGE
+ *  100ML") stays new_candidate/needs_review instead of manufacturing an
+ *  incomplete permanent identity. */
+export function checkAutoCreateEligibility(attrs: StructuredAttributes): AutoCreateEligibility {
+  if (!attrs.brandToken) return { eligible: false, reason: "brand not recognized" };
+  if (attrs.coreNameTokens.length === 0) return { eligible: false, reason: "no fragrance/product-line name beyond brand" };
+  if (attrs.sizeMl === null) return { eligible: false, reason: "size not parsed" };
+  if (attrs.concentration === null && attrs.productForm === "fragrance") {
+    return { eligible: false, reason: "concentration ambiguous (EDT/EDP/Parfum/etc. not stated) for a fragrance item" };
+  }
+  return { eligible: true };
+}
+
+// ---------------------------------------------------------------------
 // Row-level matching — alias (with conflict revalidation) -> UPC/EAN
 // (with barcode-conflict revalidation) -> gated structured match.
 // ---------------------------------------------------------------------
@@ -347,25 +630,45 @@ export interface MatchRowInput {
 
 export interface MatchRowResult {
   productId: string | null;
+  /** Set alongside productId when the resolved identity is (or is
+   *  linked to) a Master/Reference Product, OR alone when the row
+   *  resolves to a Master Product AMORUH has never physically carried. */
+  referenceProductId: string | null;
   matchType: OfferMatchType;
   matchConfidence: number | null;
   reviewStatus: ReviewStatus;
   /** Best-guess candidate to show for a one-click confirm — set for
    *  needs_review/new_candidate/alias_conflict/barcode_conflict, never
-   *  auto-applied. */
+   *  auto-applied. Mutually exclusive with candidateReferenceProductId —
+   *  a suggestion is a real Product or a reference-only Master Product,
+   *  never both. */
   candidateProductId: string | null;
+  candidateReferenceProductId: string | null;
+  /** Set only for a genuine sibling-competition needs_review row (see
+   *  matchAgainstMasterCandidates) — every competing identity, for
+   *  display. */
+  competingCandidates?: { productId: string | null; referenceProductId: string | null }[];
 }
 
 function rawTextOf(row: Pick<MatchRowInput, "brand" | "description">): string {
   return `${row.brand} ${row.description}`;
 }
 
-export function matchSupplierRow(row: MatchRowInput, products: Product[], aliases: SupplierAlias[]): MatchRowResult {
+/** referenceProducts defaults to [] so every existing caller keeps
+ *  compiling and behaving identically (real-catalog-only matching)
+ *  until it's explicitly passed the current Master Product list. */
+export function matchSupplierRow(
+  row: MatchRowInput,
+  products: Product[],
+  aliases: SupplierAlias[],
+  referenceProducts: PricingReferenceProduct[] = []
+): MatchRowResult {
   const productById = new Map(products.map((p) => [p.id, p]));
   const rowAttrs = extractAttributes(rawTextOf(row), row.brand);
   const rowText = rawTextOf(row);
 
-  // 1. Learned alias — memory, not proof. Revalidate against the
+  // 1. Learned alias — memory, not proof. Aliases only ever point at a
+  // real Product (see SupplierAlias's type). Revalidate against the
   // aliased product's CURRENT attributes/barcode before trusting it.
   const alias = aliases.find((a) => a.offerKey === row.offerKey);
   if (alias) {
@@ -381,85 +684,228 @@ export function matchSupplierRow(row: MatchRowInput, products: Product[], aliase
       if (gate.passes && !barcodeConflict) {
         return {
           productId: alias.productId,
+          referenceProductId: null,
           matchType: "alias",
           matchConfidence: 1,
           reviewStatus: "auto_matched",
           candidateProductId: alias.productId,
+          candidateReferenceProductId: null,
         };
       }
       return {
         productId: null,
+        referenceProductId: null,
         matchType: "unmatched",
         matchConfidence: null,
         reviewStatus: "alias_conflict",
         candidateProductId: alias.productId,
+        candidateReferenceProductId: null,
       };
     }
   }
 
-  // 2. Exact UPC/EAN — strongest identifier when available, but a
-  // barcode match paired with wildly different text is flagged instead
-  // of trusted blindly (spec §3: "supplier spreadsheets can contain errors").
+  // 2. Exact UPC/EAN — strongest identifier when available, checked
+  // against real Products first (unchanged), then Master/Reference
+  // Products. A barcode match paired with wildly different text is
+  // flagged instead of trusted blindly either way (spec §3: "supplier
+  // spreadsheets can contain errors").
   const code = (row.upc || row.ean).trim().toUpperCase();
   if (code) {
-    const exact = products.find((p) => p.barcode.toUpperCase() === code);
-    if (exact) {
-      const text = bigramSimilarity(rowText, `${exact.brand} ${exact.name}`);
+    const exactProduct = products.find((p) => p.barcode.toUpperCase() === code);
+    if (exactProduct) {
+      const text = bigramSimilarity(rowText, `${exactProduct.brand} ${exactProduct.name}`);
       if (text < BARCODE_CONFLICT_TEXT_FLOOR) {
         return {
           productId: null,
+          referenceProductId: null,
           matchType: "unmatched",
           matchConfidence: null,
           reviewStatus: "barcode_conflict",
-          candidateProductId: exact.id,
+          candidateProductId: exactProduct.id,
+          candidateReferenceProductId: null,
         };
       }
       return {
-        productId: exact.id,
+        productId: exactProduct.id,
+        referenceProductId: null,
         matchType: row.upc ? "upc" : "ean",
         matchConfidence: 0.98,
         reviewStatus: "auto_matched",
-        candidateProductId: exact.id,
+        candidateProductId: exactProduct.id,
+        candidateReferenceProductId: null,
+      };
+    }
+
+    const exactRef = referenceProducts.find(
+      (rp) => (rp.upc && rp.upc.toUpperCase() === code) || (rp.ean && rp.ean.toUpperCase() === code)
+    );
+    if (exactRef) {
+      // Already linked to a real Product — resolve via that Product,
+      // per the pool-dedup rule (a linked pair is one identity, never
+      // two), but still record the Master identity alongside it.
+      const linkedProduct = exactRef.productId ? productById.get(exactRef.productId) : undefined;
+      const resolvedProductId = linkedProduct?.id ?? null;
+      const labelBrand = linkedProduct?.brand ?? exactRef.brand;
+      const labelName = linkedProduct?.name ?? exactRef.name;
+      const text = bigramSimilarity(rowText, `${labelBrand} ${labelName}`);
+      if (text < BARCODE_CONFLICT_TEXT_FLOOR) {
+        return {
+          productId: null,
+          referenceProductId: null,
+          matchType: "unmatched",
+          matchConfidence: null,
+          reviewStatus: "barcode_conflict",
+          candidateProductId: resolvedProductId,
+          candidateReferenceProductId: resolvedProductId ? null : exactRef.id,
+        };
+      }
+      return {
+        productId: resolvedProductId,
+        referenceProductId: exactRef.id,
+        matchType: row.upc ? "upc" : "ean",
+        matchConfidence: 0.98,
+        reviewStatus: "auto_matched",
+        candidateProductId: resolvedProductId,
+        candidateReferenceProductId: resolvedProductId ? null : exactRef.id,
       };
     }
   }
 
-  // 3-6. Gated structured match against every product — best candidate.
-  let best: { product: Product; score: StructuredMatchScore } | null = null;
-  for (const p of products) {
-    const productAttrs = extractProductAttributes(p);
-    const score = scoreStructuredMatch(rowAttrs, productAttrs);
-    if (score.confidence > 0 && (!best || score.confidence > best.score.confidence)) {
-      best = { product: p, score };
-    }
-  }
+  // 3. Gated structured match against the combined, deduped Master
+  // Product candidate pool — ambiguity judged relative to what the row
+  // itself specifies (see matchAgainstMasterCandidates).
+  const pool = buildMasterCandidatePool(products, referenceProducts);
+  const result = matchAgainstMasterCandidates(rowAttrs, pool);
 
-  if (best && best.score.confidence >= AUTO_MATCH_THRESHOLD) {
+  if (result.outcome === "auto_match" && result.winner) {
     return {
-      productId: best.product.id,
+      productId: result.winner.productId,
+      referenceProductId: result.winner.referenceProductId,
       matchType: "structured",
-      matchConfidence: Math.round(best.score.confidence * 100) / 100,
+      matchConfidence: result.confidence !== null ? Math.round(result.confidence * 100) / 100 : null,
       reviewStatus: "auto_matched",
-      candidateProductId: best.product.id,
+      candidateProductId: result.winner.productId,
+      candidateReferenceProductId: result.winner.productId ? null : result.winner.referenceProductId,
     };
   }
-  if (best && best.score.confidence >= REVIEW_THRESHOLD) {
+
+  if (result.outcome === "needs_review") {
+    const top = result.competingCandidates[0] ?? null;
     return {
       productId: null,
+      referenceProductId: null,
       matchType: "unmatched",
-      matchConfidence: Math.round(best.score.confidence * 100) / 100,
+      matchConfidence: result.confidence !== null ? Math.round(result.confidence * 100) / 100 : null,
       reviewStatus: "needs_review",
-      candidateProductId: best.product.id,
+      candidateProductId: top?.productId ?? null,
+      candidateReferenceProductId: top?.productId ? null : (top?.referenceProductId ?? null),
+      competingCandidates:
+        result.competingCandidates.length > 1
+          ? result.competingCandidates.map((c) => ({ productId: c.productId, referenceProductId: c.referenceProductId }))
+          : undefined,
     };
   }
 
   return {
     productId: null,
+    referenceProductId: null,
     matchType: "unmatched",
-    matchConfidence: best ? Math.round(best.score.confidence * 100) / 100 : null,
+    matchConfidence: result.confidence !== null ? Math.round(result.confidence * 100) / 100 : null,
     reviewStatus: "new_candidate",
-    candidateProductId: best?.product.id ?? null,
+    candidateProductId: null,
+    candidateReferenceProductId: null,
   };
+}
+
+// ---------------------------------------------------------------------
+// Import safety — plan's "Import safety" section. A read-only dry-match
+// pass over PARSED rows (never over raw upload rows) against the
+// current catalog/aliases/Master Products, extending the Preview step
+// rather than a third UI step. Never writes anything — the caller
+// (parse-preview route) already never writes; this is purely additive
+// classification of what processing WOULD do.
+// ---------------------------------------------------------------------
+
+export interface MatchPreviewSummary {
+  totalRows: number;
+  matchedProduct: number;
+  matchedReferenceProduct: number;
+  proposedNewMasterProducts: number;
+  requiresReview: number;
+  /** A genuine "nothing matched, and not even structurally complete
+   *  enough to auto-create" row — e.g. no brand recognized at all, or a
+   *  fragrance whose concentration is unstated. Distinct from
+   *  requiresReview (which DOES have a specific competing candidate or
+   *  conflict to show); this is the honest "we can't say anything about
+   *  this row yet" bucket. */
+  unsupported: number;
+}
+
+export function computeMatchPreview(
+  rows: { supplierSku: string; description: string; brand: string; upc: string; ean: string }[],
+  products: Product[],
+  aliases: SupplierAlias[],
+  referenceProducts: PricingReferenceProduct[]
+): MatchPreviewSummary {
+  let matchedProduct = 0;
+  let matchedReferenceProduct = 0;
+  let proposedNewMasterProducts = 0;
+  let requiresReview = 0;
+  let unsupported = 0;
+
+  // A local, in-memory-only "would auto-create" pool — mirrors the real
+  // upload's own mutable in-import list (plan §4/§5b) so a genuine
+  // repeat of the same physical item within this SAME preview is only
+  // counted once, not twice. Never written to Redis; discarded with this
+  // function call.
+  const previewPool = [...referenceProducts];
+  let previewIdSeq = 0;
+
+  for (const row of rows) {
+    const offerKey = deriveOfferKey(row.supplierSku, row.description);
+    const match = matchSupplierRow({ offerKey, ...row }, products, aliases, previewPool);
+
+    if (match.reviewStatus === "auto_matched") {
+      if (match.productId) matchedProduct++;
+      else matchedReferenceProduct++;
+      continue;
+    }
+    if (match.reviewStatus === "new_candidate") {
+      const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, row.brand);
+      const eligibility = checkAutoCreateEligibility(rowAttrs);
+      if (!eligibility.eligible) {
+        unsupported++;
+        continue;
+      }
+      proposedNewMasterProducts++;
+      previewPool.push({
+        id: `preview_${previewIdSeq++}`,
+        brand: row.brand,
+        name: row.description,
+        description: row.description,
+        sizeMl: rowAttrs.sizeMl,
+        concentration: rowAttrs.concentration,
+        isTester: rowAttrs.isTester,
+        isGiftSet: rowAttrs.isGiftSet,
+        isRefill: rowAttrs.isRefill,
+        productForm: rowAttrs.productForm,
+        upc: row.upc,
+        ean: row.ean,
+        productId: null,
+        createdAt: "",
+        createdBy: "preview",
+        creationMethod: "auto_import",
+        createdFromSupplierId: null,
+        createdFromUploadId: null,
+        createdFromOfferKey: null,
+      });
+      continue;
+    }
+    // needs_review, alias_conflict, barcode_conflict
+    requiresReview++;
+  }
+
+  return { totalRows: rows.length, matchedProduct, matchedReferenceProduct, proposedNewMasterProducts, requiresReview, unsupported };
 }
 
 // ---------------------------------------------------------------------

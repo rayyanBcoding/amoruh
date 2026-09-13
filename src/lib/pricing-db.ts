@@ -6,6 +6,7 @@ import type {
   OfferComparisonRow,
   PricingReferenceProduct,
   ProductOfferComparison,
+  ReferenceProductOfferComparison,
   ReviewStatus,
   SupplierAlias,
   SupplierOfferCurrent,
@@ -51,8 +52,26 @@ const KEYS = {
   offersByProduct: (productId: string) => `amoruh:pricing:offers_by_product:${productId}`,
   referenceProduct: (id: string) => `amoruh:pricing:reference_product:${id}`,
   referenceProductsIndex: "amoruh:pricing:reference_products_index",
-  referenceProductByUpc: (upc: string) => `amoruh:pricing:reference_product_by_upc:${upc}`,
-  referenceProductByEan: (ean: string) => `amoruh:pricing:reference_product_by_ean:${ean}`,
+  // Normalized (trimmed + uppercased) at this single choke point so every
+  // caller's pointer read/write agrees regardless of the case IT happens
+  // to pass — real barcodes here are numeric-only (uppercasing is a
+  // no-op), but callers that build these keys are otherwise inconsistent
+  // about case (matchSupplierRow's own in-memory barcode comparisons
+  // already uppercase both sides; the pointer-key callers didn't, until
+  // now) — confirmed directly via a real cross-file mismatch during
+  // Phase 1 verification (intake-product-linking.ts's own lookup
+  // uppercases before calling these).
+  referenceProductByUpc: (upc: string) => `amoruh:pricing:reference_product_by_upc:${upc.trim().toUpperCase()}`,
+  referenceProductByEan: (ean: string) => `amoruh:pricing:reference_product_by_ean:${ean.trim().toUpperCase()}`,
+  /** Global Master Product identity signature pointer — see
+   *  computeIdentitySignature (pricing-matching.ts). The fallback exact-
+   *  match check for auto-creation dedup when a row has no UPC/EAN. */
+  referenceProductBySignature: (signature: string) => `amoruh:pricing:reference_product_by_signature:${signature}`,
+  /** Mirrors offersByProduct exactly, for Master/Reference Products —
+   *  the reverse index a search/comparison view needs to answer "every
+   *  supplier offer for this Master Product," same as offersByProduct
+   *  already does for real Products. */
+  offersByReferenceProduct: (referenceProductId: string) => `amoruh:pricing:offers_by_reference_product:${referenceProductId}`,
 } as const;
 
 export function newId(prefix: string): string {
@@ -242,6 +261,16 @@ export interface OffersByProductOp {
   member: string; // `${supplierId}::${offerKey}`
 }
 
+/** Mirrors OffersByProductOp exactly, for the Master/Reference Product
+ *  reverse index. The commit/resolve scripts below are already fully
+ *  generic over "any SADD/SREM pair from KEYS[5..]/KEYS[3..] onward" —
+ *  this reuses that same mechanism rather than a second script. */
+export interface OffersByReferenceProductOp {
+  op: "SADD" | "SREM";
+  referenceProductId: string;
+  member: string;
+}
+
 export async function commitGeneration(input: {
   supplierId: string;
   uploadId: string;
@@ -250,13 +279,16 @@ export async function commitGeneration(input: {
   finishedUpload: SupplierPriceUpload;
   newAliases: SupplierAlias[];
   offersByProductOps: OffersByProductOp[];
+  offersByReferenceProductOps?: OffersByReferenceProductOp[];
 }): Promise<"OK" | "STALE_GENERATION"> {
+  const refOps = input.offersByReferenceProductOps ?? [];
   const keys = [
     KEYS.currentGenerationId(input.supplierId),
     KEYS.currentGenerationSeq(input.supplierId),
     KEYS.upload(input.uploadId),
     KEYS.aliases(input.supplierId),
     ...input.offersByProductOps.map((o) => KEYS.offersByProduct(o.productId)),
+    ...refOps.map((o) => KEYS.offersByReferenceProduct(o.referenceProductId)),
   ];
   const args = [
     String(input.seq),
@@ -264,6 +296,7 @@ export async function commitGeneration(input: {
     JSON.stringify(input.finishedUpload),
     JSON.stringify(input.newAliases),
     ...input.offersByProductOps.flatMap((o) => [o.op, o.member]),
+    ...refOps.flatMap((o) => [o.op, o.member]),
   ];
   return redis.eval<(string | number)[], "OK" | "STALE_GENERATION">(COMMIT_SCRIPT, keys, args);
 }
@@ -298,20 +331,24 @@ export async function resolveOfferManually(input: {
   updatedOffer: SupplierOfferCurrent;
   newAliases: SupplierAlias[];
   offersByProductOps: OffersByProductOp[];
+  offersByReferenceProductOps?: OffersByReferenceProductOp[];
 }): Promise<void> {
   const generationId = await getCurrentGenerationId(input.supplierId);
   if (!generationId) throw new Error("This supplier has no committed price list to update yet.");
 
+  const refOps = input.offersByReferenceProductOps ?? [];
   const keys = [
     KEYS.offerCurrentHash(input.supplierId, generationId),
     KEYS.aliases(input.supplierId),
     ...input.offersByProductOps.map((o) => KEYS.offersByProduct(o.productId)),
+    ...refOps.map((o) => KEYS.offersByReferenceProduct(o.referenceProductId)),
   ];
   const args = [
     input.offerKey,
     JSON.stringify(input.updatedOffer),
     JSON.stringify(input.newAliases),
     ...input.offersByProductOps.flatMap((o) => [o.op, o.member]),
+    ...refOps.flatMap((o) => [o.op, o.member]),
   ];
   await redis.eval<(string | number)[], string>(RESOLVE_OFFER_SCRIPT, keys, args);
 }
@@ -372,6 +409,32 @@ export async function createReferenceProduct(
   return product;
 }
 
+/** Sets productId on an existing Master Product — the ONLY way this link
+ *  is ever made, from Intake's own receiving-time integration hook (plan
+ *  §6, intake-product-linking.ts), once something is actually stocked.
+ *  A plain read-modify-write is safe here: productId has no reverse-
+ *  index consequences of its own (offers_by_reference_product stays
+ *  keyed by the Master Product's own id regardless), and this never
+ *  silently reassigns an EXISTING different link — that would be
+ *  exactly the kind of guess §6 forbids, so it's refused instead. */
+export async function linkReferenceProductToProduct(
+  referenceProductId: string,
+  productId: string
+): Promise<
+  | { ok: true; referenceProduct: PricingReferenceProduct }
+  | { ok: false; reason: "not_found" | "already_linked_elsewhere" }
+> {
+  const existing = await getReferenceProduct(referenceProductId);
+  if (!existing) return { ok: false, reason: "not_found" };
+  if (existing.productId && existing.productId !== productId) {
+    return { ok: false, reason: "already_linked_elsewhere" };
+  }
+  if (existing.productId === productId) return { ok: true, referenceProduct: existing };
+  const updated: PricingReferenceProduct = { ...existing, productId };
+  await redis.set(KEYS.referenceProduct(referenceProductId), updated);
+  return { ok: true, referenceProduct: updated };
+}
+
 /** Newest-first page of the index — bounded, never a full-collection
  *  read. */
 export async function getReferenceProducts(params: { limit?: number; cursor?: number } = {}): Promise<{
@@ -425,6 +488,131 @@ export async function searchReferenceProducts(query: string, limit = 20): Promis
     cursor += REFERENCE_SEARCH_PAGE_SIZE;
   }
   return results;
+}
+
+/** Fetches the ENTIRE reference-product catalog — the matching pool a
+ *  supplier upload's row loop needs (pricing-process.ts) and the pool
+ *  buildMasterCandidatePool dedupes against linked real Products. Same
+ *  bounded-page-to-exhaustion shape as searchReferenceProducts's full
+ *  scan, just collecting every record instead of filtering by text. At
+ *  this business's scale (hundreds to low thousands of Master Products)
+ *  this is a bounded, once-per-upload cost, not a hot per-request path. */
+export async function getAllReferenceProducts(): Promise<PricingReferenceProduct[]> {
+  const PAGE = 200;
+  const all: PricingReferenceProduct[] = [];
+  let cursor = 0;
+  for (;;) {
+    const ids = (await redis.zrange(KEYS.referenceProductsIndex, cursor, cursor + PAGE - 1)) as string[];
+    if (ids.length === 0) break;
+    const records = await Promise.all(ids.map(getReferenceProduct));
+    for (const r of records) if (r) all.push(r);
+    if (ids.length < PAGE) break;
+    cursor += PAGE;
+  }
+  return all;
+}
+
+// ---------------------------------------------------------------------
+// Idempotent get-or-create for auto-created Master Products — plan §5b.
+// A small atomic script over a FIXED set of pointer keys, same shape as
+// RESOLVE_OFFER_SCRIPT/COMMIT_SCRIPT above, not a new paradigm. Checks
+// the UPC pointer, EAN pointer, and the structural identity-signature
+// pointer (computeIdentitySignature, pricing-matching.ts) together:
+//
+//  - all pointers that resolve agree on one id (or only one resolves at
+//    all) → EXISTING — the caller must treat the record as-is and never
+//    write to its provenance fields (creationMethod/createdFrom*/
+//    createdAt); this is what makes a retried upload, an independently
+//    re-uploaded file, or a second supplier's row for the same physical
+//    item all resolve to the SAME Master Product instead of duplicating
+//    it, without ever silently overwriting who/why it was first created.
+//  - pointers resolve to DIFFERENT existing records → CONFLICT, every id
+//    involved — never auto-picked, merged, or auto-linked. The caller
+//    routes this to needs_review with every conflicting candidate shown.
+//  - nothing resolves → CREATED — writes the record, the index entry,
+//    and every pointer that has a real value (UPC/EAN may be blank;
+//    signature is always present), all atomically.
+//
+// Returns a plain delimited string ("CREATED:<id>" / "EXISTING:<id>" /
+// "CONFLICT:<id>,<id>,...") rather than JSON — Upstash auto-deserializes
+// any JSON-shaped string a script returns, so Lua-script returns in this
+// codebase are always kept as bare/delimited strings (see COMMIT_SCRIPT
+// above).
+// ---------------------------------------------------------------------
+
+const GET_OR_CREATE_REFERENCE_PRODUCT_SCRIPT = `
+local hasUpc = ARGV[1] == '1'
+local hasEan = ARGV[2] == '1'
+local newId = ARGV[3]
+
+local upcId = false
+local eanId = false
+if hasUpc then
+  upcId = redis.call('GET', KEYS[1])
+end
+if hasEan then
+  eanId = redis.call('GET', KEYS[2])
+end
+local sigId = redis.call('GET', KEYS[3])
+
+local found = {}
+local seen = {}
+if upcId then
+  if not seen[upcId] then seen[upcId] = true table.insert(found, upcId) end
+end
+if eanId then
+  if not seen[eanId] then seen[eanId] = true table.insert(found, eanId) end
+end
+if sigId then
+  if not seen[sigId] then seen[sigId] = true table.insert(found, sigId) end
+end
+
+if #found > 1 then
+  return 'CONFLICT:' .. table.concat(found, ',')
+end
+if #found == 1 then
+  return 'EXISTING:' .. found[1]
+end
+
+redis.call('SET', KEYS[4], ARGV[4])
+redis.call('ZADD', KEYS[5], ARGV[5], newId)
+if hasUpc then
+  redis.call('SET', KEYS[1], newId)
+end
+if hasEan then
+  redis.call('SET', KEYS[2], newId)
+end
+redis.call('SET', KEYS[3], newId)
+return 'CREATED:' .. newId
+`;
+
+export type GetOrCreateReferenceProductResult =
+  | { status: "created"; id: string; product: PricingReferenceProduct }
+  | { status: "existing"; id: string }
+  | { status: "conflict"; ids: string[] };
+
+export async function getOrCreateReferenceProductByIdentity(
+  identity: { upc: string; ean: string; signature: string },
+  newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt">
+): Promise<GetOrCreateReferenceProductResult> {
+  const hasUpc = identity.upc.length > 0;
+  const hasEan = identity.ean.length > 0;
+  const id = newId("refprod");
+  const product: PricingReferenceProduct = { ...newRecordInput, id, createdAt: new Date().toISOString() };
+
+  const keys = [
+    hasUpc ? KEYS.referenceProductByUpc(identity.upc) : KEYS.referenceProductByUpc("__unused__"),
+    hasEan ? KEYS.referenceProductByEan(identity.ean) : KEYS.referenceProductByEan("__unused__"),
+    KEYS.referenceProductBySignature(identity.signature),
+    KEYS.referenceProduct(id),
+    KEYS.referenceProductsIndex,
+  ];
+  const args = [hasUpc ? "1" : "0", hasEan ? "1" : "0", id, JSON.stringify(product), String(Date.now())];
+
+  const raw = await redis.eval<(string | number)[], string>(GET_OR_CREATE_REFERENCE_PRODUCT_SCRIPT, keys, args);
+  if (raw.startsWith("CONFLICT:")) return { status: "conflict", ids: raw.slice("CONFLICT:".length).split(",") };
+  if (raw.startsWith("EXISTING:")) return { status: "existing", id: raw.slice("EXISTING:".length) };
+  return { status: "created", id: raw.slice("CREATED:".length), product };
 }
 
 // ---------------------------------------------------------------------
@@ -501,6 +689,77 @@ export async function getProductOfferComparison(productId: string): Promise<Prod
   return { productId, actionable, nonActionable, bestPrice: actionable[0] ?? null };
 }
 
+/** One-time backfill primitive for offers_by_reference_product — adds a
+ *  supplier/offerKey membership that predates this index (see the
+ *  one-time backfill script; the ~10 offers already tracked via "Track
+ *  for Pricing" before this reverse index existed). Idempotent (SADD is
+ *  naturally idempotent, safe to re-run). No other code path should ever
+ *  call this directly — every ONGOING write goes through
+ *  commitGeneration/resolveOfferManually instead, which keep this index
+ *  and the generation commit atomic together. */
+export async function backfillOfferByReferenceProduct(referenceProductId: string, supplierId: string, offerKey: string): Promise<void> {
+  await redis.sadd(KEYS.offersByReferenceProduct(referenceProductId), `${supplierId}::${offerKey}`);
+}
+
+export async function getOffersByReferenceProduct(referenceProductId: string): Promise<{ supplierId: string; offerKey: string }[]> {
+  const members = (await redis.smembers(KEYS.offersByReferenceProduct(referenceProductId))) as string[];
+  return members.map((m) => {
+    const [supplierId, offerKey] = m.split("::");
+    return { supplierId, offerKey };
+  });
+}
+
+/** Direct twin of getProductOfferComparison for a Master Product that
+ *  has no linked real Product yet (or is being viewed by its Master
+ *  identity directly) — same comparison logic, keyed by
+ *  referenceProductId instead of productId. */
+export async function getReferenceProductOfferComparison(referenceProductId: string): Promise<ReferenceProductOfferComparison> {
+  const refs = await getOffersByReferenceProduct(referenceProductId);
+  const [suppliers, offers] = await Promise.all([
+    getSuppliers(),
+    Promise.all(refs.map((r) => getCurrentOffer(r.supplierId, r.offerKey))),
+  ]);
+  const supplierById = new Map(suppliers.map((s) => [s.id, s]));
+
+  const rows: OfferComparisonRow[] = [];
+  for (let i = 0; i < refs.length; i++) {
+    const offer = offers[i];
+    if (!offer) continue;
+    const rate = await getUsdRate(offer.currency);
+    const priceUsd = convertToUsd(offer.price, rate?.rate ?? null) ?? offer.price;
+    const ageDays = ageDaysOf(offer.uploadedAt);
+    rows.push({
+      supplierId: refs[i].supplierId,
+      supplierName: supplierById.get(refs[i].supplierId)?.name ?? "Unknown Supplier",
+      offerKey: offer.offerKey,
+      price: offer.price,
+      currency: offer.currency,
+      priceUsd,
+      currentlyListed: offer.currentlyListed,
+      quantity: offer.quantity,
+      isStale: ageDays > DEFAULT_FRESHNESS_THRESHOLD_DAYS,
+      ageDays: Math.round(ageDays * 10) / 10,
+      uploadedAt: offer.uploadedAt,
+      reviewStatus: offer.reviewStatus,
+    });
+  }
+
+  const actionable = rows
+    .filter(
+      (r) =>
+        r.currentlyListed &&
+        (r.quantity === null || r.quantity > 0) &&
+        !r.isStale &&
+        (r.reviewStatus === "auto_matched" || r.reviewStatus === "confirmed")
+    )
+    .sort((a, b) => a.priceUsd - b.priceUsd);
+  const nonActionable = rows
+    .filter((r) => !actionable.includes(r))
+    .sort((a, b) => a.priceUsd - b.priceUsd);
+
+  return { referenceProductId, actionable, nonActionable, bestPrice: actionable[0] ?? null };
+}
+
 // ---------------------------------------------------------------------
 // Match Review — operates ONLY on currently-listed offers.
 //
@@ -538,6 +797,8 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
   const suppliers = await getSuppliers();
   const bySupplier: MatchReviewSummary["bySupplier"] = [];
   let matched = 0;
+  let matchedCarried = 0;
+  let matchedReferenceOnly = 0;
   let reviewRequired = 0;
   let newCandidates = 0;
   let newCandidatesUntracked = 0;
@@ -550,6 +811,8 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
     const noLongerListed = offers.length - listed.length;
 
     let sMatched = 0;
+    let sMatchedCarried = 0;
+    let sMatchedReferenceOnly = 0;
     let sReview = 0;
     let sCandidates = 0;
     let sCandidatesUntracked = 0;
@@ -557,8 +820,15 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
     let sIgnored = 0;
     for (const o of listed) {
       const bucket = bucketOf(o.reviewStatus);
-      if (bucket === "matched") sMatched++;
-      else if (bucket === "review_required") sReview++;
+      if (bucket === "matched") {
+        sMatched++;
+        // Sub-split by whether the resolved identity is physically
+        // carried (productId set) vs. a Master identity AMORUH has
+        // never stocked — computed from existing fields, no new
+        // reviewStatus value.
+        if (o.productId) sMatchedCarried++;
+        else sMatchedReferenceOnly++;
+      } else if (bucket === "review_required") sReview++;
       else if (bucket === "new_candidates") {
         sCandidates++;
         if (o.referenceProductId) sCandidatesTracked++;
@@ -572,6 +842,8 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
       currentlyListed: listed.length,
       noLongerListed,
       matched: sMatched,
+      matchedCarried: sMatchedCarried,
+      matchedReferenceOnly: sMatchedReferenceOnly,
       reviewRequired: sReview,
       newCandidates: sCandidates,
       newCandidatesUntracked: sCandidatesUntracked,
@@ -579,6 +851,8 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
       ignored: sIgnored,
     });
     matched += sMatched;
+    matchedCarried += sMatchedCarried;
+    matchedReferenceOnly += sMatchedReferenceOnly;
     reviewRequired += sReview;
     newCandidates += sCandidates;
     newCandidatesUntracked += sCandidatesUntracked;
@@ -586,7 +860,17 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
     ignored += sIgnored;
   }
 
-  return { matched, reviewRequired, newCandidates, newCandidatesUntracked, newCandidatesTracked, ignored, bySupplier };
+  return {
+    matched,
+    matchedCarried,
+    matchedReferenceOnly,
+    reviewRequired,
+    newCandidates,
+    newCandidatesUntracked,
+    newCandidatesTracked,
+    ignored,
+    bySupplier,
+  };
 }
 
 /** Paginated, filterable items for one Match Review tab — serves all
@@ -641,6 +925,8 @@ export async function getMatchReviewItems(params: {
         matchConfidence: o.matchConfidence,
         candidateProductId: o.candidateProductId,
         candidateLabel: null,
+        candidateReferenceProductId: o.candidateReferenceProductId ?? null,
+        competingCandidates: o.competingCandidates,
         referenceProductId: o.referenceProductId,
       });
     }
@@ -649,4 +935,68 @@ export async function getMatchReviewItems(params: {
   const total = matching.length;
   const items = matching.slice(offset, offset + limit);
   return { items, total };
+}
+
+// ---------------------------------------------------------------------
+// Global search — plan §4. Generalizes the same "no productId and no
+// referenceProductId" (still genuinely unresolved) text search
+// getMatchReviewItems already does per-bucket into one shared function,
+// callable from both Match Review and the global Pricing/Ordering
+// search, rather than a second implementation.
+// ---------------------------------------------------------------------
+
+const UNRESOLVED_STATUSES: ReviewStatus[] = ["new_candidate", ...REVIEW_REQUIRED_STATUSES];
+
+export interface UnresolvedOfferSearchResult {
+  supplierId: string;
+  supplierName: string;
+  offerKey: string;
+  description: string;
+  brand: string;
+  supplierSku: string;
+  upc: string;
+  ean: string;
+  reviewStatus: ReviewStatus;
+}
+
+/** Any current, currently-listed offer that resolves to neither a real
+ *  Product nor a Master Product — new_candidate/needs_review/
+ *  alias_conflict/barcode_conflict. Deliberately excludes "ignored"
+ *  (an operator's deliberate dismissal, not something search should
+ *  keep resurfacing) and anything already matched/tracked (covered by
+ *  the product/reference_product result types instead). Bounded by
+ *  `limit` per the same reasoning as searchReferenceProducts — this
+ *  scans every supplier's committed offers, which at this business's
+ *  scale is a bounded, occasional-search cost, not a hot path. */
+export async function searchUnresolvedOffers(query: string, limit = 20): Promise<UnresolvedOfferSearchResult[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const q = trimmed.toLowerCase();
+
+  const suppliers = await getSuppliers();
+  const results: UnresolvedOfferSearchResult[] = [];
+  for (const s of suppliers) {
+    if (results.length >= limit) break;
+    const offers = Object.values(await getCommittedOffers(s.id));
+    for (const o of offers) {
+      if (results.length >= limit) break;
+      if (o.currentlyListed === false) continue;
+      if (o.productId || o.referenceProductId) continue;
+      if (!UNRESOLVED_STATUSES.includes(o.reviewStatus)) continue;
+      const haystack = `${o.description} ${o.brand} ${o.supplierSku} ${o.upc} ${o.ean}`.toLowerCase();
+      if (!haystack.includes(q)) continue;
+      results.push({
+        supplierId: s.id,
+        supplierName: s.name,
+        offerKey: o.offerKey,
+        description: o.description,
+        brand: o.brand,
+        supplierSku: o.supplierSku,
+        upc: o.upc,
+        ean: o.ean,
+        reviewStatus: o.reviewStatus,
+      });
+    }
+  }
+  return results;
 }

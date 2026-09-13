@@ -20,6 +20,13 @@ export type OfferMatchType =
   | "ean"
   | "structured"
   | "manual"
+  /** A brand-new Master Product was auto-created for this row — never a
+   *  match to something pre-existing (see pricing-process.ts's
+   *  auto-creation eligibility check). Distinguished from "structured"
+   *  (a genuine structural match) so the audit trail can always tell
+   *  "matched to something known" apart from "AMORUH created this
+   *  identity right now." */
+  | "auto_created"
   | "unmatched";
 
 /** One row from one supplier upload, as originally received — the
@@ -52,6 +59,21 @@ export interface SupplierOfferSnapshot {
    *  review / new candidate / alias conflict / barcode conflict) — shown
    *  for a fast one-click confirm, never auto-applied. */
   candidateProductId: string | null;
+  /** Same idea as candidateProductId, for when the best guess is a
+   *  Master/Reference Product AMORUH has never stocked rather than a
+   *  real Product — mutually exclusive with candidateProductId (a
+   *  suggestion is one or the other, never both). */
+  candidateReferenceProductId: string | null;
+  /** Set only when reviewStatus is needs_review because multiple
+   *  plausible identities genuinely compete and the row itself doesn't
+   *  specify enough to choose between them (e.g. "DIOR SAUVAGE 100ML"
+   *  against EDT/EDP/Parfum Master Products — see pricing-matching.ts's
+   *  row-relative ambiguity rule). Every competing identity, for
+   *  display; each entry is either a real Product or a Master/Reference
+   *  Product. candidateProductId/candidateReferenceProductId above stay
+   *  the "top pick" for one-click actions in the ordinary needs_review
+   *  case — this is only for the genuine-sibling-competition case. */
+  competingCandidates?: { productId: string | null; referenceProductId: string | null }[];
   matchType: OfferMatchType;
   matchConfidence: number | null;
   reviewStatus: ReviewStatus;
@@ -101,6 +123,13 @@ export interface SupplierOfferCurrent {
   ean: string;
   productId: string | null;
   candidateProductId: string | null;
+  /** See the identical field on SupplierOfferSnapshot. */
+  candidateReferenceProductId: string | null;
+  /** See the identical field on SupplierOfferSnapshot. Not carried
+   *  forward on its own — recomputed fresh every upload from whatever
+   *  is currently ambiguous; only referenceProductId/rejectedCandidate-
+   *  ProductIds below persist across uploads. */
+  competingCandidates?: { productId: string | null; referenceProductId: string | null }[];
   matchType: OfferMatchType;
   matchConfidence: number | null;
   reviewStatus: ReviewStatus;
@@ -183,6 +212,10 @@ export interface MatchReviewItem {
   /** Best-guess candidate for a one-click confirm — never auto-applied. */
   candidateProductId: string | null;
   candidateLabel: string | null;
+  candidateReferenceProductId: string | null;
+  /** See the identical field on SupplierOfferCurrent — set only for a
+   *  genuine sibling-competition needs_review row. */
+  competingCandidates?: { productId: string | null; referenceProductId: string | null }[];
   referenceProductId: string | null;
 }
 
@@ -197,6 +230,12 @@ export interface MatchReviewSupplierBreakdown {
   currentlyListed: number;
   noLongerListed: number;
   matched: number;
+  /** Sub-split of matched by whether the resolved identity is physically
+   *  carried (productId set, on the real or linked Master Product) vs.
+   *  a Master identity AMORUH has never stocked. matchedCarried +
+   *  matchedReferenceOnly === matched always. */
+  matchedCarried: number;
+  matchedReferenceOnly: number;
   reviewRequired: number;
   newCandidates: number;
   /** Sub-split of newCandidates by whether an operator has already
@@ -211,6 +250,8 @@ export interface MatchReviewSupplierBreakdown {
 
 export interface MatchReviewSummary {
   matched: number;
+  matchedCarried: number;
+  matchedReferenceOnly: number;
   reviewRequired: number;
   newCandidates: number;
   newCandidatesUntracked: number;
@@ -219,15 +260,18 @@ export interface MatchReviewSummary {
   bySupplier: MatchReviewSupplierBreakdown[];
 }
 
-/** A Pricing/Ordering-only tracked item — lets an operator name/price-
- *  compare something across suppliers without ever creating a real
- *  Inventory Product. Never read by Dashboard, Go Live, Inventory, or TV;
- *  a real Product is only ever created by Inventory Intake receiving or
- *  an intentional manual "Add Product" for stock actually owned. Carries
- *  the same structured identity the matching engine extracts for real
- *  products (see extractAttributes in pricing-matching.ts) so it's ready
- *  for cross-supplier comparison without another migration later — auto-
- *  matching against these is NOT built this pass; linking is manual. */
+/** AMORUH's canonical Master Product identity — ONE record per exact
+ *  sellable fragrance SKU, whether or not AMORUH has ever physically
+ *  carried it. Supplier offers attach here; a real Product is created
+ *  ONLY by Inventory Intake receiving or an intentional manual "Add
+ *  Product" for stock actually owned — never by Pricing/Ordering,
+ *  before or after Phase 2. Carries the full structured identity the
+ *  matching engine extracts (see extractAttributes/classifyProductForm
+ *  in pricing-matching.ts) so two candidates can only ever be treated
+ *  as the same SKU when every material dimension agrees — never text
+ *  similarity alone. Zero inventory on a Master Product means "never
+ *  carried," never "sold out" — that distinction is what productId
+ *  encodes below. */
 export interface PricingReferenceProduct {
   id: string;
   brand: string;
@@ -237,16 +281,53 @@ export interface PricingReferenceProduct {
   concentration: string | null;
   isTester: boolean;
   isGiftSet: boolean;
+  /** Refill vs. standalone bottle — a materially different sellable SKU
+   *  from either a bottle or a gift set, even at the same brand/size/
+   *  concentration. */
+  isRefill: boolean;
+  /** "fragrance" (the default, covering the overwhelming majority of
+   *  rows) or an explicit non-fragrance form (body lotion, deodorant,
+   *  aftershave, body spray, shower gel, soap, candle, ...) — see
+   *  classifyProductForm. A recognized, differing productForm on both
+   *  sides is a hard gate everywhere this identity is compared against
+   *  anything else; this is what stops a body lotion from ever being
+   *  treated as the same SKU as an EDT. */
+  productForm: string;
   upc: string;
   ean: string;
+  /** Set ONLY by Inventory Intake's receiving-time integration hook, the
+   *  moment this exact identity is actually stocked — never by anything
+   *  in Pricing/Ordering, never a guess. null means "AMORUH has never
+   *  carried this," not "sold out." */
+  productId: string | null;
   createdAt: string;
   createdBy: string;
+  /** Audit-only provenance for how/why this Master Product came to
+   *  exist — never implies inventory ownership, never read by any
+   *  matching/eligibility logic. Set exactly once, at genuine creation;
+   *  a later get-or-create that resolves to this same existing record
+   *  (a retry, a different supplier's matching offer, ...) never
+   *  overwrites these. */
+  creationMethod: "auto_import" | "manual_track";
+  createdFromSupplierId: string | null;
+  createdFromUploadId: string | null;
+  createdFromOfferKey: string | null;
 }
 
 /** One master product's current price comparison across every supplier
  *  that currently (or previously) listed it. */
 export interface ProductOfferComparison {
   productId: string;
+  actionable: OfferComparisonRow[];
+  nonActionable: OfferComparisonRow[];
+  bestPrice: OfferComparisonRow | null;
+}
+
+/** Direct twin of ProductOfferComparison for a Master Product that has no
+ *  linked real Product (or whose comparison view is entered via its
+ *  Master identity) — same shape, keyed by referenceProductId instead. */
+export interface ReferenceProductOfferComparison {
+  referenceProductId: string;
   actionable: OfferComparisonRow[];
   nonActionable: OfferComparisonRow[];
   bestPrice: OfferComparisonRow | null;

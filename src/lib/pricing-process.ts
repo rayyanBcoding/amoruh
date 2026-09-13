@@ -3,7 +3,10 @@ import {
   commitGeneration,
   createUpload,
   getAliasesForSupplier,
+  getAllReferenceProducts,
   getCommittedOffers,
+  getOrCreateReferenceProductByIdentity,
+  getReferenceProduct,
   getUpload,
   markUploadFailed,
   newId,
@@ -11,8 +14,17 @@ import {
   writeCandidateGeneration,
   writeSnapshotsBatch,
   type OffersByProductOp,
+  type OffersByReferenceProductOp,
 } from "./pricing-db";
-import { deriveOfferKey, matchSupplierRow, findPreviousBySupplierItemIdentity } from "./pricing-matching";
+import {
+  checkAutoCreateEligibility,
+  computeIdentitySignature,
+  deriveOfferKey,
+  extractAttributes,
+  matchSupplierRow,
+  findPreviousBySupplierItemIdentity,
+  type MatchPreviewSummary,
+} from "./pricing-matching";
 import {
   applyColumnMapping,
   columnMapInBounds,
@@ -129,16 +141,23 @@ export async function processSupplierUpload(input: {
 
     await updateUploadProgress(upload.id, { totalRows: rows.length });
 
-    const [products, existingAliases, previousOffers] = await Promise.all([
+    const [products, existingAliases, previousOffers, referenceProducts] = await Promise.all([
       getProducts(),
       getAliasesForSupplier(input.supplierId),
       getCommittedOffers(input.supplierId),
+      // Mutable for the duration of this upload — a row that auto-creates
+      // (or reuses, via the identity get-or-create) a Master Product is
+      // pushed in immediately, so a LATER row in this SAME file for the
+      // same physical item sees it through the normal exact-match path
+      // instead of independently re-running auto-creation (plan §4/§5b).
+      getAllReferenceProducts(),
     ]);
 
     const candidateOffers: Record<string, SupplierOfferCurrent> = { ...previousOffers };
     const touchedKeys = new Set<string>();
     const newAliases: SupplierAlias[] = [];
     const offersByProductOps: OffersByProductOp[] = [];
+    const offersByReferenceProductOps: OffersByReferenceProductOp[] = [];
     const snapshots: SupplierOfferSnapshot[] = [];
     let autoMatched = 0;
     let needsReview = 0;
@@ -152,7 +171,8 @@ export async function processSupplierUpload(input: {
       const match = matchSupplierRow(
         { offerKey, supplierSku: row.supplierSku, description: row.description, brand: row.brand, upc: row.upc, ean: row.ean },
         products,
-        aliasesSoFar
+        aliasesSoFar,
+        referenceProducts
       );
 
       const rate = await getUsdRate(row.currency);
@@ -193,19 +213,33 @@ export async function processSupplierUpload(input: {
       let finalReviewStatus = match.reviewStatus;
       let finalProductId = match.productId;
       let finalCandidateProductId = match.candidateProductId;
+      let finalCandidateReferenceProductId = match.candidateReferenceProductId;
+      let finalCompetingCandidates = match.competingCandidates;
       let finalMatchType = match.matchType;
       let finalMatchConfidence = match.matchConfidence;
+      // referenceProductId (a Pricing/Ordering "tracked item" link, set
+      // only by Match Review's own Track/Link actions or by auto-creation
+      // below) is completely independent of the fresh match result above
+      // — it always starts from whatever this offerKey already carried.
+      let finalReferenceProductId = previous?.referenceProductId ?? null;
 
       if (previous?.reviewStatus === "ignored" && match.reviewStatus !== "auto_matched") {
         finalReviewStatus = "ignored";
         finalProductId = null;
         finalCandidateProductId = null;
+        finalCandidateReferenceProductId = null;
+        finalCompetingCandidates = undefined;
         finalMatchType = "unmatched";
         finalMatchConfidence = null;
       } else if (reconnectedViaFallback && match.reviewStatus === "new_candidate" && previous) {
         finalReviewStatus = previous.reviewStatus;
         finalProductId = previous.productId;
         finalCandidateProductId = previous.candidateProductId;
+        finalCandidateReferenceProductId = previous.candidateReferenceProductId;
+        // Not carried from `previous` — competingCandidates is always
+        // recomputed fresh, never persisted state (see its own comment on
+        // SupplierOfferCurrent); a fallback-reconnected row simply has none.
+        finalCompetingCandidates = undefined;
         finalMatchType = previous.matchType;
         finalMatchConfidence = previous.matchConfidence;
       }
@@ -227,6 +261,79 @@ export async function processSupplierUpload(input: {
         finalMatchConfidence = null;
       }
 
+      // Auto-creation — plan §5. Only for a row that is, after every
+      // carry-forward above, a genuine fresh "nothing matched" AND that
+      // doesn't already carry a tracked Master Product from a prior
+      // "Track for Pricing" (finalReferenceProductId set means an
+      // operator already made a deliberate tracking decision for this
+      // exact supplier item; auto-creating a second, different Master
+      // Product for it would silently override that). checkAutoCreate-
+      // Eligibility enforces structural completeness (brand + core name +
+      // size + concentration-or-explicit-non-fragrance-form) — an
+      // ambiguous row (e.g. "DIOR SAUVAGE 100ML", no concentration
+      // stated) never auto-creates.
+      if (finalReviewStatus === "new_candidate" && !finalReferenceProductId) {
+        const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, row.brand);
+        const eligibility = checkAutoCreateEligibility(rowAttrs);
+        if (eligibility.eligible) {
+          const signature = computeIdentitySignature(rowAttrs);
+          const getOrCreateResult = await getOrCreateReferenceProductByIdentity(
+            { upc: row.upc.trim(), ean: row.ean.trim(), signature },
+            {
+              brand: row.brand.trim(),
+              name: row.description.trim(),
+              description: row.description.trim(),
+              sizeMl: rowAttrs.sizeMl,
+              concentration: rowAttrs.concentration,
+              isTester: rowAttrs.isTester,
+              isGiftSet: rowAttrs.isGiftSet,
+              isRefill: rowAttrs.isRefill,
+              productForm: rowAttrs.productForm,
+              upc: row.upc.trim(),
+              ean: row.ean.trim(),
+              productId: null,
+              createdBy: "auto_import",
+              creationMethod: "auto_import",
+              createdFromSupplierId: input.supplierId,
+              createdFromUploadId: upload.id,
+              createdFromOfferKey: offerKey,
+            }
+          );
+
+          if (getOrCreateResult.status === "conflict") {
+            // UPC/EAN and the structural signature disagree on which
+            // existing Master Product this is — never auto-picked,
+            // merged, or auto-linked. Route to needs_review with every
+            // conflicting identity shown for a human to resolve.
+            finalReviewStatus = "needs_review";
+            finalMatchType = "unmatched";
+            finalMatchConfidence = null;
+            finalCandidateProductId = null;
+            finalCandidateReferenceProductId = null;
+            finalCompetingCandidates = getOrCreateResult.ids.map((id) => ({ productId: null, referenceProductId: id }));
+          } else {
+            finalReferenceProductId = getOrCreateResult.id;
+            finalReviewStatus = "auto_matched";
+            finalMatchType = "auto_created";
+            finalMatchConfidence = 1;
+            finalCandidateProductId = null;
+            finalCandidateReferenceProductId = null;
+            finalCompetingCandidates = undefined;
+            // Make this visible to every LATER row in this same upload —
+            // whether genuinely brand-new or reused from an existing
+            // record — so a repeat of the same physical item later in
+            // this file takes the normal exact-match path instead of
+            // hitting get-or-create a second time for no reason.
+            if (getOrCreateResult.status === "created") {
+              referenceProducts.push(getOrCreateResult.product);
+            } else {
+              const reused = await getReferenceProduct(getOrCreateResult.id);
+              if (reused) referenceProducts.push(reused);
+            }
+          }
+        }
+      }
+
       snapshots.push({
         id: newId("offersnap"),
         uploadId: upload.id,
@@ -236,10 +343,12 @@ export async function processSupplierUpload(input: {
         raw: row,
         productId: finalProductId,
         candidateProductId: finalCandidateProductId,
+        candidateReferenceProductId: finalCandidateReferenceProductId,
+        competingCandidates: finalCompetingCandidates,
         matchType: finalMatchType,
         matchConfidence: finalMatchConfidence,
         reviewStatus: finalReviewStatus,
-        referenceProductId: previous?.referenceProductId ?? null,
+        referenceProductId: finalReferenceProductId,
         rejectedCandidateProductIds: rejectedIds,
         currency: row.currency,
         price: row.price,
@@ -266,14 +375,17 @@ export async function processSupplierUpload(input: {
         ean: row.ean,
         productId: finalProductId,
         candidateProductId: finalCandidateProductId,
+        candidateReferenceProductId: finalCandidateReferenceProductId,
+        competingCandidates: finalCompetingCandidates,
         matchType: finalMatchType,
         matchConfidence: finalMatchConfidence,
         reviewStatus: finalReviewStatus,
         // Carried forward exactly like productId — re-uploading a
-        // supplier's sheet must never silently wipe out a tracked link
-        // an operator set via "Track for Pricing" / "Link to tracked
-        // item" on a prior generation.
-        referenceProductId: previous?.referenceProductId ?? null,
+        // supplier's sheet must never silently wipe out a tracked link an
+        // operator set via "Track for Pricing" / "Link to tracked item"
+        // on a prior generation — and now also set fresh by auto-creation
+        // above when this row's identity is genuinely new.
+        referenceProductId: finalReferenceProductId,
         rejectedCandidateProductIds: rejectedIds,
         currentlyListed: true,
         lastUploadId: upload.id,
@@ -296,6 +408,17 @@ export async function processSupplierUpload(input: {
       }
       if (finalProductId && priorSameKeyProductId !== finalProductId) {
         offersByProductOps.push({ op: "SADD", productId: finalProductId, member });
+      }
+
+      // Mirrors the offers_by_product reverse-index maintenance above,
+      // for Master/Reference Products — same "only this offerKey's own
+      // prior link, only if it actually changed" logic.
+      const priorSameKeyReferenceProductId = reconnectedViaFallback ? null : (previous?.referenceProductId ?? null);
+      if (priorSameKeyReferenceProductId && priorSameKeyReferenceProductId !== finalReferenceProductId) {
+        offersByReferenceProductOps.push({ op: "SREM", referenceProductId: priorSameKeyReferenceProductId, member });
+      }
+      if (finalReferenceProductId && priorSameKeyReferenceProductId !== finalReferenceProductId) {
+        offersByReferenceProductOps.push({ op: "SADD", referenceProductId: finalReferenceProductId, member });
       }
 
       // A newly-confirmed high-confidence match (not already a learned
@@ -380,6 +503,7 @@ export async function processSupplierUpload(input: {
       finishedUpload,
       newAliases: existingAliases.concat(newAliases),
       offersByProductOps,
+      offersByReferenceProductOps,
     });
 
     // STALE_GENERATION: this upload fully and correctly processed every
@@ -401,4 +525,57 @@ export async function processSupplierUpload(input: {
     await markUploadFailed(upload.id, err instanceof Error ? err.message : "Processing failed.");
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------
+// Import safety — the second line of defense the new auto-creation
+// feature specifically needs, on top of the EXISTING header/mapping
+// sanity checks (verifyHeaderSignature/computeSanityChecks, unchanged).
+// Never a flat row-count-drop percentage: compares this preview's own
+// "unknown item" rate against THIS SAME SUPPLIER's own most recent
+// completed upload — a supplier whose file structure or matching
+// context looks materially different from their own history is what
+// this flags, not an arbitrary universal threshold.
+// ---------------------------------------------------------------------
+
+export interface ImportAnomalyAssessment {
+  flagged: boolean;
+  message: string | null;
+  currentUnknownRate: number;
+  priorUnknownRate: number | null;
+}
+
+/** "Unknown" = proposed-new-Master-Product + unsupported — rows this
+ *  upload has no existing structural identity for at all. Compared
+ *  against the prior rate from the same supplier's most recent
+ *  COMPLETED upload (skips failed/in-progress ones — those never
+ *  reflect a real matched baseline). No prior completed upload (a
+ *  supplier's very first file) means there is no baseline to compare
+ *  against, so this never blocks a first upload. */
+export function assessImportAnomalyRisk(preview: MatchPreviewSummary, priorUploads: SupplierPriceUpload[]): ImportAnomalyAssessment {
+  const currentUnknownRate = preview.totalRows > 0 ? (preview.proposedNewMasterProducts + preview.unsupported) / preview.totalRows : 0;
+
+  const mostRecentCompleted = priorUploads
+    .filter((u) => u.status === "completed" && u.totalRows > 0)
+    .sort((a, b) => b.seq - a.seq)[0];
+  if (!mostRecentCompleted) {
+    return { flagged: false, message: null, currentUnknownRate, priorUnknownRate: null };
+  }
+
+  const priorUnknownRate = mostRecentCompleted.newCandidates / mostRecentCompleted.totalRows;
+
+  // Flag only a genuine jump, not routine variance — more than double
+  // the prior rate AND the prior rate wasn't already high (a supplier
+  // who's always mostly "new" doesn't get flagged every single time).
+  const flagged = priorUnknownRate < 0.5 && currentUnknownRate > priorUnknownRate * 2 && currentUnknownRate - priorUnknownRate > 0.1;
+
+  const message = flagged
+    ? `This file proposes ${Math.round(currentUnknownRate * 100)}% brand-new/unmatched items (${
+        preview.proposedNewMasterProducts + preview.unsupported
+      } of ${preview.totalRows} rows) — this supplier's last completed upload was only ${Math.round(priorUnknownRate * 100)}% new (${
+        mostRecentCompleted.newCandidates
+      } of ${mostRecentCompleted.totalRows}). Confirm this file is actually from this supplier and the mapping is correct before continuing.`
+    : null;
+
+  return { flagged, message, currentUnknownRate, priorUnknownRate };
 }

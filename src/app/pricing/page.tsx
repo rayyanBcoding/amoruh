@@ -36,12 +36,21 @@ interface DashboardData {
   supplierCount: number;
 }
 
+// Three clearly labeled result types (plan §4) — never presented as if
+// they were each other. A real, physically-carried Product; a Master
+// Product AMORUH has never stocked; and a still-unresolved supplier
+// offer that hasn't matched anything yet.
+type SearchResult =
+  | { type: "product"; productId: string; brand: string; name: string; size: string; sku: string; score: number }
+  | { type: "reference_product"; referenceProductId: string; brand: string; name: string; sizeMl: number | null; concentration: string | null }
+  | { type: "unresolved_offer"; supplierId: string; supplierName: string; offerKey: string; description: string; brand: string; reviewStatus: string };
+
 export default function PricingDashboardPage() {
   const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<{ productId: string; brand: string; name: string; size: string }[]>([]);
+  const [results, setResults] = useState<SearchResult[]>([]);
 
   useEffect(() => {
     fetch("/api/pricing/dashboard")
@@ -95,15 +104,49 @@ export default function PricingDashboardPage() {
           {searching && <p className="mt-2 text-xs text-ld-muted">Searching…</p>}
           {results.length > 0 && (
             <div className="mt-3 space-y-1">
-              {results.map((r) => (
-                <button
-                  key={r.productId}
-                  onClick={() => router.push(`/pricing/products/${r.productId}`)}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-ld-white hover:bg-ld-bg-elevated"
-                >
-                  <span className="font-semibold">{r.brand}</span> {r.name} <span className="text-ld-muted">({r.size})</span>
-                </button>
-              ))}
+              {results.map((r) => {
+                if (r.type === "product") {
+                  return (
+                    <button
+                      key={`product:${r.productId}`}
+                      onClick={() => router.push(`/pricing/products/${r.productId}`)}
+                      className="block w-full rounded-lg px-3 py-2 text-left text-sm text-ld-white hover:bg-ld-bg-elevated"
+                    >
+                      <span className="font-semibold">{r.brand}</span> {r.name} <span className="text-ld-muted">({r.size})</span>
+                    </button>
+                  );
+                }
+                if (r.type === "reference_product") {
+                  return (
+                    <div
+                      key={`reference_product:${r.referenceProductId}`}
+                      className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm text-ld-white"
+                    >
+                      <span>
+                        <span className="font-semibold">{r.brand}</span> {r.name}
+                        {r.sizeMl ? <span className="text-ld-muted"> ({r.sizeMl}ml{r.concentration ? ` ${r.concentration}` : ""})</span> : null}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-ld-purple/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-ld-purple">
+                        Master Product — Not Carried
+                      </span>
+                    </div>
+                  );
+                }
+                return (
+                  <button
+                    key={`unresolved_offer:${r.supplierId}:${r.offerKey}`}
+                    onClick={() => router.push(`/pricing/suppliers/${r.supplierId}`)}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm text-ld-white hover:bg-ld-bg-elevated"
+                  >
+                    <span>
+                      <span className="font-semibold">{r.brand}</span> {r.description} <span className="text-ld-muted">— {r.supplierName}</span>
+                    </span>
+                    <span className="shrink-0 rounded-full bg-ld-amber/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-ld-amber">
+                      Unresolved Supplier Offer
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
