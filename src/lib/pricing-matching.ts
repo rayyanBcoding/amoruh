@@ -1,5 +1,5 @@
 import type { Product } from "./types";
-import type { OfferMatchType, ReviewStatus, SupplierAlias } from "./pricing-types";
+import type { OfferMatchType, ReviewStatus, SupplierAlias, SupplierOfferCurrent } from "./pricing-types";
 import { normalize, bigramSimilarity } from "./intake-matching";
 
 // ---------------------------------------------------------------------
@@ -460,4 +460,99 @@ export function matchSupplierRow(row: MatchRowInput, products: Product[], aliase
     reviewStatus: "new_candidate",
     candidateProductId: best?.product.id ?? null,
   };
+}
+
+// ---------------------------------------------------------------------
+// Supplier-item identity fallback — reconnects a row to its OWN prior
+// supplier-item identity across uploads when the row's offerKey changed
+// (e.g. the supplier reformatted their SKU column). Deliberately NOT an
+// offerKey migration: the direct offerKey lookup in pricing-process.ts
+// is tried first and is the normal, fast path (confirmed stable across
+// 9 real uploads — see the Match Review audit); this fallback only ever
+// runs when that direct lookup misses. It reconnects supplier-ITEM
+// identity to a prior SupplierOfferCurrent (a different concern from
+// matchSupplierRow's row-to-real-catalog matching above, which is
+// unchanged and still runs regardless).
+//
+// Priority, per spec: exact UPC/EAN (revalidated against structured
+// attributes, same hard gates used everywhere else) first, then a
+// strict composite identity (brand + size + concentration + tester/
+// gift-set bucket, via the SAME checkHardGates, plus a text-similarity
+// bar stricter than the normal 0.85 real-catalog auto-match threshold —
+// this is conservative supplier-item reconciliation, not catalog
+// matching). Returns null — never guesses — when zero or more than one
+// candidate qualifies; a genuinely new item, or an ambiguous one, is
+// always safer left new than silently merged into the wrong history.
+// Hard gates guarantee a different size/concentration/tester/gift-set
+// variant can never reconnect here.
+const IDENTITY_FALLBACK_TEXT_THRESHOLD = 0.92;
+
+export function findPreviousBySupplierItemIdentity(
+  row: { upc: string; ean: string; brand: string; description: string },
+  previousOffers: Record<string, SupplierOfferCurrent>
+): SupplierOfferCurrent | null {
+  const rowAttrs = extractAttributes(rawTextOf(row), row.brand);
+  const candidates = Object.values(previousOffers);
+
+  const rowCode = (row.upc || row.ean || "").trim().toUpperCase();
+  if (rowCode) {
+    const byCode = candidates.filter((o) => {
+      const code = (o.upc || o.ean || "").trim().toUpperCase();
+      return code === rowCode;
+    });
+    if (byCode.length === 1) {
+      const candidateAttrs = extractAttributes(rawTextOf(byCode[0]), byCode[0].brand);
+      if (checkHardGates(rowAttrs, candidateAttrs).passes) return byCode[0];
+    }
+    // More than one previous offer shares this code, or the one match
+    // fails the hard gate — fall through to the composite check rather
+    // than trusting a contested or contradicted barcode.
+  }
+
+  let best: { offer: SupplierOfferCurrent; score: number } | null = null;
+  let qualifyingCount = 0;
+  for (const o of candidates) {
+    const candidateAttrs = extractAttributes(rawTextOf(o), o.brand);
+    const gate = checkHardGates(rowAttrs, candidateAttrs);
+    if (!gate.passes || !gate.sizeBothParsed || !gate.concentrationBothRecognized) continue;
+    const score = textScore(rowAttrs, candidateAttrs);
+    if (score >= IDENTITY_FALLBACK_TEXT_THRESHOLD) {
+      qualifyingCount++;
+      if (!best || score > best.score) best = { offer: o, score };
+    }
+  }
+  return qualifyingCount === 1 && best ? best.offer : null;
+}
+
+// ---------------------------------------------------------------------
+// Duplicate-supplier-name detection — used only at the point a NEW
+// supplier is about to be created from free text (Pricing/Ordering's
+// Suppliers page), to warn an operator before "JIzan" and "Jizan
+// Perfumes llc" happen again as two unrelated supplier identities with
+// zero shared history. Deliberately NOT quickTextSimilarity: that scores
+// full raw strings, which empirically gets this exact job backwards — it
+// scored the real "JIzan"/"Jizan Perfumes llc" duplicate at 0.38 (missed)
+// while scoring two genuinely unrelated companies that happen to share a
+// generic "Trading Inc" suffix at 0.79 (false positive). Stripping
+// generic corporate-suffix words first, then checking whether one name's
+// remaining core tokens are contained in the other's (or, failing that,
+// a stricter token-set bar on the stripped tokens), gets both cases
+// right — verified directly against real supplier names from this
+// engagement, not assumed.
+const CORP_SUFFIX_WORDS = new Set(["llc", "inc", "ltd", "co", "company", "corp", "corporation", "trading"]);
+
+function coreSupplierTokens(name: string): string[] {
+  return tokenize(name).filter((t) => !CORP_SUFFIX_WORDS.has(t));
+}
+
+export function isPossibleDuplicateSupplierName(a: string, b: string): boolean {
+  const tokensA = coreSupplierTokens(a);
+  const tokensB = coreSupplierTokens(b);
+  if (tokensA.length === 0 || tokensB.length === 0) return false;
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  const [shorter, longer] = tokensA.length <= tokensB.length ? [setA, setB] : [setB, setA];
+  const contained = [...shorter].every((t) => longer.has(t) || [...longer].some((l) => bigramSimilarity(t, l) >= 0.85));
+  if (contained) return true;
+  return tokenSetSimilarity(tokensA, tokensB) >= 0.6;
 }

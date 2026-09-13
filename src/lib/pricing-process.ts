@@ -12,7 +12,7 @@ import {
   writeSnapshotsBatch,
   type OffersByProductOp,
 } from "./pricing-db";
-import { deriveOfferKey, matchSupplierRow } from "./pricing-matching";
+import { deriveOfferKey, matchSupplierRow, findPreviousBySupplierItemIdentity } from "./pricing-matching";
 import {
   applyColumnMapping,
   columnMapInBounds,
@@ -157,7 +157,58 @@ export async function processSupplierUpload(input: {
 
       const rate = await getUsdRate(row.currency);
       const priceUsd = convertToUsd(row.price, rate?.rate ?? null);
-      const previous = candidateOffers[offerKey];
+
+      // Direct offerKey lookup first — the normal, fast path, confirmed
+      // stable across real repeat uploads (see the Match Review audit).
+      // Only when that misses does the conservative identity fallback
+      // try to reconnect this row to its OWN prior supplier-item history
+      // under a different offerKey (e.g. the supplier reformatted their
+      // SKU column) — see findPreviousBySupplierItemIdentity's own
+      // comments for exactly what it will and won't reconnect.
+      let previous = candidateOffers[offerKey];
+      let reconnectedViaFallback = false;
+      if (!previous) {
+        const fallback = findPreviousBySupplierItemIdentity(
+          { upc: row.upc, ean: row.ean, brand: row.brand, description: row.description },
+          candidateOffers
+        );
+        if (fallback) {
+          previous = fallback;
+          reconnectedViaFallback = true;
+        }
+      }
+
+      // Carry-forward decision, applied on top of matchSupplierRow's own
+      // fresh result — never the other way around, so a genuinely
+      // stronger new signal (e.g. a UPC now cleanly resolves) always
+      // wins over stale carried-forward state:
+      //   - an intentionally "ignored" decision survives a re-upload
+      //     unless today's fresh match is a clean auto_matched (real new
+      //     evidence appeared);
+      //   - otherwise, if today's fresh match found nothing
+      //     (new_candidate) AND the identity fallback reconnected this
+      //     row to a previously-resolved item, adopt that prior
+      //     resolution rather than treating a reformatted-SKU row as
+      //     brand new.
+      let finalReviewStatus = match.reviewStatus;
+      let finalProductId = match.productId;
+      let finalCandidateProductId = match.candidateProductId;
+      let finalMatchType = match.matchType;
+      let finalMatchConfidence = match.matchConfidence;
+
+      if (previous?.reviewStatus === "ignored" && match.reviewStatus !== "auto_matched") {
+        finalReviewStatus = "ignored";
+        finalProductId = null;
+        finalCandidateProductId = null;
+        finalMatchType = "unmatched";
+        finalMatchConfidence = null;
+      } else if (reconnectedViaFallback && match.reviewStatus === "new_candidate" && previous) {
+        finalReviewStatus = previous.reviewStatus;
+        finalProductId = previous.productId;
+        finalCandidateProductId = previous.candidateProductId;
+        finalMatchType = previous.matchType;
+        finalMatchConfidence = previous.matchConfidence;
+      }
 
       snapshots.push({
         id: newId("offersnap"),
@@ -166,11 +217,11 @@ export async function processSupplierUpload(input: {
         supplierId: input.supplierId,
         offerKey,
         raw: row,
-        productId: match.productId,
-        candidateProductId: match.candidateProductId,
-        matchType: match.matchType,
-        matchConfidence: match.matchConfidence,
-        reviewStatus: match.reviewStatus,
+        productId: finalProductId,
+        candidateProductId: finalCandidateProductId,
+        matchType: finalMatchType,
+        matchConfidence: finalMatchConfidence,
+        reviewStatus: finalReviewStatus,
         referenceProductId: previous?.referenceProductId ?? null,
         currency: row.currency,
         price: row.price,
@@ -195,11 +246,11 @@ export async function processSupplierUpload(input: {
         priceUsdAtUpload: priceUsd,
         upc: row.upc,
         ean: row.ean,
-        productId: match.productId,
-        candidateProductId: match.candidateProductId,
-        matchType: match.matchType,
-        matchConfidence: match.matchConfidence,
-        reviewStatus: match.reviewStatus,
+        productId: finalProductId,
+        candidateProductId: finalCandidateProductId,
+        matchType: finalMatchType,
+        matchConfidence: finalMatchConfidence,
+        reviewStatus: finalReviewStatus,
         // Carried forward exactly like productId — re-uploading a
         // supplier's sheet must never silently wipe out a tracked link
         // an operator set via "Track for Pricing" / "Link to tracked
@@ -211,12 +262,21 @@ export async function processSupplierUpload(input: {
       };
       candidateOffers[offerKey] = nextOffer;
 
+      // The reverse index is only ever keyed by THIS row's actual
+      // offerKey. A fallback-reconnected `previous` came from a
+      // DIFFERENT offerKey (the row's own prior identity, before the
+      // SKU reformatted) — that old key's own index membership is
+      // untouched here (it simply stops being touched by future
+      // uploads, same as any other superseded offerKey), so there is
+      // nothing to SREM for it under the NEW key; only a fresh SADD (if
+      // this row now resolves to a product) applies.
       const member = `${input.supplierId}::${offerKey}`;
-      if (previous?.productId && previous.productId !== match.productId) {
-        offersByProductOps.push({ op: "SREM", productId: previous.productId, member });
+      const priorSameKeyProductId = reconnectedViaFallback ? null : (previous?.productId ?? null);
+      if (priorSameKeyProductId && priorSameKeyProductId !== finalProductId) {
+        offersByProductOps.push({ op: "SREM", productId: priorSameKeyProductId, member });
       }
-      if (match.productId && previous?.productId !== match.productId) {
-        offersByProductOps.push({ op: "SADD", productId: match.productId, member });
+      if (finalProductId && priorSameKeyProductId !== finalProductId) {
+        offersByProductOps.push({ op: "SADD", productId: finalProductId, member });
       }
 
       // A newly-confirmed high-confidence match (not already a learned
@@ -225,24 +285,43 @@ export async function processSupplierUpload(input: {
       // (repeat uploads of an already-aliased row shouldn't pile up
       // duplicate alias records).
       if (
-        match.reviewStatus === "auto_matched" &&
-        match.matchType !== "alias" &&
-        match.productId &&
-        !aliasesSoFar.some((a) => a.offerKey === offerKey && a.productId === match.productId)
+        finalReviewStatus === "auto_matched" &&
+        finalMatchType !== "alias" &&
+        finalProductId &&
+        !aliasesSoFar.some((a) => a.offerKey === offerKey && a.productId === finalProductId)
       ) {
         newAliases.push({
           id: newId("alias"),
           supplierId: input.supplierId,
           offerKey,
-          productId: match.productId,
+          productId: finalProductId,
           createdAt: nowIso,
           source: "auto_high_confidence",
         });
       }
 
-      if (match.reviewStatus === "auto_matched") autoMatched++;
-      else if (match.reviewStatus === "new_candidate") newCandidates++;
-      else needsReview++; // needs_review, alias_conflict, barcode_conflict
+      // A fallback-reconnected identity is durable evidence too — write
+      // an alias for the NEW offerKey so the next upload (which will
+      // keep using this same reformatted SKU) takes the normal, fast
+      // direct/alias path without needing the fallback again.
+      if (
+        reconnectedViaFallback &&
+        finalProductId &&
+        !aliasesSoFar.some((a) => a.offerKey === offerKey && a.productId === finalProductId)
+      ) {
+        newAliases.push({
+          id: newId("alias"),
+          supplierId: input.supplierId,
+          offerKey,
+          productId: finalProductId,
+          createdAt: nowIso,
+          source: "auto_high_confidence",
+        });
+      }
+
+      if (finalReviewStatus === "auto_matched") autoMatched++;
+      else if (finalReviewStatus === "new_candidate") newCandidates++;
+      else if (finalReviewStatus !== "ignored") needsReview++; // needs_review, alias_conflict, barcode_conflict — "ignored" is deliberately none of these three
 
       if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
         await updateUploadProgress(upload.id, { processedRows: i + 1 });
