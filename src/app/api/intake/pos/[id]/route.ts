@@ -10,6 +10,8 @@ import {
   deletePO,
 } from "@/lib/intake-db";
 import { checkPODeleteEligibility } from "@/lib/po-delete";
+import { linkMasterProductForReceivedItem } from "@/lib/intake-product-linking";
+import { getProducts } from "@/lib/db";
 import type { POStatus } from "@/lib/intake-types";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +57,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       matchType: body.productId ? "manual" : "unmatched",
     };
     await savePOLines(id, lines);
+
+    // Master Product link-back hook (V2 Phase 1 §6) — this is the other
+    // place (besides createAndLinkProductForLine) a PO line resolves to
+    // an existing Product, so it needs the same never-guessing hook.
+    // Purely advisory: this PATCH's own success never depends on it.
+    if (body.productId) {
+      const products = await getProducts();
+      const product = products.find((p) => p.id === body.productId);
+      if (product) {
+        await linkMasterProductForReceivedItem(product, lines[idx], po.supplierId);
+      }
+    }
   }
 
   if (body.status) {

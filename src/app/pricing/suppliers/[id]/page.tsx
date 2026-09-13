@@ -37,6 +37,20 @@ interface SanityCheck {
   warnings: string[];
 }
 
+interface MatchPreviewSummary {
+  totalRows: number;
+  matchedProduct: number;
+  matchedReferenceProduct: number;
+  proposedNewMasterProducts: number;
+  requiresReview: number;
+  unsupported: number;
+}
+
+interface ImportAnomalyAssessment {
+  flagged: boolean;
+  message: string | null;
+}
+
 const FIELD_LABELS: [keyof SupplierColumnMapping["columnMap"], string][] = [
   ["supplierSku", "Supplier SKU"],
   ["description", "Description"],
@@ -84,6 +98,9 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
   const [previewRows, setPreviewRows] = useState<SupplierRawRow[]>([]);
   const [totalProductRows, setTotalProductRows] = useState(0);
   const [sanityCheck, setSanityCheck] = useState<SanityCheck | null>(null);
+  const [matchPreview, setMatchPreview] = useState<MatchPreviewSummary | null>(null);
+  const [importAnomaly, setImportAnomaly] = useState<ImportAnomalyAssessment | null>(null);
+  const [confirmAnomalyAnyway, setConfirmAnomalyAnyway] = useState(false);
   const [uploadType, setUploadType] = useState<"full" | "partial">("full");
   const [result, setResult] = useState<SupplierPriceUpload | null>(null);
 
@@ -203,6 +220,9 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
       setPreviewRows(data.previewRows);
       setTotalProductRows(data.totalProductRows);
       setSanityCheck(data.sanityCheck);
+      setMatchPreview(data.matchPreview ?? null);
+      setImportAnomaly(data.importAnomaly ?? null);
+      setConfirmAnomalyAnyway(false);
       setUploadType(data.defaultUploadType ?? "full");
       return data;
     } catch (err) {
@@ -240,6 +260,9 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
       setPreviewRows(data.previewRows);
       setTotalProductRows(data.totalProductRows);
       setSanityCheck(data.sanityCheck);
+      setMatchPreview(data.matchPreview ?? null);
+      setImportAnomaly(data.importAnomaly ?? null);
+      setConfirmAnomalyAnyway(false);
       setUploadType(data.defaultUploadType ?? "full");
 
       // Reuse only ever skips the column-mapping step — Preview is
@@ -323,6 +346,9 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
     setColumnMap({});
     setPreviewRows([]);
     setSanityCheck(null);
+    setMatchPreview(null);
+    setImportAnomaly(null);
+    setConfirmAnomalyAnyway(false);
     setResult(null);
     setError(null);
   };
@@ -599,6 +625,37 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                 </div>
               )}
 
+              {matchPreview && (
+                <div>
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-ld-muted">
+                    What This Upload Would Do (matching-level, before you commit)
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                    <PreviewStat label="Valid Product Rows" value={matchPreview.totalRows} />
+                    <PreviewStat label="Matched Existing Product" value={matchPreview.matchedProduct} accent="text-ld-green" />
+                    <PreviewStat label="Matched Master Product" value={matchPreview.matchedReferenceProduct} accent="text-ld-cyan" />
+                    <PreviewStat label="Proposed New Master Products" value={matchPreview.proposedNewMasterProducts} accent="text-ld-purple" />
+                    <PreviewStat label="Requires Review" value={matchPreview.requiresReview} accent="text-ld-amber" />
+                    <PreviewStat label="Unsupported / Non-Product" value={matchPreview.unsupported} />
+                  </div>
+                </div>
+              )}
+
+              {importAnomaly?.flagged && (
+                <div className="rounded-xl border border-ld-amber/30 bg-ld-amber/5 p-4">
+                  <p className="mb-1 text-sm font-bold text-ld-amber">This upload looks unusual for this supplier.</p>
+                  <p className="text-xs text-ld-amber">{importAnomaly.message}</p>
+                  <label className="mt-3 flex items-center gap-2 text-xs text-ld-white">
+                    <input
+                      type="checkbox"
+                      checked={confirmAnomalyAnyway}
+                      onChange={(e) => setConfirmAnomalyAnyway(e.target.checked)}
+                    />
+                    I&rsquo;ve checked the file and supplier — process anyway.
+                  </label>
+                </div>
+              )}
+
               <div className="flex items-center justify-between">
                 <Button variant="ghost" onClick={() => setStage("mapping")}>
                   ← Back — Fix Mapping
@@ -606,7 +663,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                 <Button
                   variant="primary"
                   size="lg"
-                  disabled={!sanityCheck?.ok || loadingPreview}
+                  disabled={!sanityCheck?.ok || loadingPreview || (Boolean(importAnomaly?.flagged) && !confirmAnomalyAnyway)}
                   onClick={submitProcess}
                 >
                   Process {totalProductRows.toLocaleString()} Product{totalProductRows === 1 ? "" : "s"}
@@ -675,6 +732,15 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+function PreviewStat({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
+  return (
+    <div className="rounded-lg border border-ld-border bg-ld-bg-elevated p-3">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-ld-muted">{label}</p>
+      <p className={`mt-0.5 font-display text-xl font-extrabold ${accent ?? "text-ld-white"}`}>{value}</p>
     </div>
   );
 }

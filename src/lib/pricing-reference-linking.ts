@@ -99,9 +99,19 @@ export async function createReferenceProductForOffer(
     concentration: attrs.concentration,
     isTester: attrs.isTester,
     isGiftSet: attrs.isGiftSet,
+    isRefill: attrs.isRefill,
+    productForm: attrs.productForm,
     upc,
     ean,
+    productId: null,
     createdBy: "match_review",
+    // Manually created via "Track for Pricing" — never auto-import, and
+    // provenance still records exactly which offer/supplier prompted it,
+    // same as the auto-created path's audit trail.
+    creationMethod: "manual_track",
+    createdFromSupplierId: supplierId,
+    createdFromUploadId: null,
+    createdFromOfferKey: offerKey,
   });
 
   const result = await applyReferenceLink(supplierId, offerKey, referenceProduct.id);

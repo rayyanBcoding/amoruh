@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSupplier } from "@/lib/intake-db";
+import { getProducts } from "@/lib/db";
+import { getAliasesForSupplier, getAllReferenceProducts, getUploadsForSupplier } from "@/lib/pricing-db";
+import { computeMatchPreview } from "@/lib/pricing-matching";
+import { assessImportAnomalyRisk } from "@/lib/pricing-process";
 import {
   applyColumnMapping,
   buildColumnPreview,
@@ -78,6 +82,25 @@ export async function POST(req: Request) {
   const sanityCheck = computeSanityChecks(parsedRows);
   const columns = buildColumnPreview(rawRows, headerRowIndex);
 
+  // Second line of defense — matching-level, on top of the header/
+  // mapping sanity check above. Never writes anything: a read-only
+  // dry-match pass over the parsed rows, extending this SAME Preview
+  // step rather than a third UI step (plan's "Import safety" section).
+  // Skipped when the mapping already fails sanity — there's nothing
+  // trustworthy to dry-match yet.
+  let matchPreview = null;
+  let importAnomaly = null;
+  if (sanityCheck.ok) {
+    const [products, aliases, referenceProducts, priorUploads] = await Promise.all([
+      getProducts(),
+      getAliasesForSupplier(body.supplierId),
+      getAllReferenceProducts(),
+      getUploadsForSupplier(body.supplierId, 10),
+    ]);
+    matchPreview = computeMatchPreview(parsedRows, products, aliases, referenceProducts);
+    importAnomaly = assessImportAnomalyRisk(matchPreview, priorUploads);
+  }
+
   return NextResponse.json({
     headerRowWindow: rawRows.slice(0, HEADER_WINDOW_ROWS),
     detectedHeaderRowIndex: headerResolution.headerRowIndex,
@@ -90,6 +113,8 @@ export async function POST(req: Request) {
     previewRows: parsedRows.slice(0, PREVIEW_ROW_COUNT),
     totalProductRows: parsedRows.length,
     sanityCheck,
+    matchPreview,
+    importAnomaly,
     defaultUploadType: supplier.defaultUploadType ?? "full",
   });
 }
