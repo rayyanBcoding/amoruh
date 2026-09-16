@@ -7,7 +7,7 @@ import {
   getReferenceProductByUpc,
   resolveOfferManually,
 } from "./pricing-db";
-import { extractAttributes } from "./pricing-matching";
+import { extractAttributes, isPlausibleBarcode } from "./pricing-matching";
 import type { PricingReferenceProduct } from "./pricing-types";
 
 // ---------------------------------------------------------------------
@@ -74,8 +74,13 @@ export async function createReferenceProductForOffer(
   const offer = await getCurrentOffer(supplierId, offerKey);
   if (!offer) return { ok: false, error: "This supplier offer no longer exists." };
 
-  const upc = offer.upc?.trim() ?? "";
-  const ean = offer.ean?.trim() ?? "";
+  // A supplier's own placeholder text ("NO BARCODE" etc.) is never a
+  // real, uniquely-shared identifier — treated as absent here exactly
+  // like everywhere else upc/ean is used for matching/identity.
+  const rawUpc = offer.upc?.trim() ?? "";
+  const rawEan = offer.ean?.trim() ?? "";
+  const upc = isPlausibleBarcode(rawUpc.toUpperCase()) ? rawUpc : "";
+  const ean = isPlausibleBarcode(rawEan.toUpperCase()) ? rawEan : "";
 
   // Duplicate prevention — an exact UPC/EAN match links to the existing
   // reference product instead of creating a near-duplicate.

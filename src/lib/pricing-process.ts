@@ -21,6 +21,7 @@ import {
   computeIdentitySignature,
   deriveOfferKey,
   extractAttributes,
+  isPlausibleBarcode,
   isValidProductRow,
   matchSupplierRow,
   findPreviousBySupplierItemIdentity,
@@ -372,8 +373,14 @@ export async function processSupplierUpload(input: {
             finalCompetingCandidates = undefined;
           } else {
             const signature = computeIdentitySignature(rowAttrs);
+            // A supplier's own placeholder text ("NO BARCODE" etc.) must
+            // never become a stored identity pointer — it isn't a real,
+            // uniquely-shared barcode, so treat it as absent here, same
+            // as everywhere else upc/ean is used as an identifier.
+            const plausibleUpc = isPlausibleBarcode(row.upc.trim().toUpperCase()) ? row.upc.trim() : "";
+            const plausibleEan = isPlausibleBarcode(row.ean.trim().toUpperCase()) ? row.ean.trim() : "";
             const getOrCreateResult = await getOrCreateReferenceProductByIdentity(
-              { upc: row.upc.trim(), ean: row.ean.trim(), signature },
+              { upc: plausibleUpc, ean: plausibleEan, signature },
               {
                 brand: row.brand.trim(),
                 name: row.description.trim(),
@@ -384,8 +391,8 @@ export async function processSupplierUpload(input: {
                 isGiftSet: rowAttrs.isGiftSet,
                 isRefill: rowAttrs.isRefill,
                 productForm: rowAttrs.productForm,
-                upc: row.upc.trim(),
-                ean: row.ean.trim(),
+                upc: plausibleUpc,
+                ean: plausibleEan,
                 productId: null,
                 createdBy: "auto_import",
                 creationMethod: "auto_import",

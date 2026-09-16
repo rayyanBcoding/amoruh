@@ -28,6 +28,25 @@ const BARCODE_CONFLICT_TEXT_FLOOR = 0.25;
 const ML_PER_OZ = 29.5735;
 const STOPWORDS = new Set(["by", "eau", "de", "the", "and", "for", "in", "a", "an", "of"]);
 
+// Real UPC/EAN/house barcodes are numeric strings of a plausible length
+// (UPC-A 12, EAN-13 13, EAN-8 8, and shorter house codes still fall in
+// this range) — never free text. Confirmed directly against a real
+// production incident: a supplier's own placeholder text "NO BARCODE"
+// (written in the UPC/EAN column for items with no barcode) was being
+// treated as if it were a genuine, UNIQUELY-shared identifier — the
+// first row with that literal text created a Master Product carrying
+// it as its own upc, and every other row that also said "NO BARCODE"
+// then exact-matched THAT one record via this same check, incorrectly
+// auto-linking (or, when text similarity happened to fall below the
+// barcode-conflict floor, at least correctly flagging) hundreds of
+// completely unrelated fragrances to it. Applied at every point a raw
+// row's upc/ean is used as an identifier — this check, never a
+// hardcoded "NO BARCODE" special case — so any future placeholder text
+// a supplier uses is caught the same way.
+export function isPlausibleBarcode(code: string): boolean {
+  return /^[0-9]{6,14}$/.test(code);
+}
+
 // Longest-match-wins, checked in this order so "eau de parfum" doesn't
 // get shadowed by a bare "parfum" match, and "le parfum" (a specific
 // JPG-style flanker phrase) is distinguished from generic "parfum".
@@ -676,11 +695,17 @@ export function matchSupplierRow(
     if (aliasedProduct) {
       const productAttrs = extractProductAttributes(aliasedProduct);
       const gate = checkHardGates(rowAttrs, productAttrs);
+      // Only a PLAUSIBLE code that disagrees with the aliased product's
+      // real barcode is a genuine conflict signal — a supplier's own
+      // placeholder text (e.g. "NO BARCODE") carries no information at
+      // all and must never demote an otherwise-valid alias match.
+      const plausibleRowCodes = [row.upc, row.ean]
+        .map((c) => c.trim().toUpperCase())
+        .filter((c) => c && isPlausibleBarcode(c));
       const barcodeConflict =
-        Boolean(row.upc || row.ean) &&
+        plausibleRowCodes.length > 0 &&
         Boolean(aliasedProduct.barcode) &&
-        aliasedProduct.barcode.toUpperCase() !== row.upc.toUpperCase() &&
-        aliasedProduct.barcode.toUpperCase() !== row.ean.toUpperCase();
+        plausibleRowCodes.every((c) => c !== aliasedProduct.barcode.toUpperCase());
       if (gate.passes && !barcodeConflict) {
         return {
           productId: alias.productId,
@@ -710,7 +735,7 @@ export function matchSupplierRow(
   // flagged instead of trusted blindly either way (spec §3: "supplier
   // spreadsheets can contain errors").
   const code = (row.upc || row.ean).trim().toUpperCase();
-  if (code) {
+  if (code && isPlausibleBarcode(code)) {
     const exactProduct = products.find((p) => p.barcode.toUpperCase() === code);
     if (exactProduct) {
       const text = bigramSimilarity(rowText, `${exactProduct.brand} ${exactProduct.name}`);
@@ -929,8 +954,8 @@ export function computeMatchPreview(
         isGiftSet: rowAttrs.isGiftSet,
         isRefill: rowAttrs.isRefill,
         productForm: rowAttrs.productForm,
-        upc: row.upc,
-        ean: row.ean,
+        upc: isPlausibleBarcode(row.upc.trim().toUpperCase()) ? row.upc : "",
+        ean: isPlausibleBarcode(row.ean.trim().toUpperCase()) ? row.ean : "",
         productId: null,
         createdAt: "",
         createdBy: "preview",
@@ -981,7 +1006,7 @@ export function findPreviousBySupplierItemIdentity(
   const candidates = Object.values(previousOffers);
 
   const rowCode = (row.upc || row.ean || "").trim().toUpperCase();
-  if (rowCode) {
+  if (rowCode && isPlausibleBarcode(rowCode)) {
     const byCode = candidates.filter((o) => {
       const code = (o.upc || o.ean || "").trim().toUpperCase();
       return code === rowCode;

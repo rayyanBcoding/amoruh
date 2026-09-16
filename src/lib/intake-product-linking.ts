@@ -7,7 +7,7 @@ import {
   getReferenceProductByUpc,
   linkReferenceProductToProduct,
 } from "./pricing-db";
-import { checkHardGates, extractProductAttributes, extractReferenceProductAttributes } from "./pricing-matching";
+import { checkHardGates, extractProductAttributes, extractReferenceProductAttributes, isPlausibleBarcode } from "./pricing-matching";
 import type { PurchaseOrderLine } from "./intake-types";
 import type { Product } from "./types";
 
@@ -74,7 +74,11 @@ export async function linkMasterProductForReceivedItem(
   supplierId: string
 ): Promise<void> {
   try {
-    const upc = (line.upc || product.barcode || "").trim().toUpperCase();
+    // A placeholder value (a supplier's own "NO BARCODE" text, say) is
+    // never a real, uniquely-shared identifier — treated as absent here
+    // exactly like everywhere else upc/ean is used for matching.
+    const rawUpc = (line.upc || product.barcode || "").trim().toUpperCase();
+    const upc = isPlausibleBarcode(rawUpc) ? rawUpc : "";
 
     const lineageId = await findLineageReferenceProductId(supplierId, upc, product.id);
     if (lineageId) {
