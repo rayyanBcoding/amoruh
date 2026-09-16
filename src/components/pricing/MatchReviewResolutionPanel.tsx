@@ -115,6 +115,12 @@ export function MatchReviewResolutionPanel({
 
   const label = candidateLabel(item.candidateProductId);
   const trackedLabel = referenceLabel(item.referenceProductId);
+  // The SUGGESTED (unconfirmed) Master Product for a needs_review row
+  // whose top candidate isn't a real Product — matchSupplierRow sets
+  // candidateReferenceProductId in exactly this case, but until now
+  // nothing here ever displayed it, so an operator saw no suggestion at
+  // all when the best guess was a Master Product AMORUH doesn't carry.
+  const candidateReferenceLabel = referenceLabel(item.candidateReferenceProductId);
   // The RESOLVED identity this offer is matched to — a real Product
   // takes priority (comparison there already includes any linked Master
   // Product's own offers too); referenceProductId is the fallback for a
@@ -139,10 +145,13 @@ export function MatchReviewResolutionPanel({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {trackedLabel && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-ld-cyan/15 px-2.5 py-1 text-xs font-semibold text-ld-cyan ring-1 ring-inset ring-ld-cyan/40">
-              📎 Tracked as {trackedLabel}
-            </span>
+          {trackedLabel && item.referenceProductId && (
+            <Link
+              href={`/pricing/reference-products/${item.referenceProductId}`}
+              className="inline-flex items-center gap-1 rounded-full bg-ld-cyan/15 px-2.5 py-1 text-xs font-semibold text-ld-cyan ring-1 ring-inset ring-ld-cyan/40 hover:bg-ld-cyan/25"
+            >
+              📎 Tracked as {trackedLabel} →
+            </Link>
           )}
           <ReviewStatusBadge status={item.reviewStatus} confidence={item.matchConfidence} />
         </div>
@@ -160,6 +169,14 @@ export function MatchReviewResolutionPanel({
       {showActions && label && (
         <p className="mb-3 text-sm text-ld-white">
           Is this the same product? <span className="font-semibold text-ld-cyan">{label}</span>
+        </p>
+      )}
+      {showActions && !label && candidateReferenceLabel && item.candidateReferenceProductId && (
+        <p className="mb-3 text-sm text-ld-white">
+          Is this the same product?{" "}
+          <Link href={`/pricing/reference-products/${item.candidateReferenceProductId}`} className="font-semibold text-ld-cyan hover:underline">
+            {candidateReferenceLabel} (Master Product — not carried) →
+          </Link>
         </p>
       )}
       {showActions && (
