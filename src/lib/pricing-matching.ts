@@ -602,6 +602,34 @@ export interface AutoCreateEligibility {
   reason?: string;
 }
 
+// Confirmed directly against NMD Trading Inc's production spreadsheet:
+// its header row (upc/item/description/qty/price/order/category) has no
+// Brand column at all — every one of its rows has brandToken === ""
+// because there's nothing to parse it from, not because parsing failed.
+// This left 1,150+ genuinely complete rows (real edition name, size,
+// concentration, valid UPC — e.g. "JO MILANO GAME OF SPADES 'FULL
+// HOUSE' 1.0 Oz PARFUM SPR") permanently stuck in new_candidate/
+// needs_review. When brand is absent, extractAttributes never strips
+// anything from coreNameTokens (there's no brand word to strip), so the
+// full descriptive text is already sitting there unused — this doesn't
+// invent a differentiator, it just stops requiring one specific field
+// to be non-empty when enough OTHER identifying text is already present
+// to compensate.
+const MIN_CORE_TOKENS_WITHOUT_BRAND = 3;
+
+// coreNameTokens deliberately keeps concentration/packaging abbreviation
+// words (edt/spr/parfum/etc.) and gender codes for TEXT-SIMILARITY
+// purposes elsewhere (see extractAttributes) — but those words carry no
+// naming information, so counting them toward "enough identifying text
+// to auto-create without a brand" would let a near-empty row like
+// "1.7 Oz EDT SPR" (nothing but format/packaging noise, no actual
+// product name) pass on token count alone. Excluded here only, for this
+// one completeness check.
+const NON_IDENTIFYING_TOKENS = new Set(["spr", "spray", "edt", "edp", "edc", "parfum", "cologne", "elixir", "m", "w", "u", "unisex", "men", "women"]);
+function countIdentifyingTokens(tokens: string[]): number {
+  return tokens.filter((t) => !NON_IDENTIFYING_TOKENS.has(t) && !/^\d+(\.\d+)?$/.test(t)).length;
+}
+
 /** Structural completeness check for auto-creating a new Master
  *  Product — deliberately NOT a loose "2 of N fields present" rule. A
  *  row auto-creates only when its parsed identity is a genuinely
@@ -610,7 +638,9 @@ export interface AutoCreateEligibility {
  *  100ML") stays new_candidate/needs_review instead of manufacturing an
  *  incomplete permanent identity. */
 export function checkAutoCreateEligibility(attrs: StructuredAttributes): AutoCreateEligibility {
-  if (!attrs.brandToken) return { eligible: false, reason: "brand not recognized" };
+  if (!attrs.brandToken && countIdentifyingTokens(attrs.coreNameTokens) < MIN_CORE_TOKENS_WITHOUT_BRAND) {
+    return { eligible: false, reason: "brand not recognized and too little identifying text to compensate" };
+  }
   if (attrs.coreNameTokens.length === 0) return { eligible: false, reason: "no fragrance/product-line name beyond brand" };
   if (attrs.sizeMl === null) return { eligible: false, reason: "size not parsed" };
   if (attrs.concentration === null && attrs.productForm === "fragrance") {
