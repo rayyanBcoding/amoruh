@@ -681,6 +681,40 @@ function ageDaysOf(uploadedAt: string): number {
   return (Date.now() - new Date(uploadedAt).getTime()) / (1000 * 60 * 60 * 24);
 }
 
+/** Splits raw comparison rows into actionable/nonActionable, sorts both
+ *  by USD price ascending, and stamps every row with its
+ *  differenceFromBestUsd relative to the actionable best (never the
+ *  other way around — a nonActionable row's own price never becomes the
+ *  baseline). Shared by getProductOfferComparison and
+ *  getReferenceProductOfferComparison so the actionability rule and the
+ *  "best price" definition live in exactly one place. */
+function splitAndRankComparisonRows(rows: OfferComparisonRow[]): {
+  actionable: OfferComparisonRow[];
+  nonActionable: OfferComparisonRow[];
+  bestPrice: OfferComparisonRow | null;
+} {
+  const actionableBase = rows
+    .filter(
+      (r) =>
+        r.currentlyListed &&
+        (r.quantity === null || r.quantity > 0) &&
+        !r.isStale &&
+        (r.reviewStatus === "auto_matched" || r.reviewStatus === "confirmed")
+    )
+    .sort((a, b) => a.priceUsd - b.priceUsd);
+  const nonActionableBase = rows.filter((r) => !actionableBase.includes(r)).sort((a, b) => a.priceUsd - b.priceUsd);
+
+  const best = actionableBase[0] ?? null;
+  const withDiff = (r: OfferComparisonRow): OfferComparisonRow => ({
+    ...r,
+    differenceFromBestUsd: best ? Math.round((r.priceUsd - best.priceUsd) * 100) / 100 : null,
+  });
+
+  const actionable = actionableBase.map(withDiff);
+  const nonActionable = nonActionableBase.map(withDiff);
+  return { actionable, nonActionable, bestPrice: actionable[0] ?? null };
+}
+
 /** Every current supplier offer for one master product, split into
  *  actionable (eligible to be "Best Current Price") vs. everything else
  *  shown only for context — see pricing-matching.ts's plan §4. */
@@ -712,23 +746,12 @@ export async function getProductOfferComparison(productId: string): Promise<Prod
       ageDays: Math.round(ageDays * 10) / 10,
       uploadedAt: offer.uploadedAt,
       reviewStatus: offer.reviewStatus,
+      differenceFromBestUsd: null, // overwritten by splitAndRankComparisonRows below
     });
   }
 
-  const actionable = rows
-    .filter(
-      (r) =>
-        r.currentlyListed &&
-        (r.quantity === null || r.quantity > 0) &&
-        !r.isStale &&
-        (r.reviewStatus === "auto_matched" || r.reviewStatus === "confirmed")
-    )
-    .sort((a, b) => a.priceUsd - b.priceUsd);
-  const nonActionable = rows
-    .filter((r) => !actionable.includes(r))
-    .sort((a, b) => a.priceUsd - b.priceUsd);
-
-  return { productId, actionable, nonActionable, bestPrice: actionable[0] ?? null };
+  const { actionable, nonActionable, bestPrice } = splitAndRankComparisonRows(rows);
+  return { productId, actionable, nonActionable, bestPrice };
 }
 
 /** One-time backfill primitive for offers_by_reference_product — adds a
@@ -783,23 +806,12 @@ export async function getReferenceProductOfferComparison(referenceProductId: str
       ageDays: Math.round(ageDays * 10) / 10,
       uploadedAt: offer.uploadedAt,
       reviewStatus: offer.reviewStatus,
+      differenceFromBestUsd: null, // overwritten by splitAndRankComparisonRows below
     });
   }
 
-  const actionable = rows
-    .filter(
-      (r) =>
-        r.currentlyListed &&
-        (r.quantity === null || r.quantity > 0) &&
-        !r.isStale &&
-        (r.reviewStatus === "auto_matched" || r.reviewStatus === "confirmed")
-    )
-    .sort((a, b) => a.priceUsd - b.priceUsd);
-  const nonActionable = rows
-    .filter((r) => !actionable.includes(r))
-    .sort((a, b) => a.priceUsd - b.priceUsd);
-
-  return { referenceProductId, actionable, nonActionable, bestPrice: actionable[0] ?? null };
+  const { actionable, nonActionable, bestPrice } = splitAndRankComparisonRows(rows);
+  return { referenceProductId, actionable, nonActionable, bestPrice };
 }
 
 // ---------------------------------------------------------------------

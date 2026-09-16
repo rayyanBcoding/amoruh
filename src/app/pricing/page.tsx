@@ -203,9 +203,10 @@ export default function PricingDashboardPage() {
                 }
                 if (r.type === "reference_product") {
                   return (
-                    <div
+                    <button
                       key={`reference_product:${r.referenceProductId}`}
-                      className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm text-ld-white"
+                      onClick={() => router.push(`/pricing/reference-products/${r.referenceProductId}`)}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm text-ld-white hover:bg-ld-bg-elevated"
                     >
                       <span>
                         <span className="font-semibold">{r.brand}</span> {r.name}
@@ -214,7 +215,7 @@ export default function PricingDashboardPage() {
                       <span className="shrink-0 rounded-full bg-ld-purple/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-ld-purple">
                         Master Product — Not Carried
                       </span>
-                    </div>
+                    </button>
                   );
                 }
                 const key = `${r.supplierId}:${r.offerKey}`;

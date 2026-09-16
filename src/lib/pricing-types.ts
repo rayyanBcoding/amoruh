@@ -414,4 +414,12 @@ export interface OfferComparisonRow {
   ageDays: number;
   uploadedAt: string;
   reviewStatus: ReviewStatus;
+  /** priceUsd minus the CURRENT best actionable price for this same
+   *  Master Product — 0 for the best offer itself, null when there's no
+   *  actionable best price to compare against at all (every offer is
+   *  stale/unavailable/unreviewed). Computed against the actionable set
+   *  even for a nonActionable row, so a stale/out-of-stock offer still
+   *  shows useful context ("this was $3 cheaper, but it's stale") —
+   *  never implies a nonActionable row is itself a valid comparison. */
+  differenceFromBestUsd: number | null;
 }
