@@ -743,6 +743,36 @@ export async function backfillOfferByReferenceProduct(referenceProductId: string
   await redis.sadd(KEYS.offersByReferenceProduct(referenceProductId), `${supplierId}::${offerKey}`);
 }
 
+/** One-time cleanup primitive for the placeholder-barcode migration
+ *  (isPlausibleBarcode, pricing-matching.ts) — clears a Master
+ *  Product's own upc and/or ean field when it was corrupted with a
+ *  supplier's placeholder text (e.g. "NO BARCODE") and removes the
+ *  matching stale pointer key(s), so the record stops being a false
+ *  collision magnet. Every OTHER field (brand/name/size/concentration/
+ *  provenance/etc.) is untouched — this never implies the record itself
+ *  is wrong, only that its barcode field was never a real barcode. Not
+ *  used by any live request path. */
+export async function clearReferenceProductPlaceholderFields(
+  referenceProductId: string,
+  clearUpc: boolean,
+  clearEan: boolean
+): Promise<void> {
+  const existing = await getReferenceProduct(referenceProductId);
+  if (!existing) return;
+  const updated: PricingReferenceProduct = { ...existing };
+  const deletions: string[] = [];
+  if (clearUpc && existing.upc) {
+    deletions.push(KEYS.referenceProductByUpc(existing.upc));
+    updated.upc = "";
+  }
+  if (clearEan && existing.ean) {
+    deletions.push(KEYS.referenceProductByEan(existing.ean));
+    updated.ean = "";
+  }
+  await redis.set(KEYS.referenceProduct(referenceProductId), updated);
+  if (deletions.length > 0) await redis.del(...deletions);
+}
+
 export async function getOffersByReferenceProduct(referenceProductId: string): Promise<{ supplierId: string; offerKey: string }[]> {
   const members = (await redis.smembers(KEYS.offersByReferenceProduct(referenceProductId))) as string[];
   return members.map((m) => {
