@@ -238,6 +238,69 @@ export function extractReferenceProductAttributes(rp: PricingReferenceProduct): 
   };
 }
 
+/** Every brand already in active use somewhere in the live catalog
+ *  (real Products and Master Products alike) — never a hardcoded or
+ *  externally-curated brand list. Used only to try to RECOGNIZE a brand
+ *  that's genuinely already known to this system but happens to be
+ *  embedded in a supplier row's free text instead of sitting in its own
+ *  column (see recognizeBrandFromText/resolveEffectiveBrand below). */
+export function buildKnownBrandVocabulary(
+  products: Pick<Product, "brand">[],
+  referenceProducts: Pick<PricingReferenceProduct, "brand">[]
+): Set<string> {
+  const vocabulary = new Set<string>();
+  for (const brand of [...products.map((p) => p.brand), ...referenceProducts.map((r) => r.brand)]) {
+    const tokens = tokenize(brand);
+    if (tokens.length > 0) vocabulary.add(tokens.join(" "));
+  }
+  return vocabulary;
+}
+
+/** Tries to recognize a brand already known to this catalog sitting at
+ *  the START of a row's free text — e.g. NMD Trading's own format is
+ *  consistently "BRAND [GENDER] REST OF DESCRIPTION" ("JO MILANO [M]
+ *  GAME OF SPADES...", "DIOR [M] SAUVAGE..."). Deliberately anchored to
+ *  the beginning of the text (never a match anywhere inside it) —
+ *  matching a known brand name wherever it happens to appear could
+ *  false-positive on an unrelated mention (e.g. "compare to X" copy);
+ *  every real row surveyed for this fix puts the brand first. Checked
+ *  longest-brand-first so a two-word brand ("Giorgio Armani") is never
+ *  shadowed by a shorter, coincidentally-matching single-word entry.
+ *  Only ever confirms a brand that's already real and in use elsewhere
+ *  in the system — never invents one. */
+export function recognizeBrandFromText(fullText: string, knownBrands: Set<string>): string | null {
+  const tokens = tokenize(fullText);
+  if (tokens.length === 0 || knownBrands.size === 0) return null;
+  const candidates = [...knownBrands].sort((a, b) => b.split(" ").length - a.split(" ").length || b.length - a.length);
+  for (const brand of candidates) {
+    const brandTokens = brand.split(" ");
+    if (brandTokens.length <= tokens.length && brandTokens.every((t, i) => tokens[i] === t)) {
+      return brand;
+    }
+  }
+  return null;
+}
+
+/** The single, shared entry point every caller uses to decide a row's
+ *  EFFECTIVE brand — a supplier's own Brand-column value when present,
+ *  otherwise an attempt to recognize an already-known catalog brand
+ *  from the free text. Used identically by matchSupplierRow (so a
+ *  recognized brand benefits normal matching too, not just auto-create
+ *  eligibility) and by the auto-create path (so the brand actually gets
+ *  stored on the new Master Product, not left blank) — a single source
+ *  of truth so the same row never resolves to two different effective
+ *  brands depending on which code path asked. */
+export function resolveEffectiveBrand(
+  row: { brand: string; description: string },
+  products: Pick<Product, "brand">[],
+  referenceProducts: Pick<PricingReferenceProduct, "brand">[]
+): string {
+  const ownBrand = row.brand.trim();
+  if (ownBrand) return ownBrand;
+  const knownBrands = buildKnownBrandVocabulary(products, referenceProducts);
+  return recognizeBrandFromText(`${row.brand} ${row.description}`, knownBrands) ?? "";
+}
+
 export function tokenSetSimilarity(a: string[], b: string[]): number {
   if (a.length === 0 && b.length === 0) return 1;
   const setA = new Set(a);
@@ -608,9 +671,31 @@ export interface AutoCreateEligibility {
  *  complete, exact sellable SKU; anything less (most notably: a
  *  fragrance whose concentration isn't stated, e.g. "DIOR SAUVAGE
  *  100ML") stays new_candidate/needs_review instead of manufacturing an
- *  incomplete permanent identity. */
-export function checkAutoCreateEligibility(attrs: StructuredAttributes): AutoCreateEligibility {
-  if (!attrs.brandToken) return { eligible: false, reason: "brand not recognized" };
+ *  incomplete permanent identity.
+ *
+ *  Confirmed directly against NMD Trading Inc's production spreadsheet:
+ *  its header row (upc/item/description/qty/price/order/category) has
+ *  no Brand column at all — every one of its rows has brandToken === ""
+ *  because there's nothing to parse it from, not because parsing
+ *  failed. `attrs.brandToken` here should already reflect
+ *  resolveEffectiveBrand's own attempt to RECOGNIZE a real, already-
+ *  known catalog brand from the free text before this ever runs (see
+ *  below) — the no-brand-recognized path below is only reached for a
+ *  genuinely novel brand this catalog has never seen before.
+ *
+ *  For that remaining no-brand-recognized case, brand is no longer a
+ *  precondition, but the missing brand's information now has to come
+ *  from somewhere else that's actually VERIFIABLE — not a bare count of
+ *  descriptive words. `hasVerifiedBarcode` is that evidence: a real
+ *  UPC/EAN (checked by the caller via isPlausibleBarcode, which already
+ *  guards against a supplier's own placeholder text like "NO BARCODE")
+ *  is an externally-assigned, objective identifier for one specific
+ *  physical SKU — unlike a word-count threshold, it can't be satisfied
+ *  by a merely wordy but still ambiguous description. */
+export function checkAutoCreateEligibility(attrs: StructuredAttributes, hasVerifiedBarcode: boolean): AutoCreateEligibility {
+  if (!attrs.brandToken && !hasVerifiedBarcode) {
+    return { eligible: false, reason: "brand not recognized and no verified barcode to establish identity" };
+  }
   if (attrs.coreNameTokens.length === 0) return { eligible: false, reason: "no fragrance/product-line name beyond brand" };
   if (attrs.sizeMl === null) return { eligible: false, reason: "size not parsed" };
   if (attrs.concentration === null && attrs.productForm === "fragrance") {
@@ -683,7 +768,15 @@ export function matchSupplierRow(
   referenceProducts: PricingReferenceProduct[] = []
 ): MatchRowResult {
   const productById = new Map(products.map((p) => [p.id, p]));
-  const rowAttrs = extractAttributes(rawTextOf(row), row.brand);
+  const effectiveBrand = resolveEffectiveBrand(row, products, referenceProducts);
+  // True only when the ROW itself has no Brand field of its own and
+  // resolveEffectiveBrand had to fall back to recognizing an
+  // already-known catalog brand from free text — never true for a
+  // supplier that provides a real Brand column. This is NOT the same
+  // as "brand unconfirmed on the candidate side" — it's about how
+  // certain THIS row's own identity is.
+  const brandWasRecognized = !row.brand.trim() && Boolean(effectiveBrand);
+  const rowAttrs = extractAttributes(rawTextOf(row), effectiveBrand);
   const rowText = rawTextOf(row);
 
   // 1. Learned alias — memory, not proof. Aliases only ever point at a
@@ -803,6 +896,31 @@ export function matchSupplierRow(
   const result = matchAgainstMasterCandidates(rowAttrs, pool);
 
   if (result.outcome === "auto_match" && result.winner) {
+    // Verified directly: a recognized-brand row's free text shares
+    // enough boilerplate with a same-brand sibling from a themed
+    // sub-line (e.g. two different "Game of Spades" editions, same
+    // brand/size/concentration/form, differing only in one distinguishing
+    // phrase) that scoreStructuredMatch's text score alone can clear the
+    // auto-match threshold — "Diamonds" scored 0.89 against an existing
+    // "Full House" entry despite being a genuinely different product,
+    // each with its own UPC. A row whose brand had to be RECOGNIZED
+    // (never one the supplier stated directly) is exactly the case with
+    // no independently-confirmed brand to trust that text score against,
+    // so an exact identity-signature match is required to auto-match a
+    // DIFFERENT existing candidate this way — never a raw text score
+    // alone. An exact UPC/EAN hit (step 2 above) is unaffected and
+    // remains the primary, preferred path.
+    if (brandWasRecognized && computeIdentitySignature(rowAttrs) !== computeIdentitySignature(result.winner.attrs)) {
+      return {
+        productId: null,
+        referenceProductId: null,
+        matchType: "unmatched",
+        matchConfidence: result.confidence !== null ? Math.round(result.confidence * 100) / 100 : null,
+        reviewStatus: "needs_review",
+        candidateProductId: result.winner.productId,
+        candidateReferenceProductId: result.winner.productId ? null : result.winner.referenceProductId,
+      };
+    }
     return {
       productId: result.winner.productId,
       referenceProductId: result.winner.referenceProductId,
@@ -934,8 +1052,11 @@ export function computeMatchPreview(
       continue;
     }
     if (match.reviewStatus === "new_candidate") {
-      const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, row.brand);
-      const eligibility = checkAutoCreateEligibility(rowAttrs);
+      const effectiveBrand = resolveEffectiveBrand(row, products, previewPool);
+      const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, effectiveBrand);
+      const hasVerifiedBarcode =
+        isPlausibleBarcode(row.upc.trim().toUpperCase()) || isPlausibleBarcode(row.ean.trim().toUpperCase());
+      const eligibility = checkAutoCreateEligibility(rowAttrs, hasVerifiedBarcode);
       if (!eligibility.eligible) {
         // Incomplete/ambiguous — this is a genuine Match Review case,
         // not a separate "unsupported" limbo.
@@ -945,7 +1066,7 @@ export function computeMatchPreview(
       proposedNewMasterProducts++;
       previewPool.push({
         id: `preview_${previewIdSeq++}`,
-        brand: row.brand,
+        brand: effectiveBrand,
         name: row.description,
         description: row.description,
         sizeMl: rowAttrs.sizeMl,
