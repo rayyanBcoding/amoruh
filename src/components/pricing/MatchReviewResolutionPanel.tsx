@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/Button";
 import { ReviewStatusBadge } from "@/components/pricing/PricingBadges";
 import { formatCurrency } from "@/lib/format";
@@ -114,6 +115,17 @@ export function MatchReviewResolutionPanel({
 
   const label = candidateLabel(item.candidateProductId);
   const trackedLabel = referenceLabel(item.referenceProductId);
+  // The RESOLVED identity this offer is matched to — a real Product
+  // takes priority (comparison there already includes any linked Master
+  // Product's own offers too); referenceProductId is the fallback for a
+  // Master Product AMORUH has never physically stocked. Only ever
+  // meaningful for an actually-matched offer (item.productId is the
+  // CONFIRMED resolution, never a mere candidate/suggestion).
+  const comparisonHref = item.productId
+    ? `/pricing/products/${item.productId}`
+    : item.referenceProductId
+      ? `/pricing/reference-products/${item.referenceProductId}`
+      : null;
 
   return (
     <div>
@@ -135,6 +147,15 @@ export function MatchReviewResolutionPanel({
           <ReviewStatusBadge status={item.reviewStatus} confidence={item.matchConfidence} />
         </div>
       </div>
+
+      {!showActions && comparisonHref && (
+        <Link
+          href={comparisonHref}
+          className="mb-3 inline-flex items-center gap-1 rounded-lg bg-ld-purple/15 px-3 py-1.5 text-xs font-semibold text-ld-purple hover:bg-ld-purple/25"
+        >
+          View Product / Compare Suppliers →
+        </Link>
+      )}
 
       {showActions && label && (
         <p className="mb-3 text-sm text-ld-white">

@@ -264,6 +264,13 @@ export interface MatchReviewItem {
   upc: string;
   reviewStatus: ReviewStatus;
   matchConfidence: number | null;
+  /** The actual CONFIRMED real-Product identity this offer resolved to
+   *  — distinct from candidateProductId (an unconfirmed suggestion).
+   *  Set only for auto_matched/confirmed offers; this (or
+   *  referenceProductId below, for a Master Product AMORUH has never
+   *  stocked) is what a "View Product / Compare Suppliers" link
+   *  navigates to. */
+  productId: string | null;
   /** Best-guess candidate for a one-click confirm — never auto-applied. */
   candidateProductId: string | null;
   candidateLabel: string | null;
