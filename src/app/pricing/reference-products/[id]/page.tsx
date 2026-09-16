@@ -4,20 +4,26 @@ import { useEffect, useState, use } from "react";
 import { Nav } from "@/components/Nav";
 import { OfferComparisonTable } from "@/components/pricing/OfferComparisonTable";
 import { formatCurrency } from "@/lib/format";
-import type { Product } from "@/lib/types";
-import type { ProductOfferComparison } from "@/lib/pricing-types";
+import type { PricingReferenceProduct, ReferenceProductOfferComparison } from "@/lib/pricing-types";
 
-export default function ProductComparisonPage({ params }: { params: Promise<{ id: string }> }) {
+// Direct twin of /pricing/products/[id] for a Master Product AMORUH has
+// never (yet) physically stocked — same comparison logic, same
+// component, keyed by referenceProductId instead of productId. Only
+// ever reached for a Master Product that ISN'T linked to a real Product
+// (search already excludes linked ones from reference_product results —
+// see /api/pricing/search — since a linked pair is one identity, shown
+// only via its real-Product page).
+export default function ReferenceProductComparisonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [product, setProduct] = useState<Product | null>(null);
-  const [comparison, setComparison] = useState<ProductOfferComparison | null>(null);
+  const [product, setProduct] = useState<PricingReferenceProduct | null>(null);
+  const [comparison, setComparison] = useState<ReferenceProductOfferComparison | null>(null);
 
   useEffect(() => {
-    fetch(`/api/products/${id}`)
+    fetch(`/api/pricing/reference-products/${id}`)
       .then((res) => (res.ok ? res.json() : null))
       .then(setProduct)
       .catch(() => {});
-    fetch(`/api/pricing/products/${id}/offers`)
+    fetch(`/api/pricing/reference-products/${id}/offers`)
       .then((res) => (res.ok ? res.json() : null))
       .then(setComparison)
       .catch(() => {});
@@ -27,10 +33,20 @@ export default function ProductComparisonPage({ params }: { params: Promise<{ id
     <div className="min-h-screen">
       <Nav />
       <main className="mx-auto max-w-[1000px] px-6 py-6">
-        <h1 className="mb-1 font-display text-2xl font-extrabold text-ld-white lg:text-3xl">
-          {product ? `${product.brand} ${product.name}` : "Loading…"}
-        </h1>
-        {product && <p className="mb-6 text-sm text-ld-muted">{product.size} · SKU {product.sku}</p>}
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <h1 className="font-display text-2xl font-extrabold text-ld-white lg:text-3xl">
+            {product ? `${product.brand} ${product.name}` : "Loading…"}
+          </h1>
+          <span className="rounded-full bg-ld-purple/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-ld-purple">
+            Master Product — Not Carried
+          </span>
+        </div>
+        {product && (
+          <p className="mb-6 text-sm text-ld-muted">
+            {product.sizeMl ? `${product.sizeMl}ml` : "Size unknown"}
+            {product.concentration ? ` · ${product.concentration}` : ""}
+          </p>
+        )}
 
         {comparison?.bestPrice ? (
           <div className="glass-panel mb-6 rounded-2xl border border-ld-green/30 p-5">
