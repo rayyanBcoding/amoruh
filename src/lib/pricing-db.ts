@@ -355,6 +355,46 @@ export async function resolveOfferManually(input: {
   await redis.eval<(string | number)[], string>(RESOLVE_OFFER_SCRIPT, keys, args);
 }
 
+/** One-time BULK primitive for a large reclassification sweep (e.g. the
+ *  backlog migration) — the same field-level write resolveOfferManually
+ *  does per offer, chunked for throughput instead of one Redis round
+ *  trip per row. NOT used by any live request path; only by an
+ *  explicit, reviewed migration script. Deliberately does not touch
+ *  aliases (a bulk reclassification isn't the same kind of operator-
+ *  confirmed evidence an upload/Match Review action is) and does not
+ *  redo the commit script's seq-guard — it writes directly into
+ *  whatever generation is CURRENT for this supplier at call time, safe
+ *  as long as no concurrent upload for the SAME supplier commits a new
+ *  generation mid-sweep (run one-time migrations during a quiet
+ *  window). */
+export async function bulkUpdateOffers(
+  supplierId: string,
+  updates: Record<string, SupplierOfferCurrent>,
+  ops: { offersByProductOps?: OffersByProductOp[]; offersByReferenceProductOps?: OffersByReferenceProductOp[] } = {}
+): Promise<{ ok: true; count: number } | { ok: false; reason: string }> {
+  const generationId = await getCurrentGenerationId(supplierId);
+  if (!generationId) return { ok: false, reason: "This supplier has no committed price list." };
+
+  const key = KEYS.offerCurrentHash(supplierId, generationId);
+  const entries = Object.entries(updates);
+  const CHUNK = 200;
+  for (let i = 0; i < entries.length; i += CHUNK) {
+    const chunk = Object.fromEntries(entries.slice(i, i + CHUNK));
+    if (Object.keys(chunk).length > 0) await redis.hset(key, chunk);
+  }
+
+  for (const op of ops.offersByProductOps ?? []) {
+    if (op.op === "SADD") await redis.sadd(KEYS.offersByProduct(op.productId), op.member);
+    else await redis.srem(KEYS.offersByProduct(op.productId), op.member);
+  }
+  for (const op of ops.offersByReferenceProductOps ?? []) {
+    if (op.op === "SADD") await redis.sadd(KEYS.offersByReferenceProduct(op.referenceProductId), op.member);
+    else await redis.srem(KEYS.offersByReferenceProduct(op.referenceProductId), op.member);
+  }
+
+  return { ok: true, count: entries.length };
+}
+
 // ---------------------------------------------------------------------
 // Aliases
 // ---------------------------------------------------------------------
@@ -780,30 +820,50 @@ export async function getReferenceProductOfferComparison(referenceProductId: str
 //
 // Operating-model correction: there is no "New Product Candidate"
 // bucket. "no existing match" resolves immediately, at processing time,
-// into either matched (auto-created) or review_required (genuinely
-// ambiguous/incomplete) — see pricing-process.ts. A legacy
-// "new_candidate" row (pre-correction historical data, not yet migrated)
-// and a "not_a_product" row (never a real product at all) are both
-// deliberately invisible here — neither is counted, listed, or
-// actionable through Match Review; the one-time backlog migration is
-// what reclassifies the former into a real bucket.
+// into either matched (auto-created) or a genuinely-ambiguous offer —
+// see pricing-process.ts. A legacy "new_candidate" row (pre-correction
+// historical data, not yet migrated) and a "not_a_product" row (never a
+// real product at all) are both deliberately invisible here — neither
+// is counted, listed, or actionable through Match Review.
+//
+// Sep 2026 scoping change: a genuinely-ambiguous ("needs_review") offer
+// is NOT automatically part of the active queue either. Most ambiguous
+// supplier-catalog items will never be purchased — forcing a human
+// decision on all of them just because a supplier listed them defeats
+// the purpose of deferring work until it matters. review_required now
+// means "alias_conflict/barcode_conflict (an existing confirmed
+// identity going wrong — always urgent), OR a needs_review item an
+// operator or workflow has explicitly flagged (reviewRequestedAt set)."
+// Every ambiguous offer, flagged or not, still counts toward the quiet
+// unresolvedOffers total and is still fully searchable — see
+// searchUnresolvedOffers and requestIdentityResolution
+// (pricing-product-linking.ts).
 // ---------------------------------------------------------------------
 
 const MATCHED_STATUSES: ReviewStatus[] = ["auto_matched", "confirmed"];
 const REVIEW_REQUIRED_STATUSES: ReviewStatus[] = ["needs_review", "alias_conflict", "barcode_conflict"];
+// alias_conflict/barcode_conflict are always active regardless of any
+// flag — see the header comment above.
+const ALWAYS_ACTIVE_REVIEW_STATUSES: ReviewStatus[] = ["alias_conflict", "barcode_conflict"];
 
-function bucketOf(status: ReviewStatus): MatchReviewBucket | "ignored" | null {
-  if (MATCHED_STATUSES.includes(status)) return "matched";
-  if (REVIEW_REQUIRED_STATUSES.includes(status)) return "review_required";
-  if (status === "ignored") return "ignored";
+function isActiveReviewRequired(o: Pick<SupplierOfferCurrent, "reviewStatus" | "reviewRequestedAt">): boolean {
+  if (ALWAYS_ACTIVE_REVIEW_STATUSES.includes(o.reviewStatus)) return true;
+  if (o.reviewStatus === "needs_review") return Boolean(o.reviewRequestedAt);
+  return false;
+}
+
+function bucketOf(o: Pick<SupplierOfferCurrent, "reviewStatus" | "reviewRequestedAt">): MatchReviewBucket | "ignored" | null {
+  if (MATCHED_STATUSES.includes(o.reviewStatus)) return "matched";
+  if (isActiveReviewRequired(o)) return "review_required";
+  if (o.reviewStatus === "ignored") return "ignored";
   return null;
 }
 
 /** The literal per-supplier diagnostic breakdown: currently-listed vs.
- *  no-longer-listed record counts, then the two operational buckets
- *  computed only from the currently-listed set. One HGETALL per
- *  supplier (small supplier count at this business's scale) — same
- *  cost as the query this replaces, just classified correctly. */
+ *  no-longer-listed record counts, then the operational buckets computed
+ *  only from the currently-listed set. One HGETALL per supplier (small
+ *  supplier count at this business's scale) — same cost as the query
+ *  this replaces, just classified correctly. */
 export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
   const suppliers = await getSuppliers();
   const bySupplier: MatchReviewSummary["bySupplier"] = [];
@@ -811,6 +871,7 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
   let matchedCarried = 0;
   let matchedReferenceOnly = 0;
   let reviewRequired = 0;
+  let unresolvedOffers = 0;
   let ignored = 0;
 
   for (const s of suppliers) {
@@ -822,9 +883,10 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
     let sMatchedCarried = 0;
     let sMatchedReferenceOnly = 0;
     let sReview = 0;
+    let sUnresolved = 0;
     let sIgnored = 0;
     for (const o of listed) {
-      const bucket = bucketOf(o.reviewStatus);
+      const bucket = bucketOf(o);
       if (bucket === "matched") {
         sMatched++;
         // Sub-split by whether the resolved identity is physically
@@ -833,8 +895,11 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
         // reviewStatus value.
         if (o.productId) sMatchedCarried++;
         else sMatchedReferenceOnly++;
-      } else if (bucket === "review_required") sReview++;
-      else if (bucket === "ignored") sIgnored++;
+      } else if (bucket === "ignored") sIgnored++;
+      if (REVIEW_REQUIRED_STATUSES.includes(o.reviewStatus)) {
+        sUnresolved++;
+        if (bucket === "review_required") sReview++;
+      }
     }
 
     bySupplier.push({
@@ -846,22 +911,26 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
       matchedCarried: sMatchedCarried,
       matchedReferenceOnly: sMatchedReferenceOnly,
       reviewRequired: sReview,
+      unresolvedOffers: sUnresolved,
       ignored: sIgnored,
     });
     matched += sMatched;
     matchedCarried += sMatchedCarried;
     matchedReferenceOnly += sMatchedReferenceOnly;
     reviewRequired += sReview;
+    unresolvedOffers += sUnresolved;
     ignored += sIgnored;
   }
 
-  return { matched, matchedCarried, matchedReferenceOnly, reviewRequired, ignored, bySupplier };
+  return { matched, matchedCarried, matchedReferenceOnly, reviewRequired, unresolvedOffers, ignored, bySupplier };
 }
 
 /** Paginated, filterable items for one Match Review tab — serves both
  *  buckets through the same function so there's one query path, not
  *  two. Never serializes more than `limit` items regardless of how
- *  large the bucket is. */
+ *  large the bucket is. "review_required" here is the ACTIVE queue
+ *  (see isActiveReviewRequired) — browsing every ambiguous offer,
+ *  flagged or not, is searchUnresolvedOffers's job instead. */
 export async function getMatchReviewItems(params: {
   bucket: MatchReviewBucket;
   supplierId?: string;
@@ -872,7 +941,6 @@ export async function getMatchReviewItems(params: {
   const { bucket, supplierId, search, limit = 50, offset = 0 } = params;
   const suppliers = await getSuppliers();
   const relevantSuppliers = supplierId ? suppliers.filter((s) => s.id === supplierId) : suppliers;
-  const bucketStatuses = bucket === "matched" ? MATCHED_STATUSES : REVIEW_REQUIRED_STATUSES;
   const searchLower = search?.trim().toLowerCase();
 
   const matching: MatchReviewItem[] = [];
@@ -880,7 +948,7 @@ export async function getMatchReviewItems(params: {
     const offers = Object.values(await getCommittedOffers(s.id));
     for (const o of offers) {
       if (o.currentlyListed === false) continue;
-      if (!bucketStatuses.includes(o.reviewStatus)) continue;
+      if (bucket === "matched" ? !MATCHED_STATUSES.includes(o.reviewStatus) : !isActiveReviewRequired(o)) continue;
       if (
         searchLower &&
         !o.description.toLowerCase().includes(searchLower) &&
@@ -906,6 +974,7 @@ export async function getMatchReviewItems(params: {
         candidateReferenceProductId: o.candidateReferenceProductId ?? null,
         competingCandidates: o.competingCandidates,
         referenceProductId: o.referenceProductId,
+        reviewRequestedAt: o.reviewRequestedAt ?? null,
       });
     }
   }
@@ -913,6 +982,35 @@ export async function getMatchReviewItems(params: {
   const total = matching.length;
   const items = matching.slice(offset, offset + limit);
   return { items, total };
+}
+
+/** Single-offer lookup in the same MatchReviewItem shape — what the
+ *  focused single-item resolution view (a workflow's
+ *  requestIdentityResolution call) needs, without paging through a
+ *  whole bucket to find one item. */
+export async function getMatchReviewItemForOffer(supplierId: string, offerKey: string): Promise<MatchReviewItem | null> {
+  const [offer, suppliers] = await Promise.all([getCurrentOffer(supplierId, offerKey), getSuppliers()]);
+  if (!offer) return null;
+  const supplier = suppliers.find((s) => s.id === supplierId);
+  return {
+    supplierId,
+    supplierName: supplier?.name ?? "Unknown Supplier",
+    offerKey: offer.offerKey,
+    description: offer.description,
+    brand: offer.brand,
+    price: offer.price,
+    currency: offer.currency,
+    quantity: offer.quantity,
+    upc: offer.upc,
+    reviewStatus: offer.reviewStatus,
+    matchConfidence: offer.matchConfidence,
+    candidateProductId: offer.candidateProductId,
+    candidateLabel: null,
+    candidateReferenceProductId: offer.candidateReferenceProductId ?? null,
+    competingCandidates: offer.competingCandidates,
+    referenceProductId: offer.referenceProductId,
+    reviewRequestedAt: offer.reviewRequestedAt ?? null,
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -934,7 +1032,16 @@ export interface UnresolvedOfferSearchResult {
   supplierSku: string;
   upc: string;
   ean: string;
+  price: number;
+  currency: string;
+  quantity: number | null;
+  /** Freshness — when this offer was last seen on an upload. */
+  uploadedAt: string;
   reviewStatus: ReviewStatus;
+  /** Whether this item is already in the active Review Required queue —
+   *  lets the UI show "Send for Review" only when there's actually
+   *  something to send. */
+  reviewRequestedAt: string | null;
 }
 
 /** Any current, currently-listed offer that resolves to neither a real
@@ -972,7 +1079,12 @@ export async function searchUnresolvedOffers(query: string, limit = 20): Promise
         supplierSku: o.supplierSku,
         upc: o.upc,
         ean: o.ean,
+        price: o.price,
+        currency: o.currency,
+        quantity: o.quantity,
+        uploadedAt: o.uploadedAt,
         reviewStatus: o.reviewStatus,
+        reviewRequestedAt: o.reviewRequestedAt ?? null,
       });
     }
   }

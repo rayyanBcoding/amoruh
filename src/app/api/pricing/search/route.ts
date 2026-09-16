@@ -65,7 +65,16 @@ export async function GET(req: Request) {
     offerKey: o.offerKey,
     description: o.description,
     brand: o.brand,
+    upc: o.upc,
+    supplierSku: o.supplierSku,
+    price: o.price,
+    currency: o.currency,
+    quantity: o.quantity,
+    // Computed server-side (never client-side — Date.now() during
+    // render is impure/unstable) — freshness, in whole days.
+    ageDays: Math.round((Date.now() - new Date(o.uploadedAt).getTime()) / (1000 * 60 * 60 * 24)),
     reviewStatus: o.reviewStatus,
+    reviewRequestedAt: o.reviewRequestedAt,
   }));
 
   return NextResponse.json({

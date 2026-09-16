@@ -41,7 +41,15 @@ export async function linkOfferToProduct(
   await resolveOfferManually({
     supplierId,
     offerKey,
-    updatedOffer: { ...offer, productId, candidateProductId: productId, matchType: "manual", reviewStatus: "confirmed" },
+    updatedOffer: {
+      ...offer,
+      productId,
+      candidateProductId: productId,
+      matchType: "manual",
+      reviewStatus: "confirmed",
+      // Resolved — clear any active-review flag automatically.
+      reviewRequestedAt: null,
+    },
     newAliases,
     offersByProductOps: ops,
   });
@@ -65,7 +73,18 @@ export async function unlinkOffer(supplierId: string, offerKey: string): Promise
   await resolveOfferManually({
     supplierId,
     offerKey,
-    updatedOffer: { ...offer, productId: null, candidateProductId: null, matchType: "unmatched", reviewStatus: "needs_review" },
+    updatedOffer: {
+      ...offer,
+      productId: null,
+      candidateProductId: null,
+      matchType: "unmatched",
+      reviewStatus: "needs_review",
+      // The operator is actively undoing a confirmed match right now —
+      // that's a deliberate decision that this item needs a fresh look,
+      // so it goes straight into the active queue rather than quietly
+      // becoming just another unflagged ambiguous offer.
+      reviewRequestedAt: new Date().toISOString(),
+    },
     newAliases,
     offersByProductOps: ops,
   });
@@ -132,9 +151,82 @@ export async function ignoreOffer(supplierId: string, offerKey: string): Promise
   await resolveOfferManually({
     supplierId,
     offerKey,
-    updatedOffer: { ...offer, reviewStatus: "ignored" },
+    updatedOffer: { ...offer, reviewStatus: "ignored", reviewRequestedAt: null },
     newAliases: await getAliasesForSupplier(supplierId),
     offersByProductOps: [],
   });
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------
+// Sep 2026 scoping change — a genuinely-ambiguous ("needs_review") offer
+// no longer joins the active Match Review queue merely by existing; it
+// only becomes actionable once flagged. These two functions are the
+// only ways that flag is ever set.
+// ---------------------------------------------------------------------
+
+/** Explicit operator action ("Send for Review") — flags an ambiguous
+ *  offer as needing a human decision NOW, without changing anything
+ *  else about it (reviewStatus/candidates/tracking all untouched). This
+ *  is what moves an item from "quietly unresolved, searchable" into the
+ *  active Review Required queue. Idempotent — sending an already-
+ *  flagged item again is a harmless no-op. Only meaningful for
+ *  needs_review: alias_conflict/barcode_conflict are already always
+ *  active, and anything else isn't ambiguous at all. */
+export async function requestReviewForOffer(supplierId: string, offerKey: string): Promise<{ ok: boolean; error?: string }> {
+  const offer = await getCurrentOffer(supplierId, offerKey);
+  if (!offer) return { ok: false, error: "This supplier offer no longer exists." };
+  if (offer.reviewStatus !== "needs_review") {
+    return { ok: false, error: "Only a genuinely ambiguous item can be sent for review this way." };
+  }
+  if (offer.reviewRequestedAt) return { ok: true };
+
+  await resolveOfferManually({
+    supplierId,
+    offerKey,
+    updatedOffer: { ...offer, reviewRequestedAt: new Date().toISOString() },
+    newAliases: await getAliasesForSupplier(supplierId),
+    offersByProductOps: [],
+  });
+  return { ok: true };
+}
+
+export type IdentityResolutionResult =
+  | { status: "resolved"; productId: string | null; referenceProductId: string | null }
+  | { status: "needs_resolution"; supplierId: string; offerKey: string }
+  | { status: "not_found" };
+
+/** THE shared entry point for any workflow that needs an exact Master
+ *  Product/real-Product identity before it can proceed — "the operator
+ *  tries to Add to Order," "the item enters Inventory Intake/Receiving,"
+ *  or any future workflow with the same requirement. Neither of those
+ *  buying/receiving workflows exists yet in Pricing/Ordering (Phase 2),
+ *  so nothing calls this today except requestReviewForOffer's own
+ *  explicit "Send for Review" path below it — but this is the one hook
+ *  they'll both call once built, so wiring them in later is a single
+ *  call, not a new mechanism.
+ *
+ *  Always re-checks CURRENT state first: if the offer has since
+ *  resolved on its own (a later upload supplied a UPC, an operator
+ *  already handled it through the normal queue), the caller proceeds
+ *  immediately with zero human involvement — "if exact identity is
+ *  clear, auto-resolve." Only when it's STILL genuinely ambiguous does
+ *  this flag it (exactly like requestReviewForOffer) and tell the
+ *  caller to show the focused single-item resolution view for this one
+ *  offer instead of proceeding. */
+export async function requestIdentityResolution(supplierId: string, offerKey: string): Promise<IdentityResolutionResult> {
+  const offer = await getCurrentOffer(supplierId, offerKey);
+  if (!offer) return { status: "not_found" };
+
+  if (offer.reviewStatus === "auto_matched" || offer.reviewStatus === "confirmed") {
+    return { status: "resolved", productId: offer.productId, referenceProductId: offer.referenceProductId };
+  }
+
+  if (offer.reviewStatus === "needs_review" && !offer.reviewRequestedAt) {
+    await requestReviewForOffer(supplierId, offerKey);
+  }
+  // alias_conflict/barcode_conflict are already always-active — nothing
+  // extra to flag; either way, still ambiguous, so still needs the
+  // focused resolution view.
+  return { status: "needs_resolution", supplierId, offerKey };
 }

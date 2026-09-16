@@ -224,6 +224,7 @@ export async function processSupplierUpload(input: {
           reviewStatus: "not_a_product",
           referenceProductId: null,
           rejectedCandidateProductIds: [],
+          reviewRequestedAt: null,
           currentlyListed: true,
           lastUploadId: upload.id,
           uploadedAt: nowIso,
@@ -429,6 +430,16 @@ export async function processSupplierUpload(input: {
         }
       }
 
+      // Whether a genuinely-ambiguous item is flagged for the ACTIVE
+      // review queue is completely independent of the fresh match above
+      // — it only ever changes via an explicit "Send for Review" or a
+      // workflow's requestIdentityResolution call (pricing-product-
+      // linking.ts), never by re-matching. Carried forward across
+      // re-uploads while still needs_review (a flag doesn't silently
+      // vanish on the next price list); cleared the instant the row
+      // resolves to anything else, matched or not.
+      const finalReviewRequestedAt = finalReviewStatus === "needs_review" ? (previous?.reviewRequestedAt ?? null) : null;
+
       snapshots.push({
         id: newId("offersnap"),
         uploadId: upload.id,
@@ -445,6 +456,7 @@ export async function processSupplierUpload(input: {
         reviewStatus: finalReviewStatus,
         referenceProductId: finalReferenceProductId,
         rejectedCandidateProductIds: rejectedIds,
+        reviewRequestedAt: finalReviewRequestedAt,
         currency: row.currency,
         price: row.price,
         fxRateAtUpload: rate?.rate ?? null,
@@ -482,6 +494,7 @@ export async function processSupplierUpload(input: {
         // above when this row's identity is genuinely new.
         referenceProductId: finalReferenceProductId,
         rejectedCandidateProductIds: rejectedIds,
+        reviewRequestedAt: finalReviewRequestedAt,
         currentlyListed: true,
         lastUploadId: upload.id,
         uploadedAt: nowIso,

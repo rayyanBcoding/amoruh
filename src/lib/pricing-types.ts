@@ -110,6 +110,10 @@ export interface SupplierOfferSnapshot {
    *  exactly what was rejected and when. Optional/defaults to empty —
    *  additive, most snapshots never have one. */
   rejectedCandidateProductIds?: string[];
+  /** See the identical field on SupplierOfferCurrent — recorded here too
+   *  so the permanent history shows exactly when (if ever) this item
+   *  became operationally relevant enough to need a human decision. */
+  reviewRequestedAt?: string | null;
   /** Original currency + price, never overwritten (rule #4). */
   currency: string;
   price: number;
@@ -165,6 +169,22 @@ export interface SupplierOfferCurrent {
    *  exact rejected productId(s); a different candidate (for the same or
    *  a different offerKey) is unaffected. Optional/defaults to empty. */
   rejectedCandidateProductIds?: string[];
+  /** Set (to a timestamp) when a genuinely ambiguous ("needs_review")
+   *  item becomes operationally relevant enough to need a human
+   *  decision — an operator's explicit "Send for Review," or (once
+   *  built) an Add-to-Order/Receiving workflow that needs an exact
+   *  identity right now (see requestIdentityResolution in
+   *  pricing-product-linking.ts). `null` (the default) means the item
+   *  sits quietly — still fully tracked, searchable, and correct — but
+   *  deliberately excluded from the active Match Review queue merely
+   *  because a supplier listed it. Irrelevant for every other
+   *  reviewStatus: alias_conflict/barcode_conflict are always active
+   *  regardless of this field (see pricing-db.ts's bucketOf), and
+   *  resolving an item (linking/ignoring/auto-matching) always clears
+   *  this back to null. Carried forward across re-uploads while the
+   *  item stays needs_review — a flag an operator set doesn't silently
+   *  vanish on the next price-list upload. */
+  reviewRequestedAt: string | null;
   /** false once a FULL upload completes without this offerKey present.
    *  Never deleted — kept for "No Longer Listed" display + history. */
   currentlyListed: boolean;
@@ -252,6 +272,10 @@ export interface MatchReviewItem {
    *  genuine sibling-competition needs_review row. */
   competingCandidates?: { productId: string | null; referenceProductId: string | null }[];
   referenceProductId: string | null;
+  /** See the identical field on SupplierOfferCurrent. Always set for an
+   *  item appearing in the "review_required" bucket (alias_conflict/
+   *  barcode_conflict items just don't need it to have gotten there). */
+  reviewRequestedAt: string | null;
 }
 
 /** The two operational buckets a CURRENTLY LISTED offer can fall into —
@@ -259,7 +283,17 @@ export interface MatchReviewItem {
  *  into one of these two (see pricing-process.ts). A delisted offer
  *  (currentlyListed: false) is excluded from both entirely, as is a
  *  legacy "new_candidate" or "not_a_product" row — see getMatchReview-
- *  Summary/bucketOf. */
+ *  Summary/bucketOf.
+ *
+ *  "review_required" is deliberately NOT every ambiguous offer — a
+ *  plain needs_review item only counts once it's flagged (
+ *  reviewRequestedAt set, via an explicit "Send for Review" or a future
+ *  Add-to-Order/Receiving workflow); alias_conflict/barcode_conflict
+ *  are always in it regardless, since those represent an existing
+ *  confirmed identity going wrong, not "we haven't looked at this new
+ *  item yet." The full, unfiltered count of ambiguous offers is
+ *  MatchReviewSummary.unresolvedOffers — a quiet, informational total,
+ *  never a task queue (see the Sep 2026 Match Review scoping change). */
 export type MatchReviewBucket = "review_required" | "matched";
 
 export interface MatchReviewSupplierBreakdown {
@@ -274,7 +308,13 @@ export interface MatchReviewSupplierBreakdown {
    *  matchedReferenceOnly === matched always. */
   matchedCarried: number;
   matchedReferenceOnly: number;
+  /** Actionable NOW — alias_conflict/barcode_conflict, plus any
+   *  needs_review item an operator or workflow has explicitly flagged. */
   reviewRequired: number;
+  /** EVERY ambiguous offer (needs_review + alias_conflict +
+   *  barcode_conflict), flagged or not — the full universe reviewRequired
+   *  is a subset of. Quiet/informational, never a required task count. */
+  unresolvedOffers: number;
   ignored: number;
 }
 
@@ -283,6 +323,7 @@ export interface MatchReviewSummary {
   matchedCarried: number;
   matchedReferenceOnly: number;
   reviewRequired: number;
+  unresolvedOffers: number;
   ignored: number;
   bySupplier: MatchReviewSupplierBreakdown[];
 }

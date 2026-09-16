@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
+import { FocusedResolutionModal } from "@/components/pricing/FocusedResolutionModal";
+import { formatCurrency } from "@/lib/format";
+import type { MatchReviewItem } from "@/lib/pricing-types";
 
 interface SupplierBreakdown {
   supplierId: string;
@@ -13,6 +16,7 @@ interface SupplierBreakdown {
   noLongerListed: number;
   matched: number;
   reviewRequired: number;
+  unresolvedOffers: number;
   ignored: number;
 }
 
@@ -35,7 +39,15 @@ interface DashboardData {
     startedAt: string;
     isLive: boolean;
   }[];
-  matchReview: { reviewRequired: number; matched: number; bySupplier: SupplierBreakdown[] };
+  matchReview: {
+    reviewRequired: number;
+    /** EVERY genuinely ambiguous offer, flagged or not — quiet,
+     *  informational, never a required task count. reviewRequired is a
+     *  subset of this. */
+    unresolvedOffers: number;
+    matched: number;
+    bySupplier: SupplierBreakdown[];
+  };
   supplierCount: number;
 }
 
@@ -46,7 +58,22 @@ interface DashboardData {
 type SearchResult =
   | { type: "product"; productId: string; brand: string; name: string; size: string; sku: string; score: number }
   | { type: "reference_product"; referenceProductId: string; brand: string; name: string; sizeMl: number | null; concentration: string | null }
-  | { type: "unresolved_offer"; supplierId: string; supplierName: string; offerKey: string; description: string; brand: string; reviewStatus: string };
+  | {
+      type: "unresolved_offer";
+      supplierId: string;
+      supplierName: string;
+      offerKey: string;
+      description: string;
+      brand: string;
+      upc: string;
+      supplierSku: string;
+      price: number;
+      currency: string;
+      quantity: number | null;
+      ageDays: number;
+      reviewStatus: string;
+      reviewRequestedAt: string | null;
+    };
 
 export default function PricingDashboardPage() {
   const router = useRouter();
@@ -78,6 +105,60 @@ export default function PricingDashboardPage() {
     }
   };
 
+  const [sendingKey, setSendingKey] = useState<string | null>(null);
+  const sendForReview = async (supplierId: string, offerKey: string) => {
+    const key = `${supplierId}:${offerKey}`;
+    setSendingKey(key);
+    try {
+      const res = await fetch("/api/pricing/match-review/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "request_review", supplierId, offerKey }),
+      });
+      if (res.ok) {
+        const now = new Date().toISOString();
+        setResults((prev) =>
+          prev.map((r) => (r.type === "unresolved_offer" && r.supplierId === supplierId && r.offerKey === offerKey ? { ...r, reviewRequestedAt: now } : r))
+        );
+      }
+    } finally {
+      setSendingKey(null);
+    }
+  };
+
+  const [resolvingKey, setResolvingKey] = useState<string | null>(null);
+  const [resolutionItem, setResolutionItem] = useState<MatchReviewItem | null>(null);
+  const [resolveNotice, setResolveNotice] = useState<string | null>(null);
+  // The shared entry point ANY workflow calls when it needs an exact
+  // identity right now (requestIdentityResolution, pricing-product-
+  // linking.ts) — "explicitly chooses to resolve/review it" from the
+  // spec. Re-checks state first: if it's already resolved, nothing to
+  // show; only genuine remaining ambiguity opens the focused modal.
+  const resolveNow = async (supplierId: string, offerKey: string) => {
+    const key = `${supplierId}:${offerKey}`;
+    setResolvingKey(key);
+    setResolveNotice(null);
+    try {
+      const res = await fetch("/api/pricing/match-review/request-resolution", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supplierId, offerKey }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResolveNotice(data?.error ?? "Could not check this item.");
+        return;
+      }
+      if (data.status === "resolved") {
+        setResolveNotice("Already resolved — no review needed.");
+        return;
+      }
+      if (data.item) setResolutionItem(data.item);
+    } finally {
+      setResolvingKey(null);
+    }
+  };
+
   return (
     <div className="min-h-screen">
       <Nav />
@@ -105,6 +186,7 @@ export default function PricingDashboardPage() {
             className="w-full rounded-xl border border-ld-border bg-ld-bg-elevated px-4 py-3 text-sm text-ld-white placeholder:text-ld-muted/60 outline-none focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/15"
           />
           {searching && <p className="mt-2 text-xs text-ld-muted">Searching…</p>}
+          {resolveNotice && <p className="mt-2 text-xs text-ld-cyan">{resolveNotice}</p>}
           {results.length > 0 && (
             <div className="mt-3 space-y-1">
               {results.map((r) => {
@@ -135,19 +217,42 @@ export default function PricingDashboardPage() {
                     </div>
                   );
                 }
+                const key = `${r.supplierId}:${r.offerKey}`;
+                const ageDays = r.ageDays;
                 return (
-                  <button
-                    key={`unresolved_offer:${r.supplierId}:${r.offerKey}`}
-                    onClick={() => router.push(`/pricing/suppliers/${r.supplierId}`)}
-                    className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm text-ld-white hover:bg-ld-bg-elevated"
+                  <div
+                    key={`unresolved_offer:${key}`}
+                    className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm text-ld-white hover:bg-ld-bg-elevated"
                   >
-                    <span>
-                      <span className="font-semibold">{r.brand}</span> {r.description} <span className="text-ld-muted">— {r.supplierName}</span>
-                    </span>
-                    <span className="shrink-0 rounded-full bg-ld-amber/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-ld-amber">
-                      Unresolved Supplier Offer
-                    </span>
-                  </button>
+                    <button onClick={() => router.push(`/pricing/suppliers/${r.supplierId}`)} className="min-w-0 flex-1 text-left">
+                      <span className="font-semibold">{r.brand}</span> {r.description}
+                      <span className="text-ld-muted">
+                        {" — "}
+                        {r.supplierName} · {formatCurrency(r.price)} {r.currency !== "USD" && `(${r.currency})`}
+                        {r.quantity !== null && ` · Qty ${r.quantity}`}
+                        {(r.upc || r.supplierSku) && ` · ${r.upc || r.supplierSku}`}
+                        {` · ${ageDays === 0 ? "today" : `${ageDays}d ago`}`}
+                      </span>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="rounded-full bg-ld-amber/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-ld-amber">
+                        Unresolved
+                      </span>
+                      {r.reviewStatus === "needs_review" &&
+                        (r.reviewRequestedAt ? (
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-ld-cyan">Sent for Review ✓</span>
+                        ) : (
+                          <Button variant="outline" disabled={sendingKey === key} onClick={() => sendForReview(r.supplierId, r.offerKey)}>
+                            Send for Review
+                          </Button>
+                        ))}
+                      {(r.reviewStatus === "needs_review" || r.reviewStatus === "alias_conflict" || r.reviewStatus === "barcode_conflict") && (
+                        <Button variant="cyan" disabled={resolvingKey === key} onClick={() => resolveNow(r.supplierId, r.offerKey)}>
+                          Resolve Now
+                        </Button>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -157,6 +262,9 @@ export default function PricingDashboardPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <StatCard label="Suppliers" value={data?.supplierCount ?? "—"} />
           <StatCard label="Lists Uploaded Today" value={data?.uploadsToday ?? "—"} />
+          {/* Actionable human work ONLY — alias/barcode conflicts, plus
+              anything explicitly sent for review. NOT every ambiguous
+              item a supplier happens to list. */}
           <StatCard
             label="Review Required"
             value={data?.matchReview.reviewRequired ?? "—"}
@@ -167,6 +275,15 @@ export default function PricingDashboardPage() {
           <StatCard label="Master Products Auto-Created" value={data?.recentAutoCreated ?? "—"} accent="text-ld-purple" />
           <StatCard label="Matched" value={data?.matchReview.matched ?? "—"} accent="text-ld-green" />
         </div>
+
+        {/* Deliberately NOT a StatCard — quiet, muted, informational
+            only. This is the full universe of ambiguous supplier items
+            (Review Required is the small actionable subset above); most
+            of these will never be purchased and are not required work. */}
+        <p className="mt-3 text-xs text-ld-muted">
+          <span className="font-semibold text-ld-muted">{(data?.matchReview.unresolvedOffers ?? 0).toLocaleString()}</span> unresolved supplier
+          offers sitting quietly in the background — searchable, not a required task. Resolution is only needed if you try to order one.
+        </p>
 
         {data && data.matchReview.bySupplier.length > 0 && (
           <div className="glass-panel mt-4 rounded-2xl p-5">
@@ -180,6 +297,7 @@ export default function PricingDashboardPage() {
                     <th className="py-1 pr-4">No Longer Listed</th>
                     <th className="py-1 pr-4">Matched</th>
                     <th className="py-1 pr-4">Review Required</th>
+                    <th className="py-1 pr-4 font-normal normal-case tracking-normal text-ld-muted/70">Unresolved (quiet)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -192,6 +310,7 @@ export default function PricingDashboardPage() {
                       <td className={`py-2 pr-4 ${s.reviewRequired > 0 ? "font-semibold text-ld-amber" : "text-ld-muted"}`}>
                         {s.reviewRequired.toLocaleString()}
                       </td>
+                      <td className="py-2 pr-4 text-ld-muted/70">{s.unresolvedOffers.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -237,6 +356,19 @@ export default function PricingDashboardPage() {
           )}
         </div>
       </main>
+
+      {resolutionItem && (
+        <FocusedResolutionModal
+          item={resolutionItem}
+          onClose={() => setResolutionItem(null)}
+          onResolved={() => {
+            setResolutionItem(null);
+            // Refresh so the "Sent for Review"/badge state in the search
+            // results reflects whatever just happened.
+            if (query.trim()) runSearch(query);
+          }}
+        />
+      )}
     </div>
   );
 }
