@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { ignoreOffer, linkOfferToProduct, unlinkOffer, rejectSuggestedCandidate } from "@/lib/pricing-product-linking";
+import { ignoreOffer, linkOfferToProduct, unlinkOffer, rejectSuggestedCandidate, requestReviewForOffer } from "@/lib/pricing-product-linking";
 
 export const dynamic = "force-dynamic";
 
 interface Body {
-  action?: "link" | "unlink" | "ignore" | "reject_candidate";
+  action?: "link" | "unlink" | "ignore" | "reject_candidate" | "request_review";
   supplierId?: string;
   offerKey?: string;
   productId?: string;
@@ -44,6 +44,11 @@ export async function POST(req: Request) {
   if (body.action === "reject_candidate") {
     if (!body.productId) return NextResponse.json({ error: "Missing productId." }, { status: 400 });
     const result = await rejectSuggestedCandidate(body.supplierId, body.offerKey, body.productId);
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.action === "request_review") {
+    const result = await requestReviewForOffer(body.supplierId, body.offerKey);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
     return NextResponse.json({ ok: true });
   }

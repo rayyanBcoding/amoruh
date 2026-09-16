@@ -3,9 +3,8 @@
 import { useEffect, useState } from "react";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
-import { ReviewStatusBadge } from "@/components/pricing/PricingBadges";
 import { TrackForPricingModal } from "@/components/pricing/TrackForPricingModal";
-import { formatCurrency } from "@/lib/format";
+import { MatchReviewResolutionPanel } from "@/components/pricing/MatchReviewResolutionPanel";
 import type { MatchReviewBucket, MatchReviewItem, MatchReviewSummary, PricingReferenceProduct } from "@/lib/pricing-types";
 import type { Product } from "@/lib/types";
 
@@ -14,77 +13,15 @@ const PAGE_SIZE = 50;
 // No "New Product Candidates" tab — "no existing match" resolves into
 // one of these two at processing time (see pricing-process.ts). A
 // structurally-complete row auto-creates and lands in Matched
-// immediately; anything genuinely ambiguous or incomplete lands here in
-// Review Required, with the exact same Track/Link actions either way.
+// immediately; anything genuinely ambiguous or incomplete only lands
+// here once it's actually flagged for review (an alias/barcode
+// conflict, or an explicit "Send for Review") — see pricing-db.ts's
+// isActiveReviewRequired. Most ambiguous supplier-catalog items never
+// show up here at all; they sit quietly, searchable, until they matter.
 const TABS: { key: MatchReviewBucket; label: string }[] = [
   { key: "review_required", label: "Review Required" },
   { key: "matched", label: "Matched" },
 ];
-
-/** Inline "Link to tracked item…" search — separate from the real-
- *  catalog "Search Another Product…" select, since reference products
- *  can scale well beyond what a plain <select> of everything should
- *  ever hold. */
-function LinkTrackedItemSearch({ onPick, disabled }: { onPick: (referenceProductId: string) => void; disabled: boolean }) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<PricingReferenceProduct[]>([]);
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    const q = query.trim();
-    // Deferred a tick — react-hooks/set-state-in-effect flags any
-    // setState reachable synchronously from an effect body, including
-    // the immediate "clear results" path below.
-    const handle = setTimeout(
-      () => {
-        if (!q) {
-          setResults([]);
-          return;
-        }
-        fetch(`/api/pricing/reference-products?q=${encodeURIComponent(q)}&limit=8`)
-          .then((res) => (res.ok ? res.json() : { items: [] }))
-          .then((data) => setResults(data.items ?? []))
-          .catch(() => setResults([]));
-      },
-      q ? 250 : 0
-    );
-    return () => clearTimeout(handle);
-  }, [query]);
-
-  return (
-    <div className="relative">
-      <input
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        disabled={disabled}
-        placeholder="Link to tracked item…"
-        className="w-48 rounded-lg border border-ld-border bg-ld-bg-elevated px-3 py-2 text-xs text-ld-white outline-none focus:border-ld-cyan"
-      />
-      {open && results.length > 0 && (
-        <div className="absolute z-10 mt-1 w-64 rounded-lg border border-ld-border bg-ld-bg-card shadow-lg">
-          {results.map((r) => (
-            <button
-              key={r.id}
-              onClick={() => {
-                onPick(r.id);
-                setQuery("");
-                setResults([]);
-                setOpen(false);
-              }}
-              className="block w-full truncate px-3 py-2 text-left text-xs text-ld-white hover:bg-ld-bg-elevated"
-            >
-              {r.brand} {r.name}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function MatchReviewPage() {
   const [bucket, setBucket] = useState<MatchReviewBucket>("review_required");
@@ -188,18 +125,6 @@ export default function MatchReviewPage() {
     }
   };
 
-  const candidateLabel = (productId: string | null) => {
-    if (!productId) return null;
-    const p = products.find((pr) => pr.id === productId);
-    return p ? `${p.brand} ${p.name} (${p.size})` : null;
-  };
-
-  const referenceLabel = (referenceProductId: string | null) => {
-    if (!referenceProductId) return null;
-    const r = referenceProducts.find((rp) => rp.id === referenceProductId);
-    return r ? `${r.brand} ${r.name}` : "Tracked item";
-  };
-
   return (
     <div className="min-h-screen">
       <Nav />
@@ -263,74 +188,18 @@ export default function MatchReviewPage() {
             {items.map((item) => {
               const key = itemKey(item);
               const busy = busyKey === key;
-              const label = candidateLabel(item.candidateProductId);
-              const trackedLabel = referenceLabel(item.referenceProductId);
               return (
                 <div key={key} className="glass-panel rounded-2xl p-5">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="font-semibold text-ld-white">{item.description || item.brand}</p>
-                      <p className="text-xs text-ld-muted">
-                        {item.supplierName} · {formatCurrency(item.price)} {item.currency !== "USD" && `(${item.currency})`}
-                        {item.quantity !== null && ` · Qty ${item.quantity}`}
-                        {item.upc && ` · UPC ${item.upc}`}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {trackedLabel && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-ld-cyan/15 px-2.5 py-1 text-xs font-semibold text-ld-cyan ring-1 ring-inset ring-ld-cyan/40">
-                          📎 Tracked as {trackedLabel}
-                        </span>
-                      )}
-                      <ReviewStatusBadge status={item.reviewStatus} confidence={item.matchConfidence} />
-                    </div>
-                  </div>
-
-                  {bucket === "review_required" && (
-                    <>
-                      {label && (
-                        <p className="mb-3 text-sm text-ld-white">
-                          Is this the same product? <span className="font-semibold text-ld-cyan">{label}</span>
-                        </p>
-                      )}
-                      <div className="flex flex-wrap items-center gap-2">
-                        {item.candidateProductId && (
-                          <>
-                            <Button variant="cyan" size="md" disabled={busy} onClick={() => resolve(item, { action: "link", productId: item.candidateProductId })}>
-                              Yes — Link
-                            </Button>
-                            <Button variant="danger" size="md" disabled={busy} onClick={() => resolve(item, { action: "reject_candidate", productId: item.candidateProductId })}>
-                              No — Not a Match
-                            </Button>
-                          </>
-                        )}
-                        <select
-                          disabled={busy}
-                          value=""
-                          onChange={(e) => e.target.value && resolve(item, { action: "link", productId: e.target.value })}
-                          className="rounded-lg border border-ld-border bg-ld-bg-elevated px-3 py-2 text-xs text-ld-white outline-none focus:border-ld-purple"
-                        >
-                          <option value="">Search Another Product…</option>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.sku} — {p.brand} {p.name} ({p.size})
-                            </option>
-                          ))}
-                        </select>
-                        {!trackedLabel && (
-                          <>
-                            <Button variant="outline" size="md" disabled={busy} onClick={() => setTrackModalFor(item)}>
-                              📎 Track for Pricing
-                            </Button>
-                            <LinkTrackedItemSearch disabled={busy} onPick={(refId) => linkTrackedItem(item, refId)} />
-                          </>
-                        )}
-                        <Button variant="ghost" size="md" disabled={busy} onClick={() => resolve(item, { action: "ignore" })}>
-                          Ignore
-                        </Button>
-                      </div>
-                    </>
-                  )}
+                  <MatchReviewResolutionPanel
+                    item={item}
+                    products={products}
+                    referenceProducts={referenceProducts}
+                    busy={busy}
+                    onResolve={(body) => resolve(item, body)}
+                    onLinkTracked={(refId) => linkTrackedItem(item, refId)}
+                    onTrackForPricing={() => setTrackModalFor(item)}
+                    showActions={bucket === "review_required"}
+                  />
                 </div>
               );
             })}
