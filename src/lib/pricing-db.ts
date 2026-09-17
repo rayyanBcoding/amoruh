@@ -754,14 +754,22 @@ export async function getProductOfferComparison(productId: string): Promise<Prod
   return { productId, actionable, nonActionable, bestPrice };
 }
 
-/** One-time backfill primitive for offers_by_reference_product — adds a
- *  supplier/offerKey membership that predates this index (see the
- *  one-time backfill script; the ~10 offers already tracked via "Track
- *  for Pricing" before this reverse index existed). Idempotent (SADD is
- *  naturally idempotent, safe to re-run). No other code path should ever
- *  call this directly — every ONGOING write goes through
- *  commitGeneration/resolveOfferManually instead, which keep this index
- *  and the generation commit atomic together. */
+/** Backfill primitive for offers_by_reference_product — adds a
+ *  supplier/offerKey membership that predates this index (originally:
+ *  the one-time backfill script for the ~10 offers already tracked via
+ *  "Track for Pricing" before this reverse index existed). Idempotent
+ *  (SADD is naturally idempotent, safe to re-run).
+ *
+ *  Every ONGOING write goes through commitGeneration/resolveOfferManually
+ *  instead, which keep this index and the generation commit/offer update
+ *  atomic together — this primitive should never be a substitute for
+ *  that. The one standing exception: createReferenceProductForOffer's
+ *  own retry-safety branch (pricing-reference-linking.ts) calls this
+ *  defensively when it finds an offer already linked, self-healing
+ *  exactly this same class of gap (an offer whose referenceProductId is
+ *  correct but whose reverse-index membership predates it — which is
+ *  precisely the shape of every record this index bug left behind
+ *  before applyReferenceLink was fixed to pass offersByReferenceProductOps). */
 export async function backfillOfferByReferenceProduct(referenceProductId: string, supplierId: string, offerKey: string): Promise<void> {
   await redis.sadd(KEYS.offersByReferenceProduct(referenceProductId), `${supplierId}::${offerKey}`);
 }

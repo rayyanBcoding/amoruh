@@ -1,4 +1,5 @@
 import {
+  backfillOfferByReferenceProduct,
   createReferenceProduct,
   getAliasesForSupplier,
   getCurrentOffer,
@@ -6,6 +7,7 @@ import {
   getReferenceProductByEan,
   getReferenceProductByUpc,
   resolveOfferManually,
+  type OffersByReferenceProductOp,
 } from "./pricing-db";
 import { extractAttributes, isPlausibleBarcode } from "./pricing-matching";
 import type { PricingReferenceProduct } from "./pricing-types";
@@ -52,16 +54,49 @@ async function applyReferenceLink(
   // touches aliases, so it must pass them through completely unchanged.
   const currentAliases = await getAliasesForSupplier(supplierId);
 
-  // Only referenceProductId changes — productId/candidateProductId/
-  // matchType/reviewStatus are untouched, and offersByProductOps stays
-  // empty: this never touches the real-catalog reverse index, because
-  // it never touches the real catalog.
+  // Reverse-index maintenance — mirrors the identical SADD/SREM pattern
+  // already used by pricing-process.ts's upload-commit path and by
+  // linkOfferToProduct/unlinkOffer's real-Product equivalent
+  // (pricing-product-linking.ts). THIS WAS THE BUG: this function
+  // previously never issued these ops at all, so offers_by_reference_
+  // product stayed empty for any link made through "Track for Pricing" /
+  // "Resolve Now" / "Link tracked item" — SupplierOfferCurrent.
+  // referenceProductId was set correctly, but the comparison page reads
+  // exclusively from this reverse index (getOffersByReferenceProduct),
+  // so it showed nothing at all until the supplier's NEXT price upload
+  // happened to reconcile it via pricing-process.ts's own logic.
+  const member = `${supplierId}::${offerKey}`;
+  const priorReferenceProductId = offer.referenceProductId ?? null;
+  const offersByReferenceProductOps: OffersByReferenceProductOp[] = [];
+  if (priorReferenceProductId && priorReferenceProductId !== referenceProductId) {
+    offersByReferenceProductOps.push({ op: "SREM", referenceProductId: priorReferenceProductId, member });
+  }
+  if (referenceProductId && priorReferenceProductId !== referenceProductId) {
+    offersByReferenceProductOps.push({ op: "SADD", referenceProductId, member });
+  }
+
+  // matchType/reviewStatus now mirror linkOfferToProduct/unlinkOffer's
+  // real-Product equivalent exactly: a manual link is a genuine
+  // confirmation (an operator directly said "this offer is this exact
+  // Master Product"), at least as authoritative as an auto_matched
+  // structural match, and requestIdentityResolution ("Resolve Now")
+  // already checks for reviewStatus === "confirmed" to treat an offer
+  // as already resolved — leaving it at "needs_review" left both that
+  // re-entrancy check AND the comparison page's own actionability
+  // filter treating a manually-confirmed link as if nothing had
+  // happened. Unlinking mirrors unlinkOffer: back to needs_review with
+  // reviewRequestedAt set, since the operator is deliberately flagging
+  // this item needs a fresh look, not silently going back to quiet
+  // ambiguity.
   await resolveOfferManually({
     supplierId,
     offerKey,
-    updatedOffer: { ...offer, referenceProductId },
+    updatedOffer: referenceProductId
+      ? { ...offer, referenceProductId, matchType: "manual", reviewStatus: "confirmed", reviewRequestedAt: null }
+      : { ...offer, referenceProductId: null, matchType: "unmatched", reviewStatus: "needs_review", reviewRequestedAt: new Date().toISOString() },
     newAliases: currentAliases,
     offersByProductOps: [],
+    offersByReferenceProductOps,
   });
   return { ok: true };
 }
@@ -73,6 +108,33 @@ export async function createReferenceProductForOffer(
 ): Promise<ReferenceLinkResult> {
   const offer = await getCurrentOffer(supplierId, offerKey);
   if (!offer) return { ok: false, error: "This supplier offer no longer exists." };
+
+  // Retry safety — a genuine network retry (client timeout, double
+  // click before the UI re-renders and hides the button) must never
+  // create a SECOND Master Product for an offer that's already linked.
+  // Without this check, a retried call would fall through to the
+  // create-new branch below (nothing there re-checks offer state),
+  // leaving the FIRST reference product permanently orphaned — the
+  // offer's own referenceProductId now points at the second one, and
+  // applyReferenceLink's SREM correctly empties the first one's reverse-
+  // index set, but the orphaned record itself lingers in the catalog
+  // forever. Returning the already-linked product is a safe no-op —
+  // and, defensively, self-heals the exact class of gap this whole bug
+  // was: re-adding the reverse-index membership in case this retry is
+  // itself recovering from a partial failure (or from before
+  // applyReferenceLink was fixed to maintain this index at all).
+  // Idempotent either way — a no-op if the membership is already there.
+  if (offer.referenceProductId) {
+    const alreadyLinked = await getReferenceProduct(offer.referenceProductId);
+    if (alreadyLinked) {
+      await backfillOfferByReferenceProduct(offer.referenceProductId, supplierId, offerKey);
+      return { ok: true, referenceProduct: alreadyLinked, linkedExisting: true };
+    }
+    // The offer points at a reference product that no longer exists
+    // (should not happen in practice — reference products are never
+    // deleted — but fall through to normal creation rather than silently
+    // succeeding with stale, wrong data).
+  }
 
   // A supplier's own placeholder text ("NO BARCODE" etc.) is never a
   // real, uniquely-shared identifier — treated as absent here exactly
