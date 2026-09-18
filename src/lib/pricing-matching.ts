@@ -822,7 +822,20 @@ export function matchSupplierRow(
   row: MatchRowInput,
   products: Product[],
   aliases: SupplierAlias[],
-  referenceProducts: PricingReferenceProduct[] = []
+  referenceProducts: PricingReferenceProduct[] = [],
+  // Callers processing many rows in a loop (computeMatchPreview,
+  // processSupplierUpload) build this ONCE outside the loop and append
+  // to it incrementally as rows auto-create — passing it here avoids
+  // buildMasterCandidatePool's full products+referenceProducts scan (and
+  // re-extraction of every candidate's attributes) being repeated on
+  // EVERY row. Confirmed as a real, severe perf regression: at the
+  // current catalog scale (~8,300 reference products) this rebuild cost
+  // ~80ms/row, so a several-hundred-row supplier file took 30-80+
+  // seconds PER preview request (re-run on every column-map change) —
+  // exceeding Vercel's 60s function timeout. Omitted, this falls back to
+  // the old rebuild-every-call behavior, so single-row callers are
+  // unaffected.
+  precomputedPool?: MasterCandidate[]
 ): MatchRowResult {
   const productById = new Map(products.map((p) => [p.id, p]));
   const effectiveBrand = resolveEffectiveBrand(row, products, referenceProducts);
@@ -942,7 +955,7 @@ export function matchSupplierRow(
   // 3. Gated structured match against the combined, deduped Master
   // Product candidate pool — ambiguity judged relative to what the row
   // itself specifies (see matchAgainstMasterCandidates).
-  const pool = buildMasterCandidatePool(products, referenceProducts);
+  const pool = precomputedPool ?? buildMasterCandidatePool(products, referenceProducts);
   let result = matchAgainstMasterCandidates(rowAttrs, pool);
 
   // Verified directly, and NOT limited to recognized-brand rows: two
@@ -1119,6 +1132,11 @@ export function computeMatchPreview(
   const previewPool = [...referenceProducts];
   let previewIdSeq = 0;
 
+  // Built ONCE from the starting catalog, then grown incrementally in
+  // lockstep with previewPool below — never rebuilt per row (see
+  // matchSupplierRow's precomputedPool comment for why that mattered).
+  const candidatePool = buildMasterCandidatePool(products, previewPool);
+
   for (const row of rows) {
     if (!isValidProductRow(row)) {
       nonProductRows++;
@@ -1126,7 +1144,7 @@ export function computeMatchPreview(
     }
 
     const offerKey = deriveOfferKey(row.supplierSku, row.description);
-    const match = matchSupplierRow({ offerKey, ...row }, products, aliases, previewPool);
+    const match = matchSupplierRow({ offerKey, ...row }, products, aliases, previewPool, candidatePool);
 
     if (match.reviewStatus === "auto_matched") {
       if (match.productId) matchedProduct++;
@@ -1146,7 +1164,7 @@ export function computeMatchPreview(
         continue;
       }
       proposedNewMasterProducts++;
-      previewPool.push({
+      const newReferenceProduct: PricingReferenceProduct = {
         id: `preview_${previewIdSeq++}`,
         brand: effectiveBrand,
         name: row.description,
@@ -1166,6 +1184,14 @@ export function computeMatchPreview(
         createdFromSupplierId: null,
         createdFromUploadId: null,
         createdFromOfferKey: null,
+      };
+      previewPool.push(newReferenceProduct);
+      candidatePool.push({
+        productId: null,
+        referenceProductId: newReferenceProduct.id,
+        attrs: extractReferenceProductAttributes(newReferenceProduct),
+        upc: newReferenceProduct.upc,
+        ean: newReferenceProduct.ean,
       });
       continue;
     }
