@@ -938,34 +938,40 @@ export function matchSupplierRow(
   // Product candidate pool — ambiguity judged relative to what the row
   // itself specifies (see matchAgainstMasterCandidates).
   const pool = buildMasterCandidatePool(products, referenceProducts);
-  const result = matchAgainstMasterCandidates(rowAttrs, pool);
+  let result = matchAgainstMasterCandidates(rowAttrs, pool);
+
+  // Verified directly: a recognized-brand row's free text shares enough
+  // boilerplate with a same-brand sibling from a themed sub-line (e.g.
+  // several different "Game of Spades" editions, same brand/size/
+  // concentration/form, differing only in one distinguishing word) that
+  // scoreStructuredMatch's text score alone clears the auto-match
+  // threshold OR produces several near-tied "competing" candidates —
+  // "Diamonds" scored 0.89 against an existing "Full House" entry
+  // despite being a genuinely different product, and three short-name
+  // siblings (Alpha/Beta/Gamma-shaped) score near-identically against
+  // EACH OTHER purely from shared boilerplate, tripping the sibling-tie-
+  // break even though none of them is actually a match for a fourth,
+  // genuinely new edition. A row whose brand had to be RECOGNIZED (never
+  // one the supplier stated directly) has no independently-confirmed
+  // brand to trust either of those fuzzy outcomes against, so an exact
+  // identity-signature match against one of the candidates actually
+  // considered is required to trust auto_match OR needs_review here —
+  // never a raw text score alone. Found, it's a clean, certain
+  // auto-match; not found among ANY candidate considered, this is
+  // treated as no_match — this candidate/these candidates simply don't
+  // apply to this row, which says nothing about whether the ROW ITSELF
+  // is a genuinely new, complete identity (pricing-process.ts's own
+  // eligibility check decides that independently). An exact UPC/EAN hit
+  // (step 2 above) is unaffected and remains the primary, preferred path.
+  if (brandWasRecognized && result.outcome !== "no_match") {
+    const candidatesConsidered = result.winner ? [result.winner] : result.competingCandidates;
+    const exactMatch = candidatesConsidered.find((c) => computeIdentitySignature(rowAttrs) === computeIdentitySignature(c.attrs));
+    result = exactMatch
+      ? { outcome: "auto_match", winner: exactMatch, competingCandidates: [], confidence: 1 }
+      : { outcome: "no_match", winner: null, competingCandidates: [], confidence: null };
+  }
 
   if (result.outcome === "auto_match" && result.winner) {
-    // Verified directly: a recognized-brand row's free text shares
-    // enough boilerplate with a same-brand sibling from a themed
-    // sub-line (e.g. two different "Game of Spades" editions, same
-    // brand/size/concentration/form, differing only in one distinguishing
-    // phrase) that scoreStructuredMatch's text score alone can clear the
-    // auto-match threshold — "Diamonds" scored 0.89 against an existing
-    // "Full House" entry despite being a genuinely different product,
-    // each with its own UPC. A row whose brand had to be RECOGNIZED
-    // (never one the supplier stated directly) is exactly the case with
-    // no independently-confirmed brand to trust that text score against,
-    // so an exact identity-signature match is required to auto-match a
-    // DIFFERENT existing candidate this way — never a raw text score
-    // alone. An exact UPC/EAN hit (step 2 above) is unaffected and
-    // remains the primary, preferred path.
-    if (brandWasRecognized && computeIdentitySignature(rowAttrs) !== computeIdentitySignature(result.winner.attrs)) {
-      return {
-        productId: null,
-        referenceProductId: null,
-        matchType: "unmatched",
-        matchConfidence: result.confidence !== null ? Math.round(result.confidence * 100) / 100 : null,
-        reviewStatus: "needs_review",
-        candidateProductId: result.winner.productId,
-        candidateReferenceProductId: result.winner.productId ? null : result.winner.referenceProductId,
-      };
-    }
     return {
       productId: result.winner.productId,
       referenceProductId: result.winner.referenceProductId,
