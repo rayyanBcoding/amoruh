@@ -164,10 +164,40 @@ const SIZE_TOKEN_PATTERN = /(\d+(?:\.\d+)?)\s*(ml|oz)/;
 // to treat as equivalent — so it's filtered explicitly here too.
 const UNIT_WORDS = new Set(["ml", "oz", "fl"]);
 
+// Confirmed directly: "Aventus by Creed 100ml EDP" vs "Creed Aventus
+// 3.4 Oz Eau De Parfum" — the exact same physical item — scored well
+// below the auto-match threshold (~0.5) and produced different identity
+// signatures, purely because "3.4 Oz" (a SPACED number+unit) splits
+// into two tokens where "100ml" (unspaced) survives as one, and
+// "Eau De Parfum" leaves the literal word "parfum" in the token stream
+// where "EDP" leaves "edp" — two different-looking descriptions of an
+// identical concentration. Neither gap reflects genuine ambiguity: both
+// sides already resolve to the SAME parsed sizeMl/concentration value
+// via parseSizeMl/parseConcentration (which already tolerate the
+// spacing/phrasing difference) — only the TEXT TOKENS used for fuzzy
+// similarity and the identity signature disagreed. Gluing spaced
+// number+unit together, and collapsing the spelled-out "eau de X"
+// phrase to the same literal word its abbreviation already produces,
+// makes both sides tokenize identically.
+//
+// Deliberately narrow: only the full "eau de X" phrase collapses —
+// never a bare "parfum"/"cologne" alone, which can be a genuine flanker
+// NAME component with no "eau de" prefix (e.g. JPG "Le Parfum" — a
+// real, intentionally-distinct hard-gated concentration bucket, left
+// completely untouched here).
+function normalizeForMatching(text: string): string {
+  return text
+    .replace(/(\d+(?:\.\d+)?)\s*(?:fl\.?\s*)?(ml|oz)\b/gi, (_, num: string, unit: string) => `${num}${unit.toLowerCase()}`)
+    .replace(/\beau\s*de\s*parfum\b/gi, "edp")
+    .replace(/\beau\s*de\s*toilette\b/gi, "edt")
+    .replace(/\beau\s*de\s*cologne\b/gi, "edc")
+    .replace(/\bextrait\s*de\s*parfum\b|\bpure\s*parfum\b/gi, "extrait");
+}
+
 function contentTokens(fullText: string): string[] {
   return [
     ...new Set(
-      tokenize(fullText).filter(
+      tokenize(normalizeForMatching(fullText)).filter(
         (t) => !STOPWORDS.has(t) && !SIZE_TOKEN_PATTERN.test(t) && !UNIT_WORDS.has(t) && !/^\d+$/.test(t)
       )
     ),
@@ -604,8 +634,23 @@ export function matchAgainstMasterCandidates(rowAttrs: StructuredAttributes, poo
   // normally; a near-tie is needs_review with every near-tied candidate
   // shown, same "don't let text alone decide when the row is genuinely
   // ambiguous" principle applied to the flanker axis.
+  //
+  // Confirmed directly as a real, live bug: without the top.score
+  // floor, this fired for ANY two hard-gate survivors with similar
+  // scores — including two completely unrelated same-brand/size/
+  // concentration siblings (e.g. two different Christian Dior EDPs)
+  // BOTH scoring a near-zero, implausible ~0.1-0.25 against a
+  // genuinely new fragrance name. There's nothing ambiguous about
+  // "neither candidate is a real match" — that's just no_match, and
+  // this was silently blocking auto-creation for any new SKU from a
+  // brand with 2+ existing same-size/concentration entries (i.e. most
+  // established brands), which is likely the dominant cause of
+  // supplier rows staying "unresolved" despite being genuinely
+  // identifiable. The margin only means something once the top
+  // candidate has already cleared the bar for being independently
+  // plausible on its own.
   const [top, second] = scored;
-  if (top.score - second.score < SIBLING_SCORE_MARGIN) {
+  if (top.score >= REVIEW_THRESHOLD && top.score - second.score < SIBLING_SCORE_MARGIN) {
     return {
       outcome: "needs_review",
       winner: null,
@@ -893,34 +938,40 @@ export function matchSupplierRow(
   // Product candidate pool — ambiguity judged relative to what the row
   // itself specifies (see matchAgainstMasterCandidates).
   const pool = buildMasterCandidatePool(products, referenceProducts);
-  const result = matchAgainstMasterCandidates(rowAttrs, pool);
+  let result = matchAgainstMasterCandidates(rowAttrs, pool);
+
+  // Verified directly: a recognized-brand row's free text shares enough
+  // boilerplate with a same-brand sibling from a themed sub-line (e.g.
+  // several different "Game of Spades" editions, same brand/size/
+  // concentration/form, differing only in one distinguishing word) that
+  // scoreStructuredMatch's text score alone clears the auto-match
+  // threshold OR produces several near-tied "competing" candidates —
+  // "Diamonds" scored 0.89 against an existing "Full House" entry
+  // despite being a genuinely different product, and three short-name
+  // siblings (Alpha/Beta/Gamma-shaped) score near-identically against
+  // EACH OTHER purely from shared boilerplate, tripping the sibling-tie-
+  // break even though none of them is actually a match for a fourth,
+  // genuinely new edition. A row whose brand had to be RECOGNIZED (never
+  // one the supplier stated directly) has no independently-confirmed
+  // brand to trust either of those fuzzy outcomes against, so an exact
+  // identity-signature match against one of the candidates actually
+  // considered is required to trust auto_match OR needs_review here —
+  // never a raw text score alone. Found, it's a clean, certain
+  // auto-match; not found among ANY candidate considered, this is
+  // treated as no_match — this candidate/these candidates simply don't
+  // apply to this row, which says nothing about whether the ROW ITSELF
+  // is a genuinely new, complete identity (pricing-process.ts's own
+  // eligibility check decides that independently). An exact UPC/EAN hit
+  // (step 2 above) is unaffected and remains the primary, preferred path.
+  if (brandWasRecognized && result.outcome !== "no_match") {
+    const candidatesConsidered = result.winner ? [result.winner] : result.competingCandidates;
+    const exactMatch = candidatesConsidered.find((c) => computeIdentitySignature(rowAttrs) === computeIdentitySignature(c.attrs));
+    result = exactMatch
+      ? { outcome: "auto_match", winner: exactMatch, competingCandidates: [], confidence: 1 }
+      : { outcome: "no_match", winner: null, competingCandidates: [], confidence: null };
+  }
 
   if (result.outcome === "auto_match" && result.winner) {
-    // Verified directly: a recognized-brand row's free text shares
-    // enough boilerplate with a same-brand sibling from a themed
-    // sub-line (e.g. two different "Game of Spades" editions, same
-    // brand/size/concentration/form, differing only in one distinguishing
-    // phrase) that scoreStructuredMatch's text score alone can clear the
-    // auto-match threshold — "Diamonds" scored 0.89 against an existing
-    // "Full House" entry despite being a genuinely different product,
-    // each with its own UPC. A row whose brand had to be RECOGNIZED
-    // (never one the supplier stated directly) is exactly the case with
-    // no independently-confirmed brand to trust that text score against,
-    // so an exact identity-signature match is required to auto-match a
-    // DIFFERENT existing candidate this way — never a raw text score
-    // alone. An exact UPC/EAN hit (step 2 above) is unaffected and
-    // remains the primary, preferred path.
-    if (brandWasRecognized && computeIdentitySignature(rowAttrs) !== computeIdentitySignature(result.winner.attrs)) {
-      return {
-        productId: null,
-        referenceProductId: null,
-        matchType: "unmatched",
-        matchConfidence: result.confidence !== null ? Math.round(result.confidence * 100) / 100 : null,
-        reviewStatus: "needs_review",
-        candidateProductId: result.winner.productId,
-        candidateReferenceProductId: result.winner.productId ? null : result.winner.referenceProductId,
-      };
-    }
     return {
       productId: result.winner.productId,
       referenceProductId: result.winner.referenceProductId,
