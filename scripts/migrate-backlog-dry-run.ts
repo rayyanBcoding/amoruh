@@ -64,6 +64,8 @@ async function main() {
   const creationLog: string[] = [];
   const linkLog: string[] = [];
   const dedupLog: string[] = [];
+  const spadesOutcomes: string[] = [];
+  const haltaneOutcomes: string[] = [];
 
   for (const s of suppliers) {
     const offers = Object.values(await getCommittedOffers(s.id)).filter((o) => o.currentlyListed !== false);
@@ -75,22 +77,33 @@ async function main() {
       const row = { offerKey: o.offerKey, supplierSku: o.supplierSku, description: o.description, brand: o.brand, upc: o.upc, ean: o.ean };
       if (!isValidProductRow(row)) continue;
 
+      const desc = o.description.toUpperCase();
+      const isSpades = desc.includes("SPADE");
+      const isHaltane = desc.includes("HALTANE");
+      const track = (outcome: string) => {
+        if (isSpades) spadesOutcomes.push(`[${s.name}] "${o.description}" -> ${outcome}`);
+        if (isHaltane) haltaneOutcomes.push(`[${s.name}] "${o.description}" -> ${outcome}`);
+      };
+
       const freshMatch = matchSupplierRow(row, products, [], pool);
 
       if (freshMatch.reviewStatus === "auto_matched" && (freshMatch.productId || freshMatch.referenceProductId)) {
         linkedToExisting++;
+        track(`links to existing ${freshMatch.productId ?? freshMatch.referenceProductId}`);
         if (linkLog.length < 10) linkLog.push(`[${s.name}] "${o.description}" -> links to existing ${freshMatch.productId ?? freshMatch.referenceProductId}`);
         continue;
       }
 
       if (freshMatch.reviewStatus === "barcode_conflict") {
         stillConflicting++;
+        track("barcode_conflict");
         if (conflictExamples.length < 10) conflictExamples.push(`[${s.name}] "${o.description}" -> barcode_conflict`);
         continue;
       }
 
       if (freshMatch.reviewStatus === "needs_review") {
         stillAmbiguous++;
+        track(`needs_review (candidate=${freshMatch.candidateReferenceProductId ?? freshMatch.candidateProductId ?? "none"})`);
         continue;
       }
 
@@ -103,6 +116,7 @@ async function main() {
 
       if (!eligibility.eligible) {
         stillAmbiguous++;
+        track(`ineligible: ${eligibility.reason}`);
         continue;
       }
 
@@ -120,15 +134,18 @@ async function main() {
 
       if (hits.size > 1) {
         stillConflicting++;
+        track("UPC/signature pointer disagreement");
         if (conflictExamples.length < 10) conflictExamples.push(`[${s.name}] "${o.description}" -> UPC/signature pointer disagreement`);
         continue;
       }
       if (hits.size === 1) {
         dedupedWithinBacklog++;
+        track("would reuse a Master Product created earlier in this same migration batch");
         if (dedupLog.length < 10) dedupLog.push(`[${s.name}] "${o.description}" -> would reuse a Master Product created earlier IN THIS SAME migration batch`);
         continue;
       }
       createdNew++;
+      track(`would create new Master Product (brand="${effectiveBrand}")`);
       if (creationLog.length < 15) creationLog.push(`[${s.name}] "${o.description}" (brand="${effectiveBrand}") -> would create new Master Product`);
       // Simulate the write into the pool so later rows in this batch see it.
       pool.push({
@@ -169,5 +186,10 @@ async function main() {
   dedupLog.forEach((l) => console.log(`  - ${l}`));
   console.log(`\nConflict examples:`);
   conflictExamples.forEach((l) => console.log(`  - ${l}`));
+
+  console.log(`\n=== Game of Spades (${spadesOutcomes.length} rows) ===`);
+  spadesOutcomes.forEach((l) => console.log(`  - ${l}`));
+  console.log(`\n=== Haltane (${haltaneOutcomes.length} rows) ===`);
+  haltaneOutcomes.forEach((l) => console.log(`  - ${l}`));
 }
 main();

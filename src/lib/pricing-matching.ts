@@ -164,10 +164,40 @@ const SIZE_TOKEN_PATTERN = /(\d+(?:\.\d+)?)\s*(ml|oz)/;
 // to treat as equivalent — so it's filtered explicitly here too.
 const UNIT_WORDS = new Set(["ml", "oz", "fl"]);
 
+// Confirmed directly: "Aventus by Creed 100ml EDP" vs "Creed Aventus
+// 3.4 Oz Eau De Parfum" — the exact same physical item — scored well
+// below the auto-match threshold (~0.5) and produced different identity
+// signatures, purely because "3.4 Oz" (a SPACED number+unit) splits
+// into two tokens where "100ml" (unspaced) survives as one, and
+// "Eau De Parfum" leaves the literal word "parfum" in the token stream
+// where "EDP" leaves "edp" — two different-looking descriptions of an
+// identical concentration. Neither gap reflects genuine ambiguity: both
+// sides already resolve to the SAME parsed sizeMl/concentration value
+// via parseSizeMl/parseConcentration (which already tolerate the
+// spacing/phrasing difference) — only the TEXT TOKENS used for fuzzy
+// similarity and the identity signature disagreed. Gluing spaced
+// number+unit together, and collapsing the spelled-out "eau de X"
+// phrase to the same literal word its abbreviation already produces,
+// makes both sides tokenize identically.
+//
+// Deliberately narrow: only the full "eau de X" phrase collapses —
+// never a bare "parfum"/"cologne" alone, which can be a genuine flanker
+// NAME component with no "eau de" prefix (e.g. JPG "Le Parfum" — a
+// real, intentionally-distinct hard-gated concentration bucket, left
+// completely untouched here).
+function normalizeForMatching(text: string): string {
+  return text
+    .replace(/(\d+(?:\.\d+)?)\s*(?:fl\.?\s*)?(ml|oz)\b/gi, (_, num: string, unit: string) => `${num}${unit.toLowerCase()}`)
+    .replace(/\beau\s*de\s*parfum\b/gi, "edp")
+    .replace(/\beau\s*de\s*toilette\b/gi, "edt")
+    .replace(/\beau\s*de\s*cologne\b/gi, "edc")
+    .replace(/\bextrait\s*de\s*parfum\b|\bpure\s*parfum\b/gi, "extrait");
+}
+
 function contentTokens(fullText: string): string[] {
   return [
     ...new Set(
-      tokenize(fullText).filter(
+      tokenize(normalizeForMatching(fullText)).filter(
         (t) => !STOPWORDS.has(t) && !SIZE_TOKEN_PATTERN.test(t) && !UNIT_WORDS.has(t) && !/^\d+$/.test(t)
       )
     ),
@@ -604,8 +634,23 @@ export function matchAgainstMasterCandidates(rowAttrs: StructuredAttributes, poo
   // normally; a near-tie is needs_review with every near-tied candidate
   // shown, same "don't let text alone decide when the row is genuinely
   // ambiguous" principle applied to the flanker axis.
+  //
+  // Confirmed directly as a real, live bug: without the top.score
+  // floor, this fired for ANY two hard-gate survivors with similar
+  // scores — including two completely unrelated same-brand/size/
+  // concentration siblings (e.g. two different Christian Dior EDPs)
+  // BOTH scoring a near-zero, implausible ~0.1-0.25 against a
+  // genuinely new fragrance name. There's nothing ambiguous about
+  // "neither candidate is a real match" — that's just no_match, and
+  // this was silently blocking auto-creation for any new SKU from a
+  // brand with 2+ existing same-size/concentration entries (i.e. most
+  // established brands), which is likely the dominant cause of
+  // supplier rows staying "unresolved" despite being genuinely
+  // identifiable. The margin only means something once the top
+  // candidate has already cleared the bar for being independently
+  // plausible on its own.
   const [top, second] = scored;
-  if (top.score - second.score < SIBLING_SCORE_MARGIN) {
+  if (top.score >= REVIEW_THRESHOLD && top.score - second.score < SIBLING_SCORE_MARGIN) {
     return {
       outcome: "needs_review",
       winner: null,

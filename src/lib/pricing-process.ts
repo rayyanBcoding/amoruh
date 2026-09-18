@@ -288,11 +288,26 @@ export async function processSupplierUpload(input: {
       let finalCompetingCandidates = match.competingCandidates;
       let finalMatchType = match.matchType;
       let finalMatchConfidence = match.matchConfidence;
-      // referenceProductId (a Pricing/Ordering "tracked item" link, set
-      // only by Match Review's own Track/Link actions or by auto-creation
-      // below) is completely independent of the fresh match result above
-      // — it always starts from whatever this offerKey already carried.
-      let finalReferenceProductId = previous?.referenceProductId ?? null;
+      // Confirmed as a real, live bug (not by design, despite the
+      // original comment here): matchSupplierRow's own Step 2 (exact
+      // UPC/EAN against an existing Master Product) and Step 3
+      // (structural match against the reference-product candidate pool)
+      // both independently discover and return a fresh
+      // match.referenceProductId — but this previously started ONLY
+      // from `previous?.referenceProductId`, silently discarding that
+      // fresh discovery for any offerKey with no prior state (i.e.
+      // every brand-new row). reviewStatus/matchType/matchConfidence
+      // were all set correctly ("auto_matched"/"structured"/high
+      // confidence, even candidateReferenceProductId was set right) —
+      // only the actual link was never persisted, leaving the
+      // comparison page silently empty. Mirrors finalProductId's own
+      // (correct) pattern exactly: prefer the fresh match, fall back to
+      // whatever this offerKey already carried only when the fresh
+      // match found nothing new this time (preserving a manual "Track
+      // for Pricing" link across uploads that don't independently
+      // rediscover it, per this comment's original, still-valid intent
+      // for THAT case).
+      let finalReferenceProductId = match.referenceProductId ?? (previous?.referenceProductId ?? null);
 
       if (previous?.reviewStatus === "ignored" && match.reviewStatus !== "auto_matched") {
         finalReviewStatus = "ignored";
