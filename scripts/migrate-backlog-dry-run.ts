@@ -54,12 +54,20 @@ async function main() {
   // exactly like processSupplierUpload's own in-import list.
   const pool: PricingReferenceProduct[] = await getAllReferenceProducts();
 
+  let totalExamined = 0;
+  let invalidRowCount = 0;
   let linkedToExisting = 0;
   let createdNew = 0;
   let dedupedWithinBacklog = 0;
   let stillAmbiguous = 0;
   let stillConflicting = 0;
+  const invalidExamples: string[] = [];
   const conflictExamples: string[] = [];
+  // Independent post-hoc audit trail for every proposed creation — used
+  // below to verify, SEPARATELY from the incremental pool-based dedup
+  // logic above, that none of the 3,000+ proposed creations collide
+  // with each other on signature, UPC, or EAN.
+  const createdIdentities: { signature: string; upc: string; ean: string; description: string; supplier: string }[] = [];
   const creationLog: string[] = [];
   const linkLog: string[] = [];
   const dedupLog: string[] = [];
@@ -78,8 +86,13 @@ async function main() {
     const refOps: OffersByReferenceProductOp[] = [];
 
     for (const o of unresolved) {
+      totalExamined++;
       const row = { offerKey: o.offerKey, supplierSku: o.supplierSku, description: o.description, brand: o.brand, upc: o.upc, ean: o.ean };
-      if (!isValidProductRow(row)) continue;
+      if (!isValidProductRow(row)) {
+        invalidRowCount++;
+        if (invalidExamples.length < 10) invalidExamples.push(`[${s.name}] "${o.description}"`);
+        continue;
+      }
 
       const desc = o.description.toUpperCase();
       const isSpades = desc.includes("SPADE");
@@ -220,6 +233,7 @@ async function main() {
         createdNew++;
         track(`would create new Master Product (brand="${effectiveBrand}")`);
         if (creationLog.length < 15) creationLog.push(`[${s.name}] "${o.description}" (brand="${effectiveBrand}") -> would create new Master Product`);
+        createdIdentities.push({ signature, upc: plausibleUpc, ean: plausibleEan, description: o.description, supplier: s.name });
         // Simulate the write into the pool so later rows in this batch see it.
         pool.push({
           id: `dryrun_${o.offerKey}`,
@@ -258,11 +272,17 @@ async function main() {
   }
 
   console.log(`\nMode: ${EXECUTE ? "EXECUTE (real writes)" : "DRY RUN (zero writes)"}\n`);
+  console.log(`Total unresolved offers examined: ${totalExamined}`);
+  console.log(`Invalid/non-product rows (excluded before classification): ${invalidRowCount}`);
   console.log(`Linked to an EXISTING Master/real Product: ${linkedToExisting}`);
   console.log(`New Master Products created: ${createdNew}`);
   console.log(`Deduped against another row created earlier IN THIS batch: ${dedupedWithinBacklog}`);
   console.log(`Still genuinely ambiguous/incomplete (left in Match Review): ${stillAmbiguous}`);
   console.log(`Identity conflicts (UPC vs signature disagreement, or barcode_conflict): ${stillConflicting}`);
+  const reconciledTotal = invalidRowCount + linkedToExisting + createdNew + dedupedWithinBacklog + stillAmbiguous + stillConflicting;
+  console.log(`\nRECONCILIATION: ${totalExamined} examined = ${invalidRowCount} invalid + ${linkedToExisting} linked + ${createdNew} created + ${dedupedWithinBacklog} deduped + ${stillAmbiguous} ambiguous + ${stillConflicting} conflicts = ${reconciledTotal} -> ${totalExamined === reconciledTotal ? "MATCH" : "MISMATCH — INVESTIGATE"}`);
+  console.log(`\nInvalid/non-product examples:`);
+  invalidExamples.forEach((l) => console.log(`  - ${l}`));
   console.log(`\nLink examples:`);
   linkLog.forEach((l) => console.log(`  - ${l}`));
   console.log(`\nCreation examples:`);
@@ -271,6 +291,42 @@ async function main() {
   dedupLog.forEach((l) => console.log(`  - ${l}`));
   console.log(`\nConflict examples:`);
   conflictExamples.forEach((l) => console.log(`  - ${l}`));
+
+  // Independent post-hoc duplicate audit — deliberately re-derived from
+  // scratch here rather than trusting the incremental pool-based checks
+  // above, which only ever compare a row against candidates seen SO
+  // FAR. This groups every proposed creation by signature/UPC/EAN
+  // regardless of processing order, to positively confirm none of them
+  // collide with each other.
+  console.log(`\n=== Independent duplicate audit of all ${createdIdentities.length} proposed creations ===`);
+  const bySignature = new Map<string, typeof createdIdentities>();
+  for (const c of createdIdentities) {
+    if (!bySignature.has(c.signature)) bySignature.set(c.signature, []);
+    bySignature.get(c.signature)!.push(c);
+  }
+  const signatureDupes = [...bySignature.values()].filter((group) => group.length > 1);
+  console.log(`Signature collisions among proposed creations: ${signatureDupes.length}`);
+  signatureDupes.forEach((group) => group.forEach((c) => console.log(`  DUP-SIG [${c.supplier}] "${c.description}"`)));
+
+  const byUpc = new Map<string, typeof createdIdentities>();
+  for (const c of createdIdentities) {
+    if (!c.upc) continue;
+    if (!byUpc.has(c.upc)) byUpc.set(c.upc, []);
+    byUpc.get(c.upc)!.push(c);
+  }
+  const upcDupes = [...byUpc.values()].filter((group) => group.length > 1);
+  console.log(`UPC collisions among proposed creations: ${upcDupes.length}`);
+  upcDupes.forEach((group) => group.forEach((c) => console.log(`  DUP-UPC [${c.supplier}] "${c.description}" upc=${c.upc}`)));
+
+  const byEan = new Map<string, typeof createdIdentities>();
+  for (const c of createdIdentities) {
+    if (!c.ean) continue;
+    if (!byEan.has(c.ean)) byEan.set(c.ean, []);
+    byEan.get(c.ean)!.push(c);
+  }
+  const eanDupes = [...byEan.values()].filter((group) => group.length > 1);
+  console.log(`EAN collisions among proposed creations: ${eanDupes.length}`);
+  eanDupes.forEach((group) => group.forEach((c) => console.log(`  DUP-EAN [${c.supplier}] "${c.description}" ean=${c.ean}`)));
 
   console.log(`\n=== Game of Spades (${spadesOutcomes.length} rows) ===`);
   spadesOutcomes.forEach((l) => console.log(`  - ${l}`));
