@@ -3,7 +3,7 @@
 import { useEffect, useState, use } from "react";
 import { Nav } from "@/components/Nav";
 import { OfferComparisonTable } from "@/components/pricing/OfferComparisonTable";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatProductTitle } from "@/lib/format";
 import type { Product } from "@/lib/types";
 import type { ProductOfferComparison } from "@/lib/pricing-types";
 
@@ -28,7 +28,7 @@ export default function ProductComparisonPage({ params }: { params: Promise<{ id
       <Nav />
       <main className="mx-auto max-w-[1000px] px-6 py-6">
         <h1 className="mb-1 font-display text-2xl font-extrabold text-ld-white lg:text-3xl">
-          {product ? `${product.brand} ${product.name}` : "Loading…"}
+          {product ? formatProductTitle(product.brand, product.name) : "Loading…"}
         </h1>
         {product && <p className="mb-6 text-sm text-ld-muted">{product.size} · SKU {product.sku}</p>}
 

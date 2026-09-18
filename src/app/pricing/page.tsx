@@ -197,7 +197,14 @@ export default function PricingDashboardPage() {
                       onClick={() => router.push(`/pricing/products/${r.productId}`)}
                       className="block w-full rounded-lg px-3 py-2 text-left text-sm text-ld-white hover:bg-ld-bg-elevated"
                     >
-                      <span className="font-semibold">{r.brand}</span> {r.name} <span className="text-ld-muted">({r.size})</span>
+                      {r.name.toUpperCase().startsWith(r.brand.trim().toUpperCase()) ? (
+                        r.name
+                      ) : (
+                        <>
+                          <span className="font-semibold">{r.brand}</span> {r.name}
+                        </>
+                      )}{" "}
+                      <span className="text-ld-muted">({r.size})</span>
                     </button>
                   );
                 }
@@ -209,7 +216,13 @@ export default function PricingDashboardPage() {
                       className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm text-ld-white hover:bg-ld-bg-elevated"
                     >
                       <span>
-                        <span className="font-semibold">{r.brand}</span> {r.name}
+                        {r.name.toUpperCase().startsWith(r.brand.trim().toUpperCase()) ? (
+                          r.name
+                        ) : (
+                          <>
+                            <span className="font-semibold">{r.brand}</span> {r.name}
+                          </>
+                        )}
                         {r.sizeMl ? <span className="text-ld-muted"> ({r.sizeMl}ml{r.concentration ? ` ${r.concentration}` : ""})</span> : null}
                       </span>
                       <span className="shrink-0 rounded-full bg-ld-purple/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-ld-purple">
@@ -226,7 +239,13 @@ export default function PricingDashboardPage() {
                     className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm text-ld-white hover:bg-ld-bg-elevated"
                   >
                     <button onClick={() => router.push(`/pricing/suppliers/${r.supplierId}`)} className="min-w-0 flex-1 text-left">
-                      <span className="font-semibold">{r.brand}</span> {r.description}
+                      {r.description.toUpperCase().startsWith(r.brand.trim().toUpperCase()) && r.brand.trim() ? (
+                        r.description
+                      ) : (
+                        <>
+                          <span className="font-semibold">{r.brand}</span> {r.description}
+                        </>
+                      )}
                       <span className="text-ld-muted">
                         {" — "}
                         {r.supplierName} · {formatCurrency(r.price)} {r.currency !== "USD" && `(${r.currency})`}

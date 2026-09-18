@@ -1,3 +1,19 @@
+/** Joins a brand and product name for display without repeating the
+ *  brand when `name` already starts with it — confirmed as a real,
+ *  live issue: many supplier descriptions restate the brand as their
+ *  own leading word ("BURBERRY HER (W) EDT 100ML") even when a
+ *  separate brand field/column also exists, so naively rendering
+ *  `${brand} ${name}` everywhere produced "Burberry BURBERRY HER (W)
+ *  EDT 100ML". Pure display formatting — never touches stored data,
+ *  never risks creating a duplicate or changing an identity. */
+export function formatProductTitle(brand: string, name: string): string {
+  const trimmedBrand = brand.trim();
+  const trimmedName = name.trim();
+  if (!trimmedBrand) return trimmedName;
+  if (trimmedName.toUpperCase().startsWith(trimmedBrand.toUpperCase())) return trimmedName;
+  return `${trimmedBrand} ${trimmedName}`.trim();
+}
+
 export function formatCurrency(value: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",

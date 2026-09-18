@@ -3,7 +3,7 @@
 import { useEffect, useState, use } from "react";
 import { Nav } from "@/components/Nav";
 import { OfferComparisonTable } from "@/components/pricing/OfferComparisonTable";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatProductTitle } from "@/lib/format";
 import type { PricingReferenceProduct, ReferenceProductOfferComparison } from "@/lib/pricing-types";
 
 // Direct twin of /pricing/products/[id] for a Master Product AMORUH has
@@ -35,7 +35,7 @@ export default function ReferenceProductComparisonPage({ params }: { params: Pro
       <main className="mx-auto max-w-[1000px] px-6 py-6">
         <div className="mb-1 flex flex-wrap items-center gap-2">
           <h1 className="font-display text-2xl font-extrabold text-ld-white lg:text-3xl">
-            {product ? `${product.brand} ${product.name}` : "Loading…"}
+            {product ? formatProductTitle(product.brand, product.name) : "Loading…"}
           </h1>
           <span className="rounded-full bg-ld-purple/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-ld-purple">
             Master Product — Not Carried
