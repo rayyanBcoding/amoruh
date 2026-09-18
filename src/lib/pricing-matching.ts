@@ -90,14 +90,26 @@ export type ProductForm =
   | "aftershave"
   | "body_spray"
   | "shower_gel"
+  | "shower_oil"
+  | "moisturizer"
   | "soap"
   | "candle";
 
+// Confirmed directly against real production rows (Burberry/Dior/Nuxe/
+// Elizabeth Arden/Guess/Shiseido "face moisturizer" and "shower oil"
+// listings): these were defaulting to "fragrance" (no pattern
+// recognized them), so checkAutoCreateEligibility's concentration
+// requirement — which only makes sense for an actual fragrance —
+// wrongly blocked otherwise-complete rows with reason "concentration
+// ambiguous," when the real issue was simply an unrecognized product
+// form. Matches British "moisturiser" too.
 const PRODUCT_FORM_PATTERNS: [RegExp, ProductForm][] = [
   [/\bbody\s*lotion\b/, "body_lotion"],
   [/\bafter\s*shave\b/, "aftershave"],
   [/\bbody\s*spray\b/, "body_spray"],
+  [/\bshower\s*oil\b/, "shower_oil"],
   [/\bshower\s*gel\b/, "shower_gel"],
+  [/\bmoisturi[sz]er\b/, "moisturizer"],
   [/\bdeodorant\b/, "deodorant"],
   [/\bsoap\b/, "soap"],
   [/\bcandle\b/, "candle"],
@@ -814,13 +826,6 @@ export function matchSupplierRow(
 ): MatchRowResult {
   const productById = new Map(products.map((p) => [p.id, p]));
   const effectiveBrand = resolveEffectiveBrand(row, products, referenceProducts);
-  // True only when the ROW itself has no Brand field of its own and
-  // resolveEffectiveBrand had to fall back to recognizing an
-  // already-known catalog brand from free text — never true for a
-  // supplier that provides a real Brand column. This is NOT the same
-  // as "brand unconfirmed on the candidate side" — it's about how
-  // certain THIS row's own identity is.
-  const brandWasRecognized = !row.brand.trim() && Boolean(effectiveBrand);
   const rowAttrs = extractAttributes(rawTextOf(row), effectiveBrand);
   const rowText = rawTextOf(row);
 
@@ -940,32 +945,58 @@ export function matchSupplierRow(
   const pool = buildMasterCandidatePool(products, referenceProducts);
   let result = matchAgainstMasterCandidates(rowAttrs, pool);
 
-  // Verified directly: a recognized-brand row's free text shares enough
-  // boilerplate with a same-brand sibling from a themed sub-line (e.g.
-  // several different "Game of Spades" editions, same brand/size/
-  // concentration/form, differing only in one distinguishing word) that
-  // scoreStructuredMatch's text score alone clears the auto-match
-  // threshold OR produces several near-tied "competing" candidates —
-  // "Diamonds" scored 0.89 against an existing "Full House" entry
-  // despite being a genuinely different product, and three short-name
-  // siblings (Alpha/Beta/Gamma-shaped) score near-identically against
-  // EACH OTHER purely from shared boilerplate, tripping the sibling-tie-
-  // break even though none of them is actually a match for a fourth,
-  // genuinely new edition. A row whose brand had to be RECOGNIZED (never
-  // one the supplier stated directly) has no independently-confirmed
-  // brand to trust either of those fuzzy outcomes against, so an exact
-  // identity-signature match against one of the candidates actually
-  // considered is required to trust auto_match OR needs_review here —
-  // never a raw text score alone. Found, it's a clean, certain
-  // auto-match; not found among ANY candidate considered, this is
-  // treated as no_match — this candidate/these candidates simply don't
-  // apply to this row, which says nothing about whether the ROW ITSELF
-  // is a genuinely new, complete identity (pricing-process.ts's own
-  // eligibility check decides that independently). An exact UPC/EAN hit
-  // (step 2 above) is unaffected and remains the primary, preferred path.
-  if (brandWasRecognized && result.outcome !== "no_match") {
+  // Verified directly, and NOT limited to recognized-brand rows: two
+  // genuinely different fragrances from the SAME brand/size/concentration
+  // — normally branded, nothing to do with brand recognition — routinely
+  // share enough boilerplate to score in the ambiguous middle themselves.
+  // "BURBERRY LONDON (M) EDT 100ML" (its own real UPC, no existing
+  // catalog entry for it) scored 0.7 against an unrelated existing
+  // "BURBERRY MR. BURBERRY (M) EDT 100ML" — a single, lone survivor,
+  // landing directly in needs_review via classifyTop and never reaching
+  // its own auto-create eligibility check at all. Same root issue as the
+  // recognized-brand sibling case (Diamonds vs Full House, Alpha/Beta/
+  // Gamma): scoreStructuredMatch's text score alone isn't reliable
+  // enough to trust an auto_match OR a needs_review candidate suggestion
+  // when the two sides' actual NAMES differ — regardless of whether the
+  // brand came from the row's own field or had to be recognized. An
+  // exact identity-signature match against a candidate actually
+  // considered is required to trust either outcome; found, it's a
+  // clean, certain auto-match (correctly resolving even a genuine
+  // fuzzy sibling-tie, e.g. a row for plain "Le Male" among "Le Male"/
+  // "Le Male Ice" survivors, since an exact match is stronger evidence
+  // than the fuzzy score that flagged the tie in the first place); not
+  // found among ANY candidate considered, this is no_match — these
+  // candidates simply don't apply to this row, which says nothing about
+  // whether the ROW ITSELF is a genuinely new, complete identity
+  // (pricing-process.ts's own eligibility check decides that
+  // independently). An exact UPC/EAN hit (step 2 above) is unaffected
+  // and remains the primary, preferred path.
+  //
+  // Scoped to rowAttrs.concentration !== null — this must never touch
+  // the foundational "DIOR SAUVAGE 100ML, no concentration stated"
+  // case, where matchAgainstMasterCandidates' own earlier branch
+  // deliberately returns needs_review listing every differing-
+  // concentration survivor precisely because the row itself never said
+  // which one it is; that decision stays completely untouched here.
+  //
+  // "Exact" is checked via textScore(...) === 1, NOT a raw
+  // computeIdentitySignature string comparison — confirmed as a real
+  // regression during testing: computeIdentitySignature bakes the
+  // literal brandToken string into the signature, so "Aventus by Creed"
+  // (brand recognition fails — "Creed" isn't the LEADING word — leaving
+  // rowAttrs.brandToken="") against an existing "Creed Aventus" entry
+  // (brandToken="creed") produced different signatures even though
+  // brandsMatch's own containment fallback (checking "creed" appears in
+  // the row's text) already correctly confirms the same brand, and the
+  // core name tokens are otherwise identical post-normalization.
+  // textScore already resolves exactly this asymmetry the same way
+  // brandsMatch does (falls back to whichever side has a brand, strips
+  // it fresh from BOTH sides' tokens) — reusing it here keeps this
+  // check consistent with the rest of the file instead of inventing a
+  // second, brand-asymmetry-naive comparison.
+  if (rowAttrs.concentration !== null && result.outcome !== "no_match") {
     const candidatesConsidered = result.winner ? [result.winner] : result.competingCandidates;
-    const exactMatch = candidatesConsidered.find((c) => computeIdentitySignature(rowAttrs) === computeIdentitySignature(c.attrs));
+    const exactMatch = candidatesConsidered.find((c) => textScore(rowAttrs, c.attrs) === 1);
     result = exactMatch
       ? { outcome: "auto_match", winner: exactMatch, competingCandidates: [], confidence: 1 }
       : { outcome: "no_match", winner: null, competingCandidates: [], confidence: null };
