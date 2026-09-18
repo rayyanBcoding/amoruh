@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/Button";
 import { ReviewStatusBadge } from "@/components/pricing/PricingBadges";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatProductTitle } from "@/lib/format";
 import type { MatchReviewItem, PricingReferenceProduct } from "@/lib/pricing-types";
 import type { Product } from "@/lib/types";
 
@@ -71,7 +71,7 @@ function LinkTrackedItemSearch({ onPick, disabled }: { onPick: (referenceProduct
               }}
               className="block w-full truncate px-3 py-2 text-left text-xs text-ld-white hover:bg-ld-bg-elevated"
             >
-              {r.brand} {r.name}
+              {formatProductTitle(r.brand, r.name)}
             </button>
           ))}
         </div>
@@ -105,12 +105,12 @@ export function MatchReviewResolutionPanel({
   const candidateLabel = (productId: string | null) => {
     if (!productId) return null;
     const p = products.find((pr) => pr.id === productId);
-    return p ? `${p.brand} ${p.name} (${p.size})` : null;
+    return p ? `${formatProductTitle(p.brand, p.name)} (${p.size})` : null;
   };
   const referenceLabel = (referenceProductId: string | null) => {
     if (!referenceProductId) return null;
     const r = referenceProducts.find((rp) => rp.id === referenceProductId);
-    return r ? `${r.brand} ${r.name}` : "Tracked item";
+    return r ? formatProductTitle(r.brand, r.name) : "Tracked item";
   };
 
   const label = candidateLabel(item.candidateProductId);
@@ -200,7 +200,7 @@ export function MatchReviewResolutionPanel({
           <option value="">Search Another Product…</option>
           {products.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.sku} — {p.brand} {p.name} ({p.size})
+              {p.sku} — {formatProductTitle(p.brand, p.name)} ({p.size})
             </option>
           ))}
         </select>
