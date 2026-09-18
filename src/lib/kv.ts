@@ -33,3 +33,24 @@ export const KEYS = {
    *  sales-analytics.ts for the compare-and-swap that reads this. */
   productVersion: (productId: string) => `amoruh:product_version:${productId}`,
 } as const;
+
+const SCAN_COUNT_HINT = 500;
+// Upstash refuses KEYS outright once the database's TOTAL key count gets
+// large enough — regardless of how few keys the specific pattern would
+// actually match — so there is no size below which KEYS stays safe long
+// term. SCAN is the correct, supported replacement: same "every key
+// matching this pattern" result, but walked in bounded batches via a
+// cursor instead of one unbounded server-side pass. `count` is only a
+// hint to Redis about batch size, not a page-size guarantee, so this
+// loops until the server reports cursor "0" (scan complete) rather than
+// assuming any fixed number of round trips.
+export async function scanKeys(matchPattern: string): Promise<string[]> {
+  const keys: string[] = [];
+  let cursor = "0";
+  do {
+    const result: [string, string[]] = await redis.scan(cursor, { match: matchPattern, count: SCAN_COUNT_HINT });
+    cursor = result[0];
+    keys.push(...result[1]);
+  } while (cursor !== "0");
+  return keys;
+}

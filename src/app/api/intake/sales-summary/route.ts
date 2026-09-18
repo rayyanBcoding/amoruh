@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { redis } from "@/lib/kv";
+import { redis, scanKeys } from "@/lib/kv";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,10 @@ interface Aggregate {
 // bulk counterpart to /api/intake/products/[id]/sales-summary, used by
 // the Inventory table so it isn't making one request per row.
 export async function GET() {
-  const keys = await redis.keys("amoruh:sales:aggregate:*");
+  // SCAN, not KEYS — Upstash refuses KEYS once the database's total key
+  // count is large enough, regardless of how few keys this pattern
+  // actually matches (the same failure mode that broke the Dashboard).
+  const keys = await scanKeys("amoruh:sales:aggregate:*");
   const prefix = "amoruh:sales:aggregate:";
 
   const result: Record<string, { averageSalePrice: number | null; saleCount: number }> = {};
