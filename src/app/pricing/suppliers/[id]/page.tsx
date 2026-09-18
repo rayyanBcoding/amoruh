@@ -526,7 +526,17 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2">
+              {sanityCheck && !sanityCheck.ok && !loadingPreview && (
+                <div className="rounded-xl border border-ld-red/30 bg-ld-red/5 p-4">
+                  <p className="mb-1 text-sm font-bold text-ld-red">This mapping doesn&apos;t look right yet.</p>
+                  {sanityCheck.warnings.map((w, i) => (
+                    <p key={i} className="text-xs text-ld-red">{w}</p>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2">
+                {loadingPreview && <span className="text-xs text-ld-muted">Checking this mapping against the catalog…</span>}
                 <Button variant="ghost" onClick={reset}>
                   Cancel
                 </Button>

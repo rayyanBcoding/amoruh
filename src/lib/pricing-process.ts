@@ -17,15 +17,18 @@ import {
   type OffersByReferenceProductOp,
 } from "./pricing-db";
 import {
+  buildMasterCandidatePool,
   checkAutoCreateEligibility,
   computeIdentitySignature,
   deriveOfferKey,
   extractAttributes,
+  extractReferenceProductAttributes,
   isPlausibleBarcode,
   isValidProductRow,
   matchSupplierRow,
   resolveEffectiveBrand,
   findPreviousBySupplierItemIdentity,
+  type MasterCandidate,
   type MatchPreviewSummary,
 } from "./pricing-matching";
 import {
@@ -156,6 +159,15 @@ export async function processSupplierUpload(input: {
       getAllReferenceProducts(),
     ]);
 
+    // Built ONCE from the starting catalog, then grown incrementally in
+    // lockstep with referenceProducts below — never rebuilt per row.
+    // Confirmed as a real, severe perf regression at the current catalog
+    // scale (~8,300 reference products): rebuilding it inside
+    // matchSupplierRow on every row cost ~80ms/row, so a several-
+    // hundred-row supplier upload took 30-80+ seconds of pure candidate-
+    // pool construction alone.
+    const candidatePool: MasterCandidate[] = buildMasterCandidatePool(products, referenceProducts);
+
     const candidateOffers: Record<string, SupplierOfferCurrent> = { ...previousOffers };
     const touchedKeys = new Set<string>();
     const newAliases: SupplierAlias[] = [];
@@ -243,7 +255,8 @@ export async function processSupplierUpload(input: {
         { offerKey, supplierSku: row.supplierSku, description: row.description, brand: row.brand, upc: row.upc, ean: row.ean },
         products,
         aliasesSoFar,
-        referenceProducts
+        referenceProducts,
+        candidatePool
       );
 
       const rate = await getUsdRate(row.currency);
@@ -448,9 +461,32 @@ export async function processSupplierUpload(input: {
               // hitting get-or-create a second time for no reason.
               if (getOrCreateResult.status === "created") {
                 referenceProducts.push(getOrCreateResult.product);
+                candidatePool.push({
+                  productId: null,
+                  referenceProductId: getOrCreateResult.product.id,
+                  attrs: extractReferenceProductAttributes(getOrCreateResult.product),
+                  upc: getOrCreateResult.product.upc,
+                  ean: getOrCreateResult.product.ean,
+                });
               } else {
                 const reused = await getReferenceProduct(getOrCreateResult.id);
-                if (reused) referenceProducts.push(reused);
+                if (reused) {
+                  referenceProducts.push(reused);
+                  // Mirrors buildMasterCandidatePool's own skip: a reference
+                  // product already linked to a real Product is represented
+                  // in the pool via that Product entry (already present
+                  // since `products` was fetched once, up front) — pushing
+                  // it again here would add a wrongly-shaped duplicate.
+                  if (!reused.productId) {
+                    candidatePool.push({
+                      productId: null,
+                      referenceProductId: reused.id,
+                      attrs: extractReferenceProductAttributes(reused),
+                      upc: reused.upc,
+                      ean: reused.ean,
+                    });
+                  }
+                }
               }
             }
           }
