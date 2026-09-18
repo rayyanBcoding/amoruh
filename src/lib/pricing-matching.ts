@@ -1227,22 +1227,53 @@ export function computeMatchPreview(
 // variant can never reconnect here.
 const IDENTITY_FALLBACK_TEXT_THRESHOLD = 0.92;
 
+export interface PreviousOfferIdentityEntry {
+  offer: SupplierOfferCurrent;
+  attrs: StructuredAttributes;
+  code: string;
+}
+
+export interface PreviousOfferIdentityIndex {
+  entries: PreviousOfferIdentityEntry[];
+  byCode: Map<string, PreviousOfferIdentityEntry[]>;
+}
+
+// Built ONCE per upload (pricing-process.ts), not per row. Confirmed as a
+// severe hidden O(missedRows × totalOffers) cost: this fallback used to
+// call extractAttributes (regex-based text parsing) on EVERY previous
+// offer, on EVERY row that missed the direct offerKey lookup — for a
+// supplier upload with a reformatted SKU column (most/all rows missing)
+// against thousands of previous offers, that's millions of redundant
+// re-parses of the SAME candidates. Precomputing each candidate's
+// attributes and an exact-code index once turns the expensive part of
+// every lookup into a single pass over already-computed data.
+export function buildPreviousOfferIdentityIndex(previousOffers: Record<string, SupplierOfferCurrent>): PreviousOfferIdentityIndex {
+  const entries: PreviousOfferIdentityEntry[] = Object.values(previousOffers).map((offer) => ({
+    offer,
+    attrs: extractAttributes(rawTextOf(offer), offer.brand),
+    code: (offer.upc || offer.ean || "").trim().toUpperCase(),
+  }));
+  const byCode = new Map<string, PreviousOfferIdentityEntry[]>();
+  for (const entry of entries) {
+    if (!entry.code || !isPlausibleBarcode(entry.code)) continue;
+    const list = byCode.get(entry.code);
+    if (list) list.push(entry);
+    else byCode.set(entry.code, [entry]);
+  }
+  return { entries, byCode };
+}
+
 export function findPreviousBySupplierItemIdentity(
   row: { upc: string; ean: string; brand: string; description: string },
-  previousOffers: Record<string, SupplierOfferCurrent>
+  index: PreviousOfferIdentityIndex
 ): SupplierOfferCurrent | null {
   const rowAttrs = extractAttributes(rawTextOf(row), row.brand);
-  const candidates = Object.values(previousOffers);
 
   const rowCode = (row.upc || row.ean || "").trim().toUpperCase();
   if (rowCode && isPlausibleBarcode(rowCode)) {
-    const byCode = candidates.filter((o) => {
-      const code = (o.upc || o.ean || "").trim().toUpperCase();
-      return code === rowCode;
-    });
+    const byCode = index.byCode.get(rowCode) ?? [];
     if (byCode.length === 1) {
-      const candidateAttrs = extractAttributes(rawTextOf(byCode[0]), byCode[0].brand);
-      if (checkHardGates(rowAttrs, candidateAttrs).passes) return byCode[0];
+      if (checkHardGates(rowAttrs, byCode[0].attrs).passes) return byCode[0].offer;
     }
     // More than one previous offer shares this code, or the one match
     // fails the hard gate — fall through to the composite check rather
@@ -1251,14 +1282,13 @@ export function findPreviousBySupplierItemIdentity(
 
   let best: { offer: SupplierOfferCurrent; score: number } | null = null;
   let qualifyingCount = 0;
-  for (const o of candidates) {
-    const candidateAttrs = extractAttributes(rawTextOf(o), o.brand);
-    const gate = checkHardGates(rowAttrs, candidateAttrs);
+  for (const entry of index.entries) {
+    const gate = checkHardGates(rowAttrs, entry.attrs);
     if (!gate.passes || !gate.sizeBothParsed || !gate.concentrationBothRecognized) continue;
-    const score = textScore(rowAttrs, candidateAttrs);
+    const score = textScore(rowAttrs, entry.attrs);
     if (score >= IDENTITY_FALLBACK_TEXT_THRESHOLD) {
       qualifyingCount++;
-      if (!best || score > best.score) best = { offer: o, score };
+      if (!best || score > best.score) best = { offer: entry.offer, score };
     }
   }
   return qualifyingCount === 1 && best ? best.offer : null;

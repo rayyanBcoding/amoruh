@@ -18,6 +18,7 @@ import {
 } from "./pricing-db";
 import {
   buildMasterCandidatePool,
+  buildPreviousOfferIdentityIndex,
   checkAutoCreateEligibility,
   computeIdentitySignature,
   deriveOfferKey,
@@ -168,6 +169,20 @@ export async function processSupplierUpload(input: {
     // pool construction alone.
     const candidatePool: MasterCandidate[] = buildMasterCandidatePool(products, referenceProducts);
 
+    // Built ONCE from the starting offer history — never recomputed per
+    // row. Confirmed as a real, severe hidden cost at Jizan's scale
+    // (6,352 committed offers): the identity fallback below used to call
+    // extractAttributes (regex parsing) on every previous offer, on
+    // every row that missed the direct offerKey lookup — for a
+    // reformatted-SKU file where most/all rows miss, that's millions of
+    // redundant re-parses of the SAME previous-offer set, easily
+    // exceeding Vercel's 60s function timeout on its own. This index
+    // reflects offer history as of the START of this upload (matching
+    // findPreviousBySupplierItemIdentity's own documented purpose —
+    // reconnecting to a PRIOR upload's identity — not to a sibling row
+    // processed earlier in this same pass).
+    const previousOfferIdentityIndex = buildPreviousOfferIdentityIndex(previousOffers);
+
     const candidateOffers: Record<string, SupplierOfferCurrent> = { ...previousOffers };
     const touchedKeys = new Set<string>();
     const newAliases: SupplierAlias[] = [];
@@ -274,7 +289,7 @@ export async function processSupplierUpload(input: {
       if (!previous) {
         const fallback = findPreviousBySupplierItemIdentity(
           { upc: row.upc, ean: row.ean, brand: row.brand, description: row.description },
-          candidateOffers
+          previousOfferIdentityIndex
         );
         if (fallback) {
           previous = fallback;

@@ -1,5 +1,5 @@
 import { del } from "@vercel/blob";
-import { redis } from "./kv";
+import { redis, scanKeys } from "./kv";
 import { computeCostBreakdown, computeWeightedAverageLandedCost } from "./intake-costing";
 import type {
   InventoryLot,
@@ -340,11 +340,13 @@ export async function getLotsForProduct(productId: string): Promise<InventoryLot
 
 /** Every productId that has at least one lot key — used by the Inventory
  *  table's aggregate landed-cost endpoint to know which products to
- *  compute a weighted average for. `redis.keys()` over one prefix is a
- *  fine cost at this business's product count, same reasoning already
- *  used for the flat receiving-event/transaction collections. */
+ *  compute a weighted average for. Uses SCAN (bounded, cursor-paginated
+ *  batches), never KEYS — Upstash refuses KEYS once the database's total
+ *  key count is large enough, regardless of this pattern's own match
+ *  count, which is exactly what broke the Dashboard once the catalog
+ *  grew past that threshold. */
 export async function getAllProductIdsWithLots(): Promise<string[]> {
-  const lotKeys = await redis.keys("amoruh:intake:lots:*");
+  const lotKeys = await scanKeys("amoruh:intake:lots:*");
   const prefix = "amoruh:intake:lots:";
   return lotKeys.map((k) => k.slice(prefix.length));
 }

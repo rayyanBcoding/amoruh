@@ -68,10 +68,40 @@ function columnLabel(col: ColumnPreview | undefined): string {
   return `${col.letter} — ${col.header || "(blank)"}`;
 }
 
+// A platform-level failure (a function timeout or crash) serves an HTML
+// or plain-text error page instead of our own JSON error shape — res.json()
+// throws a raw, confusing SyntaxError ("Unexpected token '<'...") in that
+// case. Read the body as text first so a non-JSON response becomes a
+// clear, displayable message instead of an uncaught parsing exception.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function safeParseJsonResponse(res: Response): Promise<any> {
+  const text = await res.text();
+  if (!text) return res.ok ? {} : { error: `Server error (${res.status}) with no details.` };
+  try {
+    return JSON.parse(text);
+  } catch {
+    const snippet = text.replace(/\s+/g, " ").trim().slice(0, 200);
+    return {
+      error: res.ok
+        ? `The server returned an unexpected, non-JSON response: "${snippet}"`
+        : `Server error (${res.status}): "${snippet}"`,
+    };
+  }
+}
+
 export default function SupplierDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  // Monotonic guard against out-of-order responses: the initial upload's
+  // auto-suggested-mapping preview and a manual dropdown correction fired
+  // moments later both hit the same slow parse-preview endpoint and can
+  // resolve in EITHER order — with no guard, whichever happens to land
+  // LAST wins, even if it's the stale one, silently reverting a just-
+  // confirmed mapping back to the wrong auto-suggestion. Every preview
+  // fetch takes a ticket before awaiting; its result is only applied if
+  // no newer ticket has been issued by the time it resolves.
+  const previewRequestSeq = useRef(0);
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [uploads, setUploads] = useState<SupplierPriceUpload[]>([]);
   const [stage, setStage] = useState<Stage>("idle");
@@ -198,6 +228,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
   // selection. Never writes anything.
   const refreshPreview = async (overrides: { headerRowIndex?: number; columnMap?: SupplierColumnMapping["columnMap"] }) => {
     if (!blobUrl) return;
+    const myRequestSeq = ++previewRequestSeq.current;
     setLoadingPreview(true);
     setError(null);
     try {
@@ -206,8 +237,15 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ supplierId: id, blobUrl, ...overrides }),
       });
-      const data = await res.json();
+      const data = await safeParseJsonResponse(res);
       if (!res.ok) throw new Error(data?.error ?? "Could not read this file.");
+
+      // A newer request was issued while this one was in flight (e.g. the
+      // operator corrected a dropdown before the initial auto-suggested
+      // preview finished) — this response is stale evidence about a
+      // mapping the operator has already moved past. Discard it rather
+      // than letting it silently overwrite the newer selection.
+      if (myRequestSeq !== previewRequestSeq.current) return data;
 
       setHeaderRowWindow(data.headerRowWindow);
       setDetectedHeaderRowIndex(data.detectedHeaderRowIndex);
@@ -226,10 +264,12 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
       setUploadType(data.defaultUploadType ?? "full");
       return data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      if (myRequestSeq === previewRequestSeq.current) {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      }
       throw err;
     } finally {
-      setLoadingPreview(false);
+      if (myRequestSeq === previewRequestSeq.current) setLoadingPreview(false);
     }
   };
 
@@ -237,6 +277,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
     setError(null);
     setStage("uploading");
     setFilename(file.name);
+    const myRequestSeq = ++previewRequestSeq.current;
     try {
       const blob = await upload(file.name, file, { access: "public", handleUploadUrl: "/api/pricing/upload" });
       setBlobUrl(blob.url);
@@ -246,8 +287,14 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ supplierId: id, blobUrl: blob.url }),
       });
-      const data = await res.json();
+      const data = await safeParseJsonResponse(res);
       if (!res.ok) throw new Error(data?.error ?? "Could not read this file.");
+
+      // The operator could only have started this whole upload once — a
+      // "newer" request racing this one would mean a second file was
+      // dropped before this one's preview loaded. Same stale-response
+      // guard as refreshPreview, applied consistently.
+      if (myRequestSeq !== previewRequestSeq.current) return;
 
       setHeaderRowWindow(data.headerRowWindow);
       setDetectedHeaderRowIndex(data.detectedHeaderRowIndex);
@@ -295,7 +342,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ supplierId: id, blobUrl, filename, uploadType, headerRowIndex, headerSignature, columnMap }),
       });
-      const data = await res.json();
+      const data = await safeParseJsonResponse(res);
       if (!res.ok) throw new Error(data?.error ?? "Could not process this upload.");
       setResult(data);
       setStage("done");
