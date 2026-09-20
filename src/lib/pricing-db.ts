@@ -157,6 +157,15 @@ export async function getRecentUploads(limit = 20): Promise<SupplierPriceUpload[
 // Immutable history (snapshots) — deterministic keys, safe to retry.
 // ---------------------------------------------------------------------
 
+// Kept sequential across chunks, unlike writeCandidateGeneration above —
+// tried firing every chunk's ~400 ops (thousands of concurrent commands
+// for a large upload) at once, and separately tried a small bounded
+// concurrency window; both measured WORSE than plain sequential chunks
+// in isolated testing (a large simultaneous burst appears to be
+// counterproductive here, whether from client connection limits or
+// Redis-side throttling). Each chunk's own 400 ops are still
+// parallelized via Promise.all — only the chunks themselves run one at
+// a time, exactly as before this investigation.
 export async function writeSnapshotsBatch(snapshots: SupplierOfferSnapshot[]): Promise<void> {
   const CHUNK = 200;
   for (let i = 0; i < snapshots.length; i += CHUNK) {
@@ -209,7 +218,15 @@ export async function getCommittedOffers(supplierId: string): Promise<Record<str
 /** Writes the fully-computed candidate generation content in bounded
  *  batches. Safe to fail partway — this key is inert until a commit
  *  script points to it, so a partial write here just means a wasted,
- *  never-referenced generation id if the upload later fails. */
+ *  never-referenced generation id if the upload later fails.
+ *
+ *  Batches are issued in parallel, not awaited one at a time — confirmed
+ *  a real, severe cost at Jizan's scale (6,352 offers): 32 sequential
+ *  HSET round trips measured ~25.7s on their own, independently enough
+ *  to threaten Vercel's 60s timeout even with every other fix in place.
+ *  Safe to parallelize: each chunk writes a disjoint set of hash fields
+ *  on the SAME key (Object.entries sliced without overlap), so there is
+ *  no write-write race between chunks. */
 export async function writeCandidateGeneration(
   supplierId: string,
   generationId: string,
@@ -218,10 +235,12 @@ export async function writeCandidateGeneration(
   const key = KEYS.offerCurrentHash(supplierId, generationId);
   const entries = Object.entries(offers);
   const CHUNK = 200;
+  const writes: Promise<number>[] = [];
   for (let i = 0; i < entries.length; i += CHUNK) {
     const chunk = Object.fromEntries(entries.slice(i, i + CHUNK));
-    if (Object.keys(chunk).length > 0) await redis.hset(key, chunk);
+    if (Object.keys(chunk).length > 0) writes.push(redis.hset(key, chunk));
   }
+  await Promise.all(writes);
 }
 
 // ---------------------------------------------------------------------
@@ -536,17 +555,21 @@ export async function searchReferenceProducts(query: string, limit = 20): Promis
  *  supplier upload's row loop needs (pricing-process.ts) and the pool
  *  buildMasterCandidatePool dedupes against linked real Products. Same
  *  bounded-page-to-exhaustion shape as searchReferenceProducts's full
- *  scan, just collecting every record instead of filtering by text. At
- *  this business's scale (hundreds to low thousands of Master Products)
- *  this is a bounded, once-per-upload cost, not a hot per-request path. */
+ *  scan, just collecting every record instead of filtering by text. This
+ *  is called at the start of every parse-preview and every process call
+ *  — confirmed a real, measurably variable cost (2-20s) once the catalog
+ *  grew past the "hundreds to low thousands" this originally assumed:
+ *  fetching each page via `Promise.all(ids.map(getReferenceProduct))`
+ *  issues one separate GET round trip per key. MGET fetches an entire
+ *  page's values in a single Redis command instead. */
 export async function getAllReferenceProducts(): Promise<PricingReferenceProduct[]> {
-  const PAGE = 200;
+  const PAGE = 1000;
   const all: PricingReferenceProduct[] = [];
   let cursor = 0;
   for (;;) {
     const ids = (await redis.zrange(KEYS.referenceProductsIndex, cursor, cursor + PAGE - 1)) as string[];
     if (ids.length === 0) break;
-    const records = await Promise.all(ids.map(getReferenceProduct));
+    const records = await redis.mget<(PricingReferenceProduct | null)[]>(ids.map((id) => KEYS.referenceProduct(id)));
     for (const r of records) if (r) all.push(r);
     if (ids.length < PAGE) break;
     cursor += PAGE;

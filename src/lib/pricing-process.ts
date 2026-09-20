@@ -6,7 +6,6 @@ import {
   getAllReferenceProducts,
   getCommittedOffers,
   getOrCreateReferenceProductByIdentity,
-  getReferenceProduct,
   getUpload,
   markUploadFailed,
   newId,
@@ -17,6 +16,8 @@ import {
   type OffersByReferenceProductOp,
 } from "./pricing-db";
 import {
+  addToBrandBucketedPool,
+  buildBrandBucketedPool,
   buildMasterCandidatePool,
   buildPreviousOfferIdentityIndex,
   checkAutoCreateEligibility,
@@ -29,7 +30,7 @@ import {
   matchSupplierRow,
   resolveEffectiveBrand,
   findPreviousBySupplierItemIdentity,
-  type MasterCandidate,
+  type BrandBucketedPool,
   type MatchPreviewSummary,
 } from "./pricing-matching";
 import {
@@ -43,6 +44,7 @@ import {
 import { getUsdRate, convertToUsd } from "./pricing-fx";
 import type { SupplierColumnMapping } from "./intake-types";
 import type {
+  PricingReferenceProduct,
   SupplierAlias,
   SupplierOfferCurrent,
   SupplierOfferSnapshot,
@@ -63,6 +65,10 @@ import type {
 // ---------------------------------------------------------------------
 
 const PROGRESS_UPDATE_INTERVAL = 200;
+
+// A real refprod_* id never starts with this — safe to distinguish a
+// not-yet-persisted placeholder from a real identity by prefix alone.
+const PENDING_PLACEHOLDER_PREFIX = "pending_";
 
 export async function processSupplierUpload(input: {
   supplierId: string;
@@ -166,8 +172,14 @@ export async function processSupplierUpload(input: {
     // scale (~8,300 reference products): rebuilding it inside
     // matchSupplierRow on every row cost ~80ms/row, so a several-
     // hundred-row supplier upload took 30-80+ seconds of pure candidate-
-    // pool construction alone.
-    const candidatePool: MasterCandidate[] = buildMasterCandidatePool(products, referenceProducts);
+    // pool construction alone. Brand-bucketed on top of that (not a flat
+    // array) — even built once, scoring every row against the full pool
+    // still measured 9-14ms/row, confirmed to independently exceed 60s
+    // for a several-thousand-row upload with many new/changed rows (a
+    // 6,352-row worst-case replay of Jizan's real data took 86s on this
+    // step alone). See narrowPoolForRow's own comment for why bucketing
+    // by brand can't silently drop a true match.
+    const candidatePool: BrandBucketedPool = buildBrandBucketedPool(buildMasterCandidatePool(products, referenceProducts));
 
     // Built ONCE from the starting offer history — never recomputed per
     // row. Confirmed as a real, severe hidden cost at Jizan's scale
@@ -195,6 +207,39 @@ export async function processSupplierUpload(input: {
     const newCandidates = 0; // legacy — always 0 under the corrected model, see SupplierPriceUpload's own doc comment
     let notAProduct = 0;
     const nowIso = new Date().toISOString();
+
+    // Auto-creates are deferred and persisted in a single parallel pass
+    // AFTER the main loop, not awaited inline per row — confirmed as the
+    // single largest remaining bottleneck (see the caller's own comment
+    // on candidatePool above for the matching-cost fix; this is the
+    // SEPARATE, larger cost on top of it): getOrCreateReferenceProductByIdentity
+    // is one real Redis round trip per call, measured at ~60ms sequential
+    // vs ~4ms/call effective when parallelized. For Jizan's real
+    // 6,352-row file (2,091 genuinely new items in one real test run),
+    // sequential awaiting cost ~125s on its own — independently enough
+    // to exceed Vercel's 60s timeout regardless of every other fix.
+    // A placeholder id stands in for the row's identity during the main
+    // loop (visible to LATER rows' own matching, exactly as a real id
+    // would be, via referenceProducts/candidatePool) and is resolved to
+    // a real id — or reverted to needs_review on a genuine conflict — in
+    // the small patch pass after the parallel persist below. Safe even
+    // if two placeholder rows turn out to be the same physical item
+    // without matching each other during the main loop: the parallel
+    // persist calls are the SAME atomic, idempotent get-or-create script
+    // used today, so they still converge on one real record regardless —
+    // this only changes WHEN and how concurrently those calls happen,
+    // never what they check or create.
+    let pendingPersistSeq = 0;
+    const pendingPersists: {
+      placeholderId: string;
+      identity: { upc: string; ean: string; signature: string };
+      newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt">;
+    }[] = [];
+    // Every row whose finalReferenceProductId ended up being a
+    // placeholder — the ORIGINAL auto-create row (via pendingPersists)
+    // AND any later row that matched against it normally (see the
+    // comment where this is populated, right before each snapshot push).
+    const placeholderUsage = new Map<string, { rowIndex: number; offerKey: string }[]>();
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -427,83 +472,60 @@ export async function processSupplierUpload(input: {
             finalCompetingCandidates = undefined;
           } else {
             const signature = computeIdentitySignature(rowAttrs);
-            const getOrCreateResult = await getOrCreateReferenceProductByIdentity(
-              { upc: plausibleUpc, ean: plausibleEan, signature },
-              {
-                brand: effectiveBrand,
-                name: row.description.trim(),
-                description: row.description.trim(),
-                sizeMl: rowAttrs.sizeMl,
-                concentration: rowAttrs.concentration,
-                isTester: rowAttrs.isTester,
-                isGiftSet: rowAttrs.isGiftSet,
-                isRefill: rowAttrs.isRefill,
-                productForm: rowAttrs.productForm,
-                upc: plausibleUpc,
-                ean: plausibleEan,
-                productId: null,
-                createdBy: "auto_import",
-                creationMethod: "auto_import",
-                createdFromSupplierId: input.supplierId,
-                createdFromUploadId: upload.id,
-                createdFromOfferKey: offerKey,
-              }
-            );
+            const placeholderId = `${PENDING_PLACEHOLDER_PREFIX}${pendingPersistSeq++}`;
+            const newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt"> = {
+              brand: effectiveBrand,
+              name: row.description.trim(),
+              description: row.description.trim(),
+              sizeMl: rowAttrs.sizeMl,
+              concentration: rowAttrs.concentration,
+              isTester: rowAttrs.isTester,
+              isGiftSet: rowAttrs.isGiftSet,
+              isRefill: rowAttrs.isRefill,
+              productForm: rowAttrs.productForm,
+              upc: plausibleUpc,
+              ean: plausibleEan,
+              productId: null,
+              createdBy: "auto_import",
+              creationMethod: "auto_import",
+              createdFromSupplierId: input.supplierId,
+              createdFromUploadId: upload.id,
+              createdFromOfferKey: offerKey,
+            };
+            pendingPersists.push({
+              placeholderId,
+              identity: { upc: plausibleUpc, ean: plausibleEan, signature },
+              newRecordInput,
+            });
 
-            if (getOrCreateResult.status === "conflict") {
-              // UPC/EAN and the structural signature disagree on which
-              // existing Master Product this is — never auto-picked,
-              // merged, or auto-linked. Route to needs_review with every
-              // conflicting identity shown for a human to resolve.
-              finalReviewStatus = "needs_review";
-              finalMatchType = "unmatched";
-              finalMatchConfidence = null;
-              finalCandidateProductId = null;
-              finalCandidateReferenceProductId = null;
-              finalCompetingCandidates = getOrCreateResult.ids.map((id) => ({ productId: null, referenceProductId: id }));
-            } else {
-              finalReferenceProductId = getOrCreateResult.id;
-              finalReviewStatus = "auto_matched";
-              finalMatchType = "auto_created";
-              finalMatchConfidence = 1;
-              finalCandidateProductId = null;
-              finalCandidateReferenceProductId = null;
-              finalCompetingCandidates = undefined;
-              // Make this visible to every LATER row in this same upload
-              // — whether genuinely brand-new or reused from an existing
-              // record — so a repeat of the same physical item later in
-              // this file takes the normal exact-match path instead of
-              // hitting get-or-create a second time for no reason.
-              if (getOrCreateResult.status === "created") {
-                referenceProducts.push(getOrCreateResult.product);
-                candidatePool.push({
-                  productId: null,
-                  referenceProductId: getOrCreateResult.product.id,
-                  attrs: extractReferenceProductAttributes(getOrCreateResult.product),
-                  upc: getOrCreateResult.product.upc,
-                  ean: getOrCreateResult.product.ean,
-                });
-              } else {
-                const reused = await getReferenceProduct(getOrCreateResult.id);
-                if (reused) {
-                  referenceProducts.push(reused);
-                  // Mirrors buildMasterCandidatePool's own skip: a reference
-                  // product already linked to a real Product is represented
-                  // in the pool via that Product entry (already present
-                  // since `products` was fetched once, up front) — pushing
-                  // it again here would add a wrongly-shaped duplicate.
-                  if (!reused.productId) {
-                    candidatePool.push({
-                      productId: null,
-                      referenceProductId: reused.id,
-                      attrs: extractReferenceProductAttributes(reused),
-                      upc: reused.upc,
-                      ean: reused.ean,
-                    });
-                  }
-                }
-              }
-            }
+            // Optimistic — the real outcome (created / resolved to an
+            // existing record / a genuine identity conflict) is only
+            // known after the deferred parallel persist pass below. A
+            // conflict retroactively reverts this exact row to
+            // needs_review once that's known (see the patch pass).
+            finalReferenceProductId = placeholderId;
+            finalReviewStatus = "auto_matched";
+            finalMatchType = "auto_created";
+            finalMatchConfidence = 1;
+            finalCandidateProductId = null;
+            finalCandidateReferenceProductId = null;
+            finalCompetingCandidates = undefined;
+
+            // Make this visible to every LATER row in this same upload —
+            // same purpose as the real record would serve — so a repeat
+            // of the same physical item later in this file takes the
+            // normal exact-match path instead of queuing a second
+            // redundant persist for what the parallel pass will discover
+            // is the same identity anyway.
+            const placeholderRecord: PricingReferenceProduct = { id: placeholderId, ...newRecordInput, createdAt: nowIso };
+            referenceProducts.push(placeholderRecord);
+            addToBrandBucketedPool(candidatePool, {
+              productId: null,
+              referenceProductId: placeholderId,
+              attrs: extractReferenceProductAttributes(placeholderRecord),
+              upc: placeholderRecord.upc,
+              ean: placeholderRecord.ean,
+            });
           }
         }
       }
@@ -517,6 +539,22 @@ export async function processSupplierUpload(input: {
       // vanish on the next price list); cleared the instant the row
       // resolves to anything else, matched or not.
       const finalReviewRequestedAt = finalReviewStatus === "needs_review" ? (previous?.reviewRequestedAt ?? null) : null;
+
+      // Track EVERY row referencing a placeholder — not just the row
+      // that originally queued it in pendingPersists. Confirmed as a
+      // real gap: a LATER row in this same file legitimately matches an
+      // EARLIER row's placeholder through the completely normal
+      // structural-match path (matchSupplierRow Step 3), not through the
+      // auto-create branch — that's by design (a repeat item should
+      // reuse the earlier identity, exactly like it would a real one).
+      // But that later row is never in pendingPersists, so only patching
+      // pendingPersists's own rows left every OTHER row pointing at that
+      // same placeholder stuck with an unresolved id forever.
+      if (finalReferenceProductId && finalReferenceProductId.startsWith(PENDING_PLACEHOLDER_PREFIX)) {
+        const rows = placeholderUsage.get(finalReferenceProductId);
+        if (rows) rows.push({ rowIndex: i, offerKey });
+        else placeholderUsage.set(finalReferenceProductId, [{ rowIndex: i, offerKey }]);
+      }
 
       snapshots.push({
         id: newId("offersnap"),
@@ -662,6 +700,74 @@ export async function processSupplierUpload(input: {
 
       if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
         await updateUploadProgress(upload.id, { processedRows: i + 1 });
+      }
+    }
+
+    // Deferred parallel persist — resolves every placeholder queued
+    // above via the SAME atomic get-or-create script used before, just
+    // issued concurrently instead of one-at-a-time. Chunked (not one
+    // unbounded Promise.all) to keep a sane bound on concurrent Redis
+    // calls, mirroring writeSnapshotsBatch's own CHUNK size below.
+    const PERSIST_CONCURRENCY = 100;
+    const persistResults = new Map<string, { status: "created" | "existing"; id: string } | { status: "conflict"; ids: string[] }>();
+    for (let i = 0; i < pendingPersists.length; i += PERSIST_CONCURRENCY) {
+      const chunk = pendingPersists.slice(i, i + PERSIST_CONCURRENCY);
+      const results = await Promise.all(chunk.map((p) => getOrCreateReferenceProductByIdentity(p.identity, p.newRecordInput)));
+      chunk.forEach((p, idx) => {
+        const r = results[idx];
+        persistResults.set(p.placeholderId, r.status === "conflict" ? { status: "conflict", ids: r.ids } : { status: r.status, id: r.id });
+      });
+    }
+
+    // Patch EVERY row that ended up referencing a placeholder — not just
+    // the row that originally queued it — with its now-resolved real
+    // identity, or, for a genuine identity conflict, revert each of
+    // those rows to needs_review, exactly like the old inline conflict
+    // branch did (same fields, same reasoning — just applied here
+    // instead of inline, now that the real outcome is known). A
+    // placeholder can be used by more than one row (see placeholderUsage
+    // above), and every reverse-index op referencing it must be patched
+    // too, not just the first one found.
+    for (const [placeholderId, usedBy] of placeholderUsage) {
+      const result = persistResults.get(placeholderId);
+      if (!result) continue; // unreachable — every placeholder is queued in pendingPersists and gets a result above
+
+      if (result.status === "conflict") {
+        const conflictCandidates = result.ids.map((id) => ({ productId: null, referenceProductId: id }));
+        for (const { rowIndex, offerKey } of usedBy) {
+          const snapshot = snapshots[rowIndex];
+          const offer = candidateOffers[offerKey];
+          if (snapshot && snapshot.referenceProductId === placeholderId) {
+            if (snapshot.matchType === "auto_created") autoCreated--;
+            else autoMatched--;
+            needsReview++;
+            snapshot.referenceProductId = null;
+            snapshot.reviewStatus = "needs_review";
+            snapshot.matchType = "unmatched";
+            snapshot.matchConfidence = null;
+            snapshot.competingCandidates = conflictCandidates;
+          }
+          if (offer && offer.referenceProductId === placeholderId) {
+            offer.referenceProductId = null;
+            offer.reviewStatus = "needs_review";
+            offer.matchType = "unmatched";
+            offer.matchConfidence = null;
+            offer.competingCandidates = conflictCandidates;
+          }
+        }
+        for (let idx = offersByReferenceProductOps.length - 1; idx >= 0; idx--) {
+          if (offersByReferenceProductOps[idx].referenceProductId === placeholderId) offersByReferenceProductOps.splice(idx, 1);
+        }
+      } else {
+        for (const { rowIndex, offerKey } of usedBy) {
+          const snapshot = snapshots[rowIndex];
+          const offer = candidateOffers[offerKey];
+          if (snapshot && snapshot.referenceProductId === placeholderId) snapshot.referenceProductId = result.id;
+          if (offer && offer.referenceProductId === placeholderId) offer.referenceProductId = result.id;
+        }
+        for (const op of offersByReferenceProductOps) {
+          if (op.referenceProductId === placeholderId) op.referenceProductId = result.id;
+        }
       }
     }
 

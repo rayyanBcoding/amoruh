@@ -565,6 +565,93 @@ export function buildMasterCandidatePool(products: Product[], referenceProducts:
   return pool;
 }
 
+// ---------------------------------------------------------------------
+// Brand-bucketed candidate index — a performance-only pre-filter over
+// buildMasterCandidatePool's full pool, confirmed necessary at the
+// current catalog scale (~8,300 reference products): scoring every row
+// against the ENTIRE pool measured ~9-14ms/row even after the pool was
+// built once and grown incrementally (PR #24) — for a several-thousand-
+// row upload with many genuinely new/changed items, that alone can
+// exceed Vercel's 60s function timeout (confirmed: 86s for a 6,352-row
+// worst-case replay). With 561 distinct brands averaging ~15 candidates
+// each, narrowing to the row's own brand(s) before scoring is the
+// correct next lever — but it must never change WHICH candidates
+// checkHardGates/brandsMatch would have considered, only how fast we
+// find them.
+//
+// Safety argument (why this can't silently drop a true match):
+//  - A row with NO recognized brandToken always gets the FULL pool —
+//    this is exactly the "unknown side, containment fallback" case in
+//    brandsMatch, which needs every candidate's own tokens considered.
+//  - A row WITH a brandToken gets every bucket whose key is either an
+//    EXACT match or >= the same 0.80 bigram-similarity threshold
+//    brandsMatch itself uses for the "both sides have a brandToken"
+//    case — checked against the ~561 distinct keys (cheap), not the
+//    ~8,300 candidates. If literally no bucket qualifies (a brand-new
+//    token, or one only ever expressed as an initialism the catalog
+//    doesn't share a literal token with), fall back to the full pool —
+//    exactly preserving brandsMatch's initialism fallback.
+//  - Candidates with NO brandToken at all are always included alongside
+//    a narrowed set too — they're the "unknown side" a known-brand row
+//    can still match via containment, and there are few enough of them
+//    (order dozens-hundreds, confirmed directly against production) that
+//    including them unconditionally costs nothing meaningful.
+// ---------------------------------------------------------------------
+
+export interface BrandBucketedPool {
+  byBrand: Map<string, MasterCandidate[]>;
+  noBrand: MasterCandidate[];
+  all: MasterCandidate[];
+}
+
+export function buildBrandBucketedPool(pool: MasterCandidate[]): BrandBucketedPool {
+  const byBrand = new Map<string, MasterCandidate[]>();
+  const noBrand: MasterCandidate[] = [];
+  for (const candidate of pool) {
+    const token = candidate.attrs.brandToken;
+    if (!token) {
+      noBrand.push(candidate);
+      continue;
+    }
+    const list = byBrand.get(token);
+    if (list) list.push(candidate);
+    else byBrand.set(token, [candidate]);
+  }
+  return { byBrand, noBrand, all: pool };
+}
+
+/** Mirrors buildMasterCandidatePool's own incremental-growth callers
+ *  (computeMatchPreview/processSupplierUpload push a freshly auto-
+ *  created candidate onto their pool mid-loop) — keeps the bucketed
+ *  index in sync with the SAME `all` array those callers already grow. */
+export function addToBrandBucketedPool(bucketed: BrandBucketedPool, candidate: MasterCandidate): void {
+  bucketed.all.push(candidate);
+  const token = candidate.attrs.brandToken;
+  if (!token) {
+    bucketed.noBrand.push(candidate);
+    return;
+  }
+  const list = bucketed.byBrand.get(token);
+  if (list) list.push(candidate);
+  else bucketed.byBrand.set(token, [candidate]);
+}
+
+const BRAND_BUCKET_SIMILARITY_THRESHOLD = 0.8; // matches brandsMatch's own threshold exactly
+
+export function narrowPoolForRow(rowAttrs: StructuredAttributes, bucketed: BrandBucketedPool): MasterCandidate[] {
+  const token = rowAttrs.brandToken;
+  if (!token) return bucketed.all;
+
+  const matched: MasterCandidate[] = [];
+  for (const [key, candidates] of bucketed.byBrand) {
+    if (key === token || bigramSimilarity(key, token) >= BRAND_BUCKET_SIMILARITY_THRESHOLD) {
+      matched.push(...candidates);
+    }
+  }
+  if (matched.length === 0) return bucketed.all;
+  return bucketed.noBrand.length > 0 ? matched.concat(bucketed.noBrand) : matched;
+}
+
 export interface MasterMatchResult {
   outcome: "auto_match" | "needs_review" | "no_match";
   winner: MasterCandidate | null;
@@ -829,13 +916,20 @@ export function matchSupplierRow(
   // buildMasterCandidatePool's full products+referenceProducts scan (and
   // re-extraction of every candidate's attributes) being repeated on
   // EVERY row. Confirmed as a real, severe perf regression: at the
-  // current catalog scale (~8,300 reference products) this rebuild cost
-  // ~80ms/row, so a several-hundred-row supplier file took 30-80+
-  // seconds PER preview request (re-run on every column-map change) —
-  // exceeding Vercel's 60s function timeout. Omitted, this falls back to
-  // the old rebuild-every-call behavior, so single-row callers are
-  // unaffected.
-  precomputedPool?: MasterCandidate[]
+  // current catalog scale (~8,300 reference products) rebuilding this
+  // per row cost ~80ms/row, so a several-hundred-row supplier file took
+  // 30-80+ seconds PER preview request (re-run on every column-map
+  // change) — exceeding Vercel's 60s function timeout. Omitted, this
+  // falls back to the old rebuild-every-call behavior, so single-row
+  // callers are unaffected.
+  //
+  // Brand-bucketed, not a flat array: even with the pool built once,
+  // scoring every row against the FULL ~8,300-candidate pool still
+  // measured 9-14ms/row — confirmed to independently exceed 60s on a
+  // several-thousand-row upload with many new/changed rows. See
+  // narrowPoolForRow's own comment for the exact safety argument for why
+  // narrowing by brand can't silently drop a true match.
+  precomputedBucketedPool?: BrandBucketedPool
 ): MatchRowResult {
   const productById = new Map(products.map((p) => [p.id, p]));
   const effectiveBrand = resolveEffectiveBrand(row, products, referenceProducts);
@@ -954,8 +1048,13 @@ export function matchSupplierRow(
 
   // 3. Gated structured match against the combined, deduped Master
   // Product candidate pool — ambiguity judged relative to what the row
-  // itself specifies (see matchAgainstMasterCandidates).
-  const pool = precomputedPool ?? buildMasterCandidatePool(products, referenceProducts);
+  // itself specifies (see matchAgainstMasterCandidates). Narrowed to the
+  // row's own brand bucket(s) when a precomputed bucketed pool is
+  // available (see narrowPoolForRow) — falls back to the full rebuilt
+  // pool otherwise, unchanged from before.
+  const pool = precomputedBucketedPool
+    ? narrowPoolForRow(rowAttrs, precomputedBucketedPool)
+    : buildMasterCandidatePool(products, referenceProducts);
   let result = matchAgainstMasterCandidates(rowAttrs, pool);
 
   // Verified directly, and NOT limited to recognized-brand rows: two
@@ -1133,9 +1232,10 @@ export function computeMatchPreview(
   let previewIdSeq = 0;
 
   // Built ONCE from the starting catalog, then grown incrementally in
-  // lockstep with previewPool below — never rebuilt per row (see
-  // matchSupplierRow's precomputedPool comment for why that mattered).
-  const candidatePool = buildMasterCandidatePool(products, previewPool);
+  // lockstep with previewPool below — never rebuilt per row, and brand-
+  // bucketed rather than a flat pool (see matchSupplierRow's
+  // precomputedBucketedPool comment for why both mattered).
+  const candidatePool = buildBrandBucketedPool(buildMasterCandidatePool(products, previewPool));
 
   for (const row of rows) {
     if (!isValidProductRow(row)) {
@@ -1186,7 +1286,7 @@ export function computeMatchPreview(
         createdFromOfferKey: null,
       };
       previewPool.push(newReferenceProduct);
-      candidatePool.push({
+      addToBrandBucketedPool(candidatePool, {
         productId: null,
         referenceProductId: newReferenceProduct.id,
         attrs: extractReferenceProductAttributes(newReferenceProduct),
