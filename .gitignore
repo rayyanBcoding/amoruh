@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# production data snapshots — real commercial data, never committed
+/backups
+
 # local Claude Code tooling artifacts
 .agents/
 .claude/
