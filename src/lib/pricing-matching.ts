@@ -24,7 +24,7 @@ import { normalize, bigramSimilarity } from "./intake-matching";
 
 const AUTO_MATCH_THRESHOLD = 0.85;
 const REVIEW_THRESHOLD = 0.55;
-const BARCODE_CONFLICT_TEXT_FLOOR = 0.25;
+export const BARCODE_CONFLICT_TEXT_FLOOR = 0.25;
 const ML_PER_OZ = 29.5735;
 const STOPWORDS = new Set(["by", "eau", "de", "the", "and", "for", "in", "a", "an", "of"]);
 
@@ -150,12 +150,65 @@ export function tokenize(text: string): string[] {
     .filter(Boolean);
 }
 
+// Standard fragrance-industry NOMINAL bottle sizes — the size a bottle
+// is actually marketed as (e.g. "100ml"), not the literal mathematical
+// oz->ml conversion (3.4oz * 29.5735 = 100.55ml). Using the nominal
+// figure means a supplier stating "3.4" (oz) and another stating
+// "100 ml" for the exact same physical bottle land on the IDENTICAL
+// sizeMl value — a packaging equivalence, not a coincidence of
+// sizesMatch's existing tolerance. Falls back to the literal conversion
+// for any decimal not in this common list.
+const NOMINAL_OZ_TO_ML: Record<string, number> = {
+  "1": 30,
+  "1.7": 50,
+  "2": 60,
+  "3.4": 100,
+  "4.2": 125,
+};
+
+function ozToMl(oz: number): number {
+  const nominal = NOMINAL_OZ_TO_ML[String(oz)];
+  if (nominal !== undefined) return nominal;
+  return Math.round(oz * ML_PER_OZ * 10) / 10;
+}
+
+// Miami Trading Zone's own convention (confirmed directly against its
+// real spreadsheet — ~1,792 of ~2,102 previously-ambiguous rows match
+// this exact shape): a bare decimal fluid-ounce figure with NO unit
+// stated at all, positioned immediately before the concentration
+// abbreviation — e.g. "3.4 EDP" (never "3.4 Oz EDP", which the oz
+// branch above already handles). Deliberately narrow to stay a
+// validated product-size context, not a guess:
+//  - requires an EXPLICIT decimal point — a bare whole number is far
+//    more likely to collide with a quantity, model number, or SKU
+//    fragment, so it is never inferred as a size here;
+//  - requires immediate adjacency to a real concentration keyword —
+//    never a bare number floating anywhere else in the description
+//    (a price and a quantity are separate spreadsheet columns entirely,
+//    not part of this text; a gift-set component size in every real
+//    example seen already states its own explicit ml/oz unit, so it
+//    is caught by the branches above instead, never here);
+//  - clamped to a plausible bottle-size range, so an unrelated decimal
+//    that happens to precede a concentration word by coincidence in
+//    some unanticipated phrasing can't produce a nonsense size.
+const CONCENTRATION_WORD_LOOKAHEAD =
+  /(?:eau\s*de\s*parfum|edp|eau\s*de\s*toilette|edt|eau\s*de\s*cologne|edc|extrait\s*de\s*parfum|pure\s*parfum|extrait|elixir|le\s*parfum|cologne|parfum)\b/i;
+const BARE_OZ_BEFORE_CONCENTRATION_PATTERN = new RegExp(`(\\d+\\.\\d+)\\s+(?=${CONCENTRATION_WORD_LOOKAHEAD.source})`, "i");
+
+function parseImpliedOzBeforeConcentration(text: string): number | null {
+  const match = text.match(BARE_OZ_BEFORE_CONCENTRATION_PATTERN);
+  if (!match) return null;
+  const oz = parseFloat(match[1]);
+  if (oz <= 0 || oz > 10) return null; // outside any plausible fragrance-bottle range
+  return ozToMl(oz);
+}
+
 export function parseSizeMl(text: string): number | null {
   const ml = text.match(/(\d+(?:\.\d+)?)\s*ml\b/i);
   if (ml) return parseFloat(ml[1]);
   const oz = text.match(/(\d+(?:\.\d+)?)\s*(?:fl\.?\s*)?oz\b/i);
-  if (oz) return Math.round(parseFloat(oz[1]) * ML_PER_OZ * 10) / 10;
-  return null;
+  if (oz) return ozToMl(parseFloat(oz[1]));
+  return parseImpliedOzBeforeConcentration(text);
 }
 
 export function parseConcentration(text: string): string | null {
@@ -1170,11 +1223,36 @@ export function matchSupplierRow(
 const NON_PRODUCT_LINE_PATTERN =
   /^(sub)?total\b|^grand\s*total\b|^shipping\b|^freight\b|^handling\b|^discount\b|^\(?tax\)?\b|^vat\b|^terms?\b|^notes?:?\s*$|^page\s+\d+\b|^continued\b/i;
 
+// Packaging/accessory merchandise — a real supplier line item (never a
+// header/total/blank line), but not a fragrance-adjacent product this
+// catalog models at all. Confirmed directly against production data:
+// empty gift boxes, bottle sleeves, makeup pouches, shopping/paper bags,
+// and display stands were being scored as "structurally ambiguous"
+// fragrances (loosely matching the brand's real SKUs on brand alone)
+// instead of being recognized for what they are — never a fragrance-
+// identity question, so never eligible to auto-create AND never worth
+// occupying Match Review. Deliberately narrow: only fires when the row
+// is fundamentally ABOUT the accessory. A genuine fragrance gift SET
+// that happens to mention "box" as one of its components still states
+// a concentration or a real supported product form — checked below —
+// so this can never swallow an actual product.
+const UNSUPPORTED_MERCHANDISE_PATTERN =
+  /\b(empty\s*box\b|gift\s*box\b|foldable\b.*\bbox\b|bottle\s*sleeve\b|makeup\s*pouch\b|drawstring\s*bag\b|paper\s*bag\b|shopping\s*bag\b|display\s*stand\b|(?:atomi[sz]er|automiser)\s*\(\s*empty\s*\)|tester\s*cap\s*only\b|tissue\s*paper\b|\bribbon\b|\bcatalog(?:ue)?\b|\bbrochure\b)/i;
+
+export function isUnsupportedMerchandise(description: string): boolean {
+  if (!UNSUPPORTED_MERCHANDISE_PATTERN.test(description)) return false;
+  const n = normalize(description);
+  const hasConcentration = CONCENTRATION_PATTERNS.some(([pattern]) => pattern.test(n));
+  const hasSupportedForm = PRODUCT_FORM_PATTERNS.some(([pattern]) => pattern.test(n));
+  return !hasConcentration && !hasSupportedForm;
+}
+
 export function isValidProductRow(row: { description: string }): boolean {
   const desc = row.description.trim();
   if (!desc) return false;
   if (!/[a-zA-Z]{2,}/.test(desc)) return false; // no real word content at all — e.g. a stray number/barcode row
   if (NON_PRODUCT_LINE_PATTERN.test(desc)) return false;
+  if (isUnsupportedMerchandise(desc)) return false;
   return true;
 }
 

@@ -16,6 +16,19 @@ import type {
 } from "./pricing-types";
 import { getSuppliers } from "./intake-db";
 import { getUsdRate, convertToUsd } from "./pricing-fx";
+import {
+  BARCODE_CONFLICT_TEXT_FLOOR,
+  extractAttributes,
+  extractProductAttributes,
+  extractReferenceProductAttributes,
+  isPlausibleBarcode,
+  isValidProductRow,
+  matchAgainstMasterCandidates,
+  resolveEffectiveBrand,
+  type MasterCandidate,
+} from "./pricing-matching";
+import { bigramSimilarity } from "./intake-matching";
+import { getProducts } from "./db";
 
 // ---------------------------------------------------------------------
 // Pricing / Ordering — storage layer.
@@ -738,14 +751,75 @@ function splitAndRankComparisonRows(rows: OfferComparisonRow[]): {
   return { actionable, nonActionable, bestPrice: actionable[0] ?? null };
 }
 
+// Warns a comparison page that additional supplier options MIGHT exist,
+// without ever auto-linking them — never included in actionable/
+// bestPrice, purely informational. Deliberately scoped to
+// needs_review/new_candidate only (never alias_conflict/barcode_
+// conflict, which is a genuine disagreement signal, not "might be the
+// same item"), and to valid product rows only (isValidProductRow —
+// packaging/accessory rows are never counted as a "missing" fragrance
+// offer). A full scan over every supplier's current unresolved offers,
+// computed fresh per comparison-page view rather than a maintained
+// index — accepted at the current catalog scale (low thousands of
+// unresolved offers) rather than adding a new write-path index for a
+// purely informational count.
+//
+// Matches via matchAgainstMasterCandidates against a pool of exactly
+// ONE candidate (the Master Product itself) — deliberately NOT a raw
+// computeIdentitySignature string comparison, which is confirmed
+// elsewhere in this file to miss real matches on brand-token asymmetry
+// (e.g. "Aventus by Creed" vs. "Creed Aventus") that checkHardGates'
+// own brandsMatch containment fallback already resolves correctly.
+async function countUnresolvedOffersMatchingIdentity(target: MasterCandidate, targetLabelText: string): Promise<number> {
+  const [suppliers, products, referenceProducts] = await Promise.all([getSuppliers(), getProducts(), getAllReferenceProducts()]);
+  const targetCode = (target.upc || target.ean).trim().toUpperCase();
+  let count = 0;
+  for (const s of suppliers) {
+    const offers = Object.values(await getCommittedOffers(s.id));
+    for (const o of offers) {
+      if (o.currentlyListed === false) continue;
+      if (o.productId || o.referenceProductId) continue;
+      if (o.reviewStatus !== "needs_review" && o.reviewStatus !== "new_candidate") continue;
+      if (!isValidProductRow(o)) continue;
+      const effectiveBrand = resolveEffectiveBrand(o, products, referenceProducts);
+      const attrs = extractAttributes(`${o.brand} ${o.description}`, effectiveBrand);
+
+      // Exact UPC/EAN is matchSupplierRow's own strongest identity signal,
+      // checked as a fast path BEFORE it ever reaches matchAgainstMasterCandidates
+      // (see matchSupplierRow step 2) — so relying on matchAgainstMasterCandidates
+      // alone here silently misses every offer that would actually resolve via
+      // a barcode match (confirmed live: a supplier's own "brand" column can
+      // hold a distributor name rather than the real fragrance house, which
+      // fails the structured brand hard-gate even on an exact-barcode pair).
+      // Mirrors matchSupplierRow's own guard exactly — a shared barcode isn't
+      // trusted blindly if the free text is wildly different — rather than
+      // the stricter attribute hard-gate, which barcode matches deliberately
+      // bypass.
+      const offerCode = (o.upc || o.ean).trim().toUpperCase();
+      if (offerCode && targetCode && offerCode === targetCode && isPlausibleBarcode(offerCode)) {
+        const text = bigramSimilarity(`${o.brand} ${o.description}`, targetLabelText);
+        if (text >= BARCODE_CONFLICT_TEXT_FLOOR) {
+          count++;
+          continue;
+        }
+      }
+
+      const result = matchAgainstMasterCandidates(attrs, [target]);
+      if (result.outcome === "auto_match") count++;
+    }
+  }
+  return count;
+}
+
 /** Every current supplier offer for one master product, split into
  *  actionable (eligible to be "Best Current Price") vs. everything else
  *  shown only for context — see pricing-matching.ts's plan §4. */
 export async function getProductOfferComparison(productId: string): Promise<ProductOfferComparison> {
   const refs = await getOffersByProduct(productId);
-  const [suppliers, offers] = await Promise.all([
+  const [suppliers, offers, product] = await Promise.all([
     getSuppliers(),
     Promise.all(refs.map((r) => getCurrentOffer(r.supplierId, r.offerKey))),
+    getProducts().then((ps) => ps.find((p) => p.id === productId) ?? null),
   ]);
   const supplierById = new Map(suppliers.map((s) => [s.id, s]));
 
@@ -774,7 +848,19 @@ export async function getProductOfferComparison(productId: string): Promise<Prod
   }
 
   const { actionable, nonActionable, bestPrice } = splitAndRankComparisonRows(rows);
-  return { productId, actionable, nonActionable, bestPrice };
+  const unresolvedElsewhereCount = product
+    ? await countUnresolvedOffersMatchingIdentity(
+        {
+          productId: product.id,
+          referenceProductId: null,
+          attrs: extractProductAttributes(product),
+          upc: product.barcode,
+          ean: product.barcode,
+        },
+        `${product.brand} ${product.name}`
+      )
+    : 0;
+  return { productId, actionable, nonActionable, bestPrice, unresolvedElsewhereCount };
 }
 
 /** Backfill primitive for offers_by_reference_product — adds a
@@ -841,9 +927,10 @@ export async function getOffersByReferenceProduct(referenceProductId: string): P
  *  referenceProductId instead of productId. */
 export async function getReferenceProductOfferComparison(referenceProductId: string): Promise<ReferenceProductOfferComparison> {
   const refs = await getOffersByReferenceProduct(referenceProductId);
-  const [suppliers, offers] = await Promise.all([
+  const [suppliers, offers, referenceProduct] = await Promise.all([
     getSuppliers(),
     Promise.all(refs.map((r) => getCurrentOffer(r.supplierId, r.offerKey))),
+    getReferenceProduct(referenceProductId),
   ]);
   const supplierById = new Map(suppliers.map((s) => [s.id, s]));
 
@@ -872,7 +959,19 @@ export async function getReferenceProductOfferComparison(referenceProductId: str
   }
 
   const { actionable, nonActionable, bestPrice } = splitAndRankComparisonRows(rows);
-  return { referenceProductId, actionable, nonActionable, bestPrice };
+  const unresolvedElsewhereCount = referenceProduct
+    ? await countUnresolvedOffersMatchingIdentity(
+        {
+          productId: referenceProduct.productId,
+          referenceProductId: referenceProduct.id,
+          attrs: extractReferenceProductAttributes(referenceProduct),
+          upc: referenceProduct.upc,
+          ean: referenceProduct.ean,
+        },
+        `${referenceProduct.brand} ${referenceProduct.name}`
+      )
+    : 0;
+  return { referenceProductId, actionable, nonActionable, bestPrice, unresolvedElsewhereCount };
 }
 
 // ---------------------------------------------------------------------
@@ -985,6 +1084,7 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
       matchedReferenceOnly: sMatchedReferenceOnly,
       reviewRequired: sReview,
       unresolvedOffers: sUnresolved,
+      quietlyUnresolved: sUnresolved - sReview,
       ignored: sIgnored,
     });
     matched += sMatched;
@@ -995,7 +1095,16 @@ export async function getMatchReviewSummary(): Promise<MatchReviewSummary> {
     ignored += sIgnored;
   }
 
-  return { matched, matchedCarried, matchedReferenceOnly, reviewRequired, unresolvedOffers, ignored, bySupplier };
+  return {
+    matched,
+    matchedCarried,
+    matchedReferenceOnly,
+    reviewRequired,
+    unresolvedOffers,
+    quietlyUnresolved: unresolvedOffers - reviewRequired,
+    ignored,
+    bySupplier,
+  };
 }
 
 /** Paginated, filterable items for one Match Review tab — serves both
