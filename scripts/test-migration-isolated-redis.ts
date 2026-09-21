@@ -149,6 +149,19 @@ async function main() {
   );
 
   const nowIso = new Date().toISOString();
+  // Unique per invocation so this test is safely re-runnable against a
+  // non-empty (but still isolated) database without colliding with a
+  // prior run's leftover suppliers/identities — get-or-create would
+  // otherwise correctly (but confusingly, for this test's own fixed
+  // assertions) return "existing" for a UPC a previous run already created.
+  const RUN_ID = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  // Alphanumeric-only variant for embedding INSIDE fragrance names —
+  // computeIdentitySignature is keyed off brand+core-name+size+
+  // concentration etc., not the UPC, so a fixed product name (e.g.
+  // "TESTBRAND ISOLATED NOVA") collides with a PRIOR run's already-
+  // created record by signature alone even when the UPC is unique this
+  // time. The core name itself needs a per-run token too.
+  const RUN_TOKEN = RUN_ID.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
   function makeOffer(overrides: Partial<SupplierOfferCurrent>): SupplierOfferCurrent {
     return {
       supplierId: "",
@@ -213,8 +226,8 @@ async function main() {
   }
 
   console.log("\n=== 1. Master Product creation (real Redis, get-or-create) ===");
-  const supplierA = await getOrCreateSupplier("TEST_ISOLATED_SUPPLIER_A");
-  const rowA = { offerKey: "isokey_a1", supplierSku: "A1", description: "TESTBRAND ISOLATED NOVA (U) EDP 100ML", brand: "TESTBRAND", upc: "1234567890123", ean: "" };
+  const supplierA = await getOrCreateSupplier(`TEST_ISOLATED_SUPPLIER_A_${RUN_ID}`);
+  const rowA = { offerKey: "isokey_a1", supplierSku: "A1", description: `TESTBRAND ISOLATED NOVA${RUN_TOKEN} (U) EDP 100ML`, brand: "TESTBRAND", upc: `1${RUN_ID.replace(/\D/g, "").slice(0, 12).padEnd(12, "0")}`, ean: "" };
   const attrsA = extractAttributes(`${rowA.brand} ${rowA.description}`, "TESTBRAND");
   const eligibilityA = checkAutoCreateEligibility(attrsA, true);
   check("seeded row is auto-create eligible", eligibilityA.eligible, eligibilityA.reason);
@@ -264,7 +277,7 @@ async function main() {
 
   console.log("\n=== 3. Supplier-offer linking + reverse-index update + price/quantity visibility ===");
   const offerA = makeOffer({ supplierId: supplierA.id, offerKey: rowA.offerKey, supplierSku: rowA.supplierSku, description: rowA.description, brand: rowA.brand, upc: rowA.upc, price: 42.5, quantity: 7, currency: "USD" });
-  await seedSupplierWithOffers("TEST_ISOLATED_SUPPLIER_A", { [rowA.offerKey]: offerA });
+  await seedSupplierWithOffers(`TEST_ISOLATED_SUPPLIER_A_${RUN_ID}`, { [rowA.offerKey]: offerA });
   const linkResult = await bulkUpdateOffers(
     supplierA.id,
     { [rowA.offerKey]: { ...offerA, referenceProductId: createdId, candidateReferenceProductId: createdId, matchType: "structured", matchConfidence: 1, reviewStatus: "auto_matched" } },
@@ -285,8 +298,8 @@ async function main() {
   );
 
   console.log("\n=== 4. Second supplier's row for the SAME identity links via matchSupplierRow, no duplicate ===");
-  const supplierB = await getOrCreateSupplier("TEST_ISOLATED_SUPPLIER_B");
-  const rowB = { offerKey: "isokey_b1", supplierSku: "B1", description: "ISOLATED NOVA BY TESTBRAND (U) EDP 3.4OZ", brand: "TESTBRAND", upc: rowA.upc, ean: "" };
+  const supplierB = await getOrCreateSupplier(`TEST_ISOLATED_SUPPLIER_B_${RUN_ID}`);
+  const rowB = { offerKey: "isokey_b1", supplierSku: "B1", description: `ISOLATED NOVA${RUN_TOKEN} BY TESTBRAND (U) EDP 3.4OZ`, brand: "TESTBRAND", upc: rowA.upc, ean: "" };
   const poolForB = await getAllReferenceProducts();
   const matchB = matchSupplierRow(rowB, [], [], poolForB);
   check(
@@ -295,7 +308,7 @@ async function main() {
     `got ${matchB.reviewStatus} ref=${matchB.referenceProductId}`
   );
   const offerB = makeOffer({ supplierId: supplierB.id, offerKey: rowB.offerKey, supplierSku: rowB.supplierSku, description: rowB.description, brand: rowB.brand, upc: rowB.upc, price: 39.99, quantity: 3 });
-  await seedSupplierWithOffers("TEST_ISOLATED_SUPPLIER_B", { [rowB.offerKey]: offerB });
+  await seedSupplierWithOffers(`TEST_ISOLATED_SUPPLIER_B_${RUN_ID}`, { [rowB.offerKey]: offerB });
   const linkResultB = await bulkUpdateOffers(
     supplierB.id,
     { [rowB.offerKey]: { ...offerB, referenceProductId: matchB.referenceProductId, candidateReferenceProductId: matchB.referenceProductId, matchType: matchB.matchType, matchConfidence: matchB.matchConfidence, reviewStatus: "auto_matched" } },
@@ -314,9 +327,9 @@ async function main() {
   check("Master Product count unchanged after re-running the whole flow a second time", countAfterSecondRun === afterCount);
 
   console.log("\n=== 6. Safe behavior after INTERRUPTED processing — no partial generation becomes active ===");
-  const supplierD = await getOrCreateSupplier("TEST_ISOLATED_SUPPLIER_D_INTERRUPTED");
+  const supplierD = await getOrCreateSupplier(`TEST_ISOLATED_SUPPLIER_D_INTERRUPTED_${RUN_ID}`);
   const gen1Offer = makeOffer({ supplierId: supplierD.id, offerKey: "d_key1", description: "ORIGINAL GEN1 OFFER", price: 10, quantity: 1 });
-  const { generationId: gen1Id } = await seedSupplierWithOffers("TEST_ISOLATED_SUPPLIER_D_INTERRUPTED", { d_key1: gen1Offer }, 1);
+  const { generationId: gen1Id } = await seedSupplierWithOffers(`TEST_ISOLATED_SUPPLIER_D_INTERRUPTED_${RUN_ID}`, { d_key1: gen1Offer }, 1);
   const activeGenBeforeInterrupt = await getCurrentGenerationId(supplierD.id);
   check("supplier D has a real committed generation (gen1) before the interruption", activeGenBeforeInterrupt === gen1Id);
 
@@ -352,6 +365,52 @@ async function main() {
   check("a stale/older seq commit is rejected (STALE_GENERATION), never overwrites the newer active generation", staleCommit === "STALE_GENERATION", staleCommit);
   const offersAfterStaleAttempt = await getCommittedOffers(supplierD.id);
   check("active generation is unaffected by the rejected stale commit attempt", offersAfterStaleAttempt.d_key1?.price === 999);
+
+  console.log("\n=== 7. Reverse-index repair procedure — simulates the exact HSET-succeeded-SADD-never-ran gap ===");
+  const { backfillOfferByReferenceProduct, getOffersByReferenceProduct: getRefMembers } = await import("../src/lib/pricing-db");
+  const supplierE = await getOrCreateSupplier(`TEST_ISOLATED_SUPPLIER_E_REPAIR_${RUN_ID}`);
+  const brokenOffer = makeOffer({ supplierId: supplierE.id, offerKey: "e_key1", description: "TESTBRAND REPAIR CASE (U) EDT 50ML", referenceProductId: createdId, reviewStatus: "auto_matched", matchType: "structured", matchConfidence: 1 });
+  await seedSupplierWithOffers(`TEST_ISOLATED_SUPPLIER_E_REPAIR_${RUN_ID}`, { e_key1: brokenOffer });
+  // Deliberately do NOT add e_key1 to offers_by_reference_product — this
+  // is the exact state a crash between bulkUpdateOffers's HSET and SADD
+  // calls would leave behind: referenceProductId set, reverse index
+  // membership missing.
+  const membersBeforeRepair = await getRefMembers(createdId);
+  check(
+    "setup: the broken offer is confirmed MISSING from the reverse index before repair",
+    !membersBeforeRepair.some((m) => m.supplierId === supplierE.id && m.offerKey === "e_key1")
+  );
+
+  // Detection: exactly the query verify-reverse-index-integrity.ts runs.
+  const isDetectedAsMissing = !(await getRefMembers(createdId)).some((m) => m.supplierId === supplierE.id && m.offerKey === "e_key1");
+  check("detection correctly identifies the gap (offer resolved but not reverse-indexed)", isDetectedAsMissing);
+
+  // Repair: the exact primitive verify-reverse-index-integrity.ts's
+  // --repair mode calls — a plain, idempotent SADD, no bespoke logic.
+  await backfillOfferByReferenceProduct(createdId, supplierE.id, "e_key1");
+  const membersAfterRepair = await getRefMembers(createdId);
+  check(
+    "repair correctly adds the missing reverse-index membership",
+    membersAfterRepair.some((m) => m.supplierId === supplierE.id && m.offerKey === "e_key1")
+  );
+
+  // Idempotency: running the repair a second time must not create a
+  // duplicate SET member or otherwise misbehave (SADD is naturally
+  // idempotent, but confirm the actual behavior, not just the theory).
+  await backfillOfferByReferenceProduct(createdId, supplierE.id, "e_key1");
+  const membersAfterSecondRepair = await getRefMembers(createdId);
+  check(
+    "repairing twice is idempotent — no duplicate membership, same count as after one repair",
+    membersAfterSecondRepair.length === membersAfterRepair.length
+  );
+
+  // Confirm repair never touches the offer's OWN hash fields (price,
+  // reviewStatus, etc.) — it is purely additive to the reverse index.
+  const offerAfterRepair = (await getCommittedOffers(supplierE.id)).e_key1;
+  check(
+    "repair does not modify the offer's own fields (price/reviewStatus unchanged)",
+    offerAfterRepair?.price === brokenOffer.price && offerAfterRepair?.reviewStatus === "auto_matched"
+  );
 
   console.log(`\n=== RESULTS: ${pass} passed, ${fail_} failed (${results.length} total assertions) ===`);
   console.log("\nFull PASS/FAIL list:");
