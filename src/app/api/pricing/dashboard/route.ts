@@ -42,6 +42,7 @@ export async function GET() {
     matchReview: {
       reviewRequired: matchReview.reviewRequired,
       unresolvedOffers: matchReview.unresolvedOffers,
+      quietlyUnresolved: matchReview.quietlyUnresolved,
       matched: matchReview.matched,
       bySupplier: matchReview.bySupplier,
     },

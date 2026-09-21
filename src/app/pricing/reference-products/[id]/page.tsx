@@ -64,6 +64,18 @@ export default function ReferenceProductComparisonPage({ params }: { params: Pro
           )
         )}
 
+        {comparison && comparison.unresolvedElsewhereCount > 0 && (
+          <div className="glass-panel mb-6 rounded-2xl border border-ld-amber/30 bg-ld-amber/5 p-4">
+            <p className="text-sm text-ld-amber">
+              <span className="font-bold">
+                {comparison.unresolvedElsewhereCount} unresolved supplier offer{comparison.unresolvedElsewhereCount === 1 ? "" : "s"}
+              </span>{" "}
+              elsewhere may be additional options for this exact product — not shown here because their identity hasn&apos;t been
+              confirmed yet. Check Match Review / search before assuming this list is complete.
+            </p>
+          </div>
+        )}
+
         <div className="glass-panel mb-6 rounded-2xl p-5">
           <h2 className="mb-4 font-display text-lg font-bold text-ld-white">Actionable Offers</h2>
           {!comparison || comparison.actionable.length === 0 ? (

@@ -29,6 +29,7 @@ import { getProducts } from "../src/lib/db";
 import {
   extractAttributes,
   checkAutoCreateEligibility,
+  isUnsupportedMerchandise,
   isValidProductRow,
   matchSupplierRow,
   resolveEffectiveBrand,
@@ -53,9 +54,17 @@ async function main() {
   // during this pass is visible to every LATER row in this same batch,
   // exactly like processSupplierUpload's own in-import list.
   const pool: PricingReferenceProduct[] = await getAllReferenceProducts();
+  const masterProductCountBefore = pool.length;
+  let offersLinkedBefore = 0;
 
   let totalExamined = 0;
   let invalidRowCount = 0;
+  // Reporting-only split of invalidRowCount (spec requires "unsupported
+  // merchandise" as its own reconciling bucket) — never changes the
+  // isValidProductRow pass/fail decision itself, just labels WHY a row
+  // failed it for the dry-run report.
+  let unsupportedMerchandiseCount = 0;
+  let otherInvalidCount = 0;
   let linkedToExisting = 0;
   let createdNew = 0;
   let dedupedWithinBacklog = 0;
@@ -63,6 +72,10 @@ async function main() {
   let stillConflicting = 0;
   const invalidExamples: string[] = [];
   const conflictExamples: string[] = [];
+  // Miami-specific slices of the same creation/link logs, required by
+  // the spec to show its size-parsing fix's real effect separately.
+  const miamiCreationLog: string[] = [];
+  const miamiLinkLog: string[] = [];
   // Independent post-hoc audit trail for every proposed creation — used
   // below to verify, SEPARATELY from the incremental pool-based dedup
   // logic above, that none of the 3,000+ proposed creations collide
@@ -76,6 +89,7 @@ async function main() {
 
   for (const s of suppliers) {
     const offers = Object.values(await getCommittedOffers(s.id)).filter((o) => o.currentlyListed !== false);
+    offersLinkedBefore += offers.filter((o) => o.productId || o.referenceProductId).length;
     const unresolved = offers.filter(
       (o) => !o.productId && !o.referenceProductId && (o.reviewStatus === "needs_review" || o.reviewStatus === "new_candidate")
     );
@@ -90,6 +104,11 @@ async function main() {
       const row = { offerKey: o.offerKey, supplierSku: o.supplierSku, description: o.description, brand: o.brand, upc: o.upc, ean: o.ean };
       if (!isValidProductRow(row)) {
         invalidRowCount++;
+        if (isUnsupportedMerchandise(o.description)) {
+          unsupportedMerchandiseCount++;
+        } else {
+          otherInvalidCount++;
+        }
         if (invalidExamples.length < 10) invalidExamples.push(`[${s.name}] "${o.description}"`);
         continue;
       }
@@ -108,7 +127,8 @@ async function main() {
         linkedToExisting++;
         const target = freshMatch.productId ?? freshMatch.referenceProductId;
         track(`links to existing ${target}`);
-        if (linkLog.length < 10) linkLog.push(`[${s.name}] "${o.description}" -> links to existing ${target}`);
+        if (linkLog.length < 20) linkLog.push(`[${s.name}] "${o.description}" -> links to existing ${target}`);
+        if (s.name.includes("Miami") && miamiLinkLog.length < 20) miamiLinkLog.push(`[${s.name}] "${o.description}" -> links to existing ${target}`);
         if (EXECUTE) {
           const member = `${s.id}::${o.offerKey}`;
           offerUpdates[o.offerKey] = {
@@ -193,7 +213,8 @@ async function main() {
         } else {
           createdNew++;
           track(`created new Master Product (brand="${effectiveBrand}") -> ${resolvedId}`);
-          if (creationLog.length < 15) creationLog.push(`[${s.name}] "${o.description}" (brand="${effectiveBrand}") -> created ${resolvedId}`);
+          if (creationLog.length < 20) creationLog.push(`[${s.name}] "${o.description}" (brand="${effectiveBrand}") -> created ${resolvedId}`);
+          if (s.name.includes("Miami") && miamiCreationLog.length < 20) miamiCreationLog.push(`[${s.name}] "${o.description}" (brand="${effectiveBrand}") -> created ${resolvedId}`);
           pool.push(result.product);
         }
 
@@ -232,7 +253,8 @@ async function main() {
         }
         createdNew++;
         track(`would create new Master Product (brand="${effectiveBrand}")`);
-        if (creationLog.length < 15) creationLog.push(`[${s.name}] "${o.description}" (brand="${effectiveBrand}") -> would create new Master Product`);
+        if (creationLog.length < 20) creationLog.push(`[${s.name}] "${o.description}" (brand="${effectiveBrand}") -> would create new Master Product`);
+        if (s.name.includes("Miami") && miamiCreationLog.length < 20) miamiCreationLog.push(`[${s.name}] "${o.description}" (brand="${effectiveBrand}") -> would create new Master Product`);
         createdIdentities.push({ signature, upc: plausibleUpc, ean: plausibleEan, description: o.description, supplier: s.name });
         // Simulate the write into the pool so later rows in this batch see it.
         pool.push({
@@ -274,6 +296,8 @@ async function main() {
   console.log(`\nMode: ${EXECUTE ? "EXECUTE (real writes)" : "DRY RUN (zero writes)"}\n`);
   console.log(`Total unresolved offers examined: ${totalExamined}`);
   console.log(`Invalid/non-product rows (excluded before classification): ${invalidRowCount}`);
+  console.log(`  — of which unsupported merchandise (empty boxes/bags/sleeves/etc.): ${unsupportedMerchandiseCount}`);
+  console.log(`  — of which other invalid/non-product (junk text, no product content): ${otherInvalidCount}`);
   console.log(`Linked to an EXISTING Master/real Product: ${linkedToExisting}`);
   console.log(`New Master Products created: ${createdNew}`);
   console.log(`Deduped against another row created earlier IN THIS batch: ${dedupedWithinBacklog}`);
@@ -285,8 +309,12 @@ async function main() {
   invalidExamples.forEach((l) => console.log(`  - ${l}`));
   console.log(`\nLink examples:`);
   linkLog.forEach((l) => console.log(`  - ${l}`));
-  console.log(`\nCreation examples:`);
+  console.log(`\nCreation examples (up to 20):`);
   creationLog.forEach((l) => console.log(`  - ${l}`));
+  console.log(`\nMiami Trading Zone creation examples (up to 20):`);
+  miamiCreationLog.forEach((l) => console.log(`  - ${l}`));
+  console.log(`\nMiami Trading Zone link examples (up to 20):`);
+  miamiLinkLog.forEach((l) => console.log(`  - ${l}`));
   console.log(`\nIntra-batch dedup examples:`);
   dedupLog.forEach((l) => console.log(`  - ${l}`));
   console.log(`\nConflict examples:`);
@@ -298,6 +326,12 @@ async function main() {
   // FAR. This groups every proposed creation by signature/UPC/EAN
   // regardless of processing order, to positively confirm none of them
   // collide with each other.
+  console.log(`\n=== Projected before/after (${EXECUTE ? "ACTUAL" : "PROJECTED"}) ===`);
+  console.log(`Master Products before: ${masterProductCountBefore}`);
+  console.log(`Master Products after:  ${masterProductCountBefore + createdNew} (+${createdNew})`);
+  console.log(`Supplier offers already linked (productId or referenceProductId set) before: ${offersLinkedBefore}`);
+  console.log(`Supplier offers linked after: ${offersLinkedBefore + linkedToExisting + createdNew} (+${linkedToExisting + createdNew})`);
+
   console.log(`\n=== Independent duplicate audit of all ${createdIdentities.length} proposed creations ===`);
   const bySignature = new Map<string, typeof createdIdentities>();
   for (const c of createdIdentities) {

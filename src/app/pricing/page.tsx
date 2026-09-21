@@ -17,6 +17,7 @@ interface SupplierBreakdown {
   matched: number;
   reviewRequired: number;
   unresolvedOffers: number;
+  quietlyUnresolved: number;
   ignored: number;
 }
 
@@ -43,8 +44,12 @@ interface DashboardData {
     reviewRequired: number;
     /** EVERY genuinely ambiguous offer, flagged or not — quiet,
      *  informational, never a required task count. reviewRequired is a
-     *  subset of this. */
+     *  subset of this, NOT a separate category. */
     unresolvedOffers: number;
+    /** unresolvedOffers minus reviewRequired — the count actually
+     *  displayed as "sitting quietly," since unresolvedOffers itself
+     *  still includes the actively-flagged reviewRequired items. */
+    quietlyUnresolved: number;
     matched: number;
     bySupplier: SupplierBreakdown[];
   };
@@ -301,8 +306,9 @@ export default function PricingDashboardPage() {
             (Review Required is the small actionable subset above); most
             of these will never be purchased and are not required work. */}
         <p className="mt-3 text-xs text-ld-muted">
-          <span className="font-semibold text-ld-muted">{(data?.matchReview.unresolvedOffers ?? 0).toLocaleString()}</span> unresolved supplier
-          offers sitting quietly in the background — searchable, not a required task. Resolution is only needed if you try to order one.
+          <span className="font-semibold text-ld-muted">{(data?.matchReview.quietlyUnresolved ?? 0).toLocaleString()}</span> more
+          unresolved supplier offers sitting quietly in the background (on top of the {(data?.matchReview.reviewRequired ?? 0).toLocaleString()}{" "}
+          above) — searchable, not a required task. Resolution is only needed if you try to order one.
         </p>
 
         {data && data.matchReview.bySupplier.length > 0 && (
@@ -330,7 +336,7 @@ export default function PricingDashboardPage() {
                       <td className={`py-2 pr-4 ${s.reviewRequired > 0 ? "font-semibold text-ld-amber" : "text-ld-muted"}`}>
                         {s.reviewRequired.toLocaleString()}
                       </td>
-                      <td className="py-2 pr-4 text-ld-muted/70">{s.unresolvedOffers.toLocaleString()}</td>
+                      <td className="py-2 pr-4 text-ld-muted/70">{s.quietlyUnresolved.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>

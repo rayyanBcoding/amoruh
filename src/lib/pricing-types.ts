@@ -322,6 +322,15 @@ export interface MatchReviewSupplierBreakdown {
    *  barcode_conflict), flagged or not — the full universe reviewRequired
    *  is a subset of. Quiet/informational, never a required task count. */
   unresolvedOffers: number;
+  /** unresolvedOffers MINUS reviewRequired — the offers that are
+   *  genuinely sitting quietly with nobody looking at them, as opposed
+   *  to unresolvedOffers itself (which STILL INCLUDES the actively-
+   *  flagged reviewRequired ones). Added because the dashboard's own
+   *  "sitting quietly in the background" wording was displaying
+   *  unresolvedOffers directly, silently implying it excluded
+   *  reviewRequired when the underlying figure never did — confirmed
+   *  during a production audit. */
+  quietlyUnresolved: number;
   ignored: number;
 }
 
@@ -331,6 +340,8 @@ export interface MatchReviewSummary {
   matchedReferenceOnly: number;
   reviewRequired: number;
   unresolvedOffers: number;
+  /** See the identical field on MatchReviewSupplierBreakdown. */
+  quietlyUnresolved: number;
   ignored: number;
   bySupplier: MatchReviewSupplierBreakdown[];
 }
@@ -396,6 +407,13 @@ export interface ProductOfferComparison {
   actionable: OfferComparisonRow[];
   nonActionable: OfferComparisonRow[];
   bestPrice: OfferComparisonRow | null;
+  /** Count of currently-unresolved supplier offers elsewhere (no
+   *  productId/referenceProductId of their own yet) that share this
+   *  exact structural identity signature — never auto-linked, never
+   *  included in actionable/bestPrice; surfaced only so the comparison
+   *  page can warn that additional supplier options may exist and
+   *  aren't showing here yet. See countUnresolvedOffersMatchingSignature. */
+  unresolvedElsewhereCount: number;
 }
 
 /** Direct twin of ProductOfferComparison for a Master Product that has no
@@ -406,6 +424,7 @@ export interface ReferenceProductOfferComparison {
   actionable: OfferComparisonRow[];
   nonActionable: OfferComparisonRow[];
   bestPrice: OfferComparisonRow | null;
+  unresolvedElsewhereCount: number;
 }
 
 export interface OfferComparisonRow {
