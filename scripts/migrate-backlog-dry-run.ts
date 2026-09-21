@@ -24,7 +24,7 @@
 // as before.
 
 import { getSuppliers } from "../src/lib/intake-db";
-import { getCommittedOffers, getAllReferenceProducts, getOrCreateReferenceProductByIdentity, bulkUpdateOffers, type OffersByReferenceProductOp } from "../src/lib/pricing-db";
+import { getCommittedOffers, getAllReferenceProducts, getOrCreateReferenceProductByIdentity, bulkUpdateOffers, type OffersByReferenceProductOp, type OffersByProductOp } from "../src/lib/pricing-db";
 import { getProducts } from "../src/lib/db";
 import {
   extractAttributes,
@@ -98,6 +98,16 @@ async function main() {
     // after every row in this supplier is classified — never per-row.
     const offerUpdates: Record<string, SupplierOfferCurrent> = {};
     const refOps: OffersByReferenceProductOp[] = [];
+    // A row can resolve directly to a real, carried Product with NO
+    // linked reference product at all (matchSupplierRow's exact-UPC/EAN
+    // real-Product branch explicitly returns referenceProductId: null in
+    // that case) — offers_by_product is this identity's own reverse
+    // index, exactly mirroring offers_by_reference_product below. Found
+    // missing entirely during migration preflight: the original version
+    // of this branch only ever pushed to refOps, silently reproducing
+    // the historical "Wildcard problem" (offer linked, invisible via
+    // reverse index) for this one specific match path.
+    const productOps: OffersByProductOp[] = [];
 
     for (const o of unresolved) {
       totalExamined++;
@@ -143,6 +153,7 @@ async function main() {
             reviewRequestedAt: null,
           };
           if (freshMatch.referenceProductId) refOps.push({ op: "SADD", referenceProductId: freshMatch.referenceProductId, member });
+          if (freshMatch.productId) productOps.push({ op: "SADD", productId: freshMatch.productId, member });
         }
         continue;
       }
@@ -282,14 +293,14 @@ async function main() {
     }
 
     if (EXECUTE && Object.keys(offerUpdates).length > 0) {
-      const result = await bulkUpdateOffers(s.id, offerUpdates, { offersByReferenceProductOps: refOps });
+      const result = await bulkUpdateOffers(s.id, offerUpdates, { offersByReferenceProductOps: refOps, offersByProductOps: productOps });
       if (!result.ok) {
         console.error(`\nSTOPPED — bulk write FAILED for supplier "${s.name}" (${s.id}): ${result.reason}`);
         console.error(`Rows already written for suppliers processed before this one are safe and complete.`);
         console.error(`Re-running with --execute --confirm-production will safely re-verify and resume — already-linked offers are skipped by the unresolved filter, and getOrCreateReferenceProductByIdentity is idempotent.`);
         process.exit(1);
       }
-      console.log(`[${s.name}] wrote ${result.count} offer updates, ${refOps.length} reverse-index ops.`);
+      console.log(`[${s.name}] wrote ${result.count} offer updates, ${refOps.length} reference-product reverse-index ops, ${productOps.length} real-product reverse-index ops.`);
     }
   }
 
