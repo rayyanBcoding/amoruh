@@ -82,13 +82,24 @@ check(
   true
 );
 
-// --- Numbered-edition core-name preservation (e.g. "Off White Solution
-// No. 1"..."No. 4") -- confirmed directly against production data as a
-// real bug: contentTokens' blanket "strip bare digits" rule was
-// silently dropping the ONLY thing distinguishing four different real
-// UPCs, collapsing them into one identical identity signature. ---
+// --- Bare-number core-name preservation, general rule (e.g. "Off White
+// Solution No. 1"..."No. 4", "GUESS 1981" vs "GUESS DARE HOMME") --
+// confirmed directly against production data as TWO real, severe bugs
+// from the same root cause (contentTokens' original blanket "strip
+// every bare digit" rule): (1) a false MERGE on creation -- "Off White
+// Solution No. 1" through "No. 4" (four different UPCs) collapsed into
+// one identical identity signature; (2) a false MATCH against an
+// EXISTING product -- "GUESS 1981(M)6.0oz Body Spray", with "1981"
+// stripped, had no remaining distinguishing content and scored 0.98
+// against the unrelated "GUESS DARE HOMME(M)6.0oz Body Spray," which
+// would have linked two different real fragrances' prices together.
+// Fixed by inverting the default: a bare integer is now preserved
+// UNLESS it's a SKU/lot code (parens/brackets in the original text) or
+// immediately adjacent to a quantity/size unit -- both confirmed, from
+// this session's own extensive real-data review, to be the only two
+// genuine noise sources ever seen in this catalog's supplier files. ---
 check(
-  "'No. 1' vs 'No. 4' produce DIFFERENT core-name tokens (positive: distinguishing edition number preserved)",
+  "'No. 1' vs 'No. 4' produce DIFFERENT core-name tokens (edition number preserved)",
   JSON.stringify(extractAttributes("OFF WHITE SOLUTION No. 1 3.4 EDP U", "OFF WHITE").coreNameTokens) ===
     JSON.stringify(extractAttributes("OFF WHITE SOLUTION No. 4 3.4 EDP U", "OFF WHITE").coreNameTokens),
   false
@@ -105,14 +116,58 @@ check(
   true
 );
 check(
-  "negative: a bare number NOT preceded by No./No/Number is still stripped as noise (unchanged prior behavior)",
-  JSON.stringify(extractAttributes("SOME BRAND FRAGRANCE 500 EDP U", "SOME BRAND").coreNameTokens) ===
-    JSON.stringify(extractAttributes("SOME BRAND FRAGRANCE 999 EDP U", "SOME BRAND").coreNameTokens),
+  "'GUESS 1981' body spray keeps '1981' as a core-name token (the real Guess-1981-vs-Dare-Homme false-match case)",
+  extractAttributes("GUESS 1981(M)6.0oz Body Spray(LI FREE)", "Guess").coreNameTokens.includes("1981"),
   true
 );
 check(
-  "negative: a stray quantity-shaped number elsewhere in the row is still stripped, e.g. '12pcs' itself is untouched but a loose count is not treated as an edition number",
+  "a bare name-number with NO 'No.' marker at all is now also preserved (e.g. Carolina Herrera '212')",
+  JSON.stringify(extractAttributes("212 3.4 EDT M", "").coreNameTokens) ===
+    JSON.stringify(extractAttributes("212 VIP BLACK 3.4 EDP M", "").coreNameTokens),
+  false
+);
+check(
+  "positive/negative pair still distinguishable: two DIFFERENT bare numbers with no other distinguishing text produce DIFFERENT signatures",
+  JSON.stringify(extractAttributes("SOME BRAND FRAGRANCE 500 EDP U", "SOME BRAND").coreNameTokens) ===
+    JSON.stringify(extractAttributes("SOME BRAND FRAGRANCE 999 EDP U", "SOME BRAND").coreNameTokens),
+  false
+);
+check(
+  "negative: a SKU/lot code inside parens is still excluded (not treated as a name number)",
+  extractAttributes("RALPH CLUB NEW YORK 3.7 EDP M (131832) - France - 20pcs ByBox", "").coreNameTokens.includes("131832"),
+  false
+);
+check(
+  "negative: a glued quantity token ('20pcs') is still excluded",
+  extractAttributes("RALPH CLUB NEW YORK 3.7 EDP M (131832) - France - 20pcs ByBox", "").coreNameTokens.includes("20pcs"),
+  false
+);
+check(
+  "negative: a loose count immediately before 'pieces' (spelled out) is still excluded",
   extractAttributes("SOME BRAND FRAGRANCE 100ML EDP 12 PIECES", "SOME BRAND").coreNameTokens.includes("12"),
+  false
+);
+
+// --- Supplier logistics/packaging noise stripped from canonical
+// identity (country of origin, carton quantity, "ByBox") -- confirmed
+// directly against Miami Trading Zone's own row convention: the SAME
+// physical fragrance re-listed from a different shipment must resolve
+// to the SAME Master Product, not a new one just because the country
+// or carton count differs between uploads. ---
+check(
+  "the same fragrance from two different countries/quantities produces the SAME core-name tokens",
+  JSON.stringify(extractAttributes("ARMAF OROS DONNA 3.4 EDP L (123466) - United Arab Emir. - 1pcs ByBox", "").coreNameTokens) ===
+    JSON.stringify(extractAttributes("ARMAF OROS DONNA 3.4 EDP L (999999) - USA - 48pcs ByBox", "").coreNameTokens),
+  true
+);
+check(
+  "'bybox' itself never appears as a core-name token",
+  extractAttributes("RALPH CLUB NEW YORK 3.7 EDP M (131832) - France - 20pcs ByBox", "").coreNameTokens.includes("bybox"),
+  false
+);
+check(
+  "the country name itself never appears as a core-name token",
+  extractAttributes("ARMAF OROS DONNA 3.4 EDP L (123466) - United Arab Emir. - 1pcs ByBox", "").coreNameTokens.includes("emir."),
   false
 );
 

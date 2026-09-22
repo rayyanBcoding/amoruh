@@ -11,6 +11,8 @@ import { getCommittedOffers, getAllReferenceProducts } from "../src/lib/pricing-
 import { getProducts } from "../src/lib/db";
 import {
   extractAttributes,
+  extractProductAttributes,
+  extractReferenceProductAttributes,
   checkAutoCreateEligibility,
   isUnsupportedMerchandise,
   isValidProductRow,
@@ -59,7 +61,25 @@ async function main() {
     upc: string; ean: string; price: number; quantity: number | null; signature: string; reason: string;
     closestExisting: string; whyNotMatch: string; duplicateCheck: string; flags: string[]; offerKey: string;
   };
-  type LinkRow = { supplier: string; description: string; price: number; quantity: number | null; targetId: string; targetLabel: string; matchType: string; matchConfidence: number | null; withinBatch: boolean };
+  type LinkRow = {
+    supplier: string; description: string; price: number; quantity: number | null; targetId: string; targetLabel: string;
+    matchType: string; matchConfidence: number | null; withinBatch: boolean; compatibilityCheck: string;
+  };
+
+  // Defense-in-depth: independently re-verify every proposed link's
+  // identity compatibility, rather than trusting matchSupplierRow's own
+  // outcome alone (the whole point of the audit item that found the
+  // Guess 1981 / Dare Homme false match — a good matcher can still be
+  // fed an impoverished row, upstream of any single fix). Flags any
+  // link where the TARGET carries meaningful distinguishing words the
+  // ROW's own text doesn't have at all.
+  function checkLinkCompatibility(rowAttrs: StructuredAttributes, targetAttrs: StructuredAttributes): string {
+    const rowWords = new Set(rowAttrs.coreNameTokens.filter((t) => t.length > 1));
+    const targetWords = targetAttrs.coreNameTokens.filter((t) => t.length > 1);
+    const targetOnly = targetWords.filter((t) => !rowWords.has(t));
+    if (targetOnly.length === 0) return "compatible — target has no distinguishing word the row lacks";
+    return `VERIFY — target has extra distinguishing word(s) not present in the row's own text: ${targetOnly.join(", ")}`;
+  }
   type AmbiguousRow = { supplier: string; description: string; reason: string };
 
   const creationRows: CreationRow[] = [];
@@ -93,10 +113,22 @@ async function main() {
         const withinBatch = targetId.startsWith("dryrun_");
         const targetRef = pool.find((rp) => rp.id === targetId);
         const targetProduct = products.find((p) => p.id === targetId);
+        const rowEffectiveBrand = resolveEffectiveBrand(row, products, runningPool);
+        const rowAttrsForCompat = extractAttributes(`${o.brand} ${o.description}`, rowEffectiveBrand);
+        const targetAttrsForCompat = targetProduct
+          ? extractProductAttributes(targetProduct)
+          : targetRef
+            ? extractReferenceProductAttributes(targetRef)
+            : null;
+        const compatibilityCheck = withinBatch
+          ? "n/a — within-batch dedup, not an existing-catalog link"
+          : targetAttrsForCompat
+            ? checkLinkCompatibility(rowAttrsForCompat, targetAttrsForCompat)
+            : "target not found — verify manually";
         const linkRow: LinkRow = {
           supplier: s.name, description: o.description, price: o.price, quantity: o.quantity,
           targetId, targetLabel: targetRef ? `${targetRef.brand} ${targetRef.name}` : targetProduct ? `${targetProduct.brand} ${targetProduct.name}` : "(this batch's own proposed creation — see New Master Products sheet)",
-          matchType: freshMatch.matchType, matchConfidence: freshMatch.matchConfidence, withinBatch,
+          matchType: freshMatch.matchType, matchConfidence: freshMatch.matchConfidence, withinBatch, compatibilityCheck,
         };
         (withinBatch ? withinBatchDedupRows : linkRows).push(linkRow);
         continue;
@@ -138,6 +170,12 @@ async function main() {
       }
       if (o.description.trim().length < 8) flags.push("SUSPICIOUS SHORT DESCRIPTION");
       if (!plausibleUpc && !plausibleEan) flags.push("NO BARCODE (eligible via structural completeness only)");
+      // Sanity check for the logistics-stripping fix (country/qty/ByBox)
+      // — should find nothing; a residual match here means the fix has
+      // a gap for this row's specific wording.
+      if (attrs.coreNameTokens.some((t) => t === "bybox" || /^\d+pcs?$/.test(t))) {
+        flags.push("RESIDUAL LOGISTICS TERM IN IDENTITY — verify manually");
+      }
       // Numbered-edition sanity check — precise version. The first cut of
       // this check matched ANY "no"/"number" in the text, which false-
       // positived heavily on ordinary supplier annotations ("TST NO CAP",
@@ -294,6 +332,12 @@ async function main() {
   console.log("\n=== Within-batch dedup links ===");
   console.log(`${withinBatchDedupRows.length} total — each already passed the same hard-gate + text-score check as a normal auto-match (not a separate, looser rule); see the "Within-Batch Dedup" sheet for the full list to review.`);
 
+  const incompatibleLinks = linkRows.filter((r) => r.compatibilityCheck.startsWith("VERIFY"));
+  console.log("\n=== Existing-catalog link compatibility audit (independent of matchSupplierRow's own outcome) ===");
+  console.log(`${linkRows.length} genuine existing-catalog links checked.`);
+  console.log(`INCOMPATIBLE (target has a distinguishing word not in the row's own text — verify before trusting): ${incompatibleLinks.length}`);
+  incompatibleLinks.forEach((r) => console.log(`  - "${r.description}" -> "${r.targetLabel}" | ${r.compatibilityCheck}`));
+
   // --- Three-tier classification ---
   type Tier = "SAFE TO CREATE" | "NEEDS CORRECTION" | "TRULY AMBIGUOUS";
   function classify(r: CreationRow): { tier: Tier; correction: string } {
@@ -308,6 +352,9 @@ async function main() {
     }
     if (r.flags.some((f) => f.startsWith("POSSIBLE NAME-EMBEDDED NUMBER"))) {
       return { tier: "TRULY AMBIGUOUS", correction: "A bare number appears to be part of this product's own name (no size/quantity/edition marker nearby) but was dropped from the parsed identity — verify manually before creating." };
+    }
+    if (r.flags.some((f) => f.startsWith("RESIDUAL LOGISTICS TERM"))) {
+      return { tier: "TRULY AMBIGUOUS", correction: "A supplier logistics term (country/quantity/ByBox) survived into the parsed identity despite the stripping fix — verify manually; likely an unanticipated wording variant." };
     }
     if (r.flags.some((f) => f === "MISSING/UNDEFINED BRAND")) {
       return { tier: "NEEDS CORRECTION", correction: `Assign brand — the row's own text clearly names a brand ("${r.description.split(/[\[\(]/)[0].trim()}") not yet in the catalog; a real UPC anchors the identity in the meantime.` };
@@ -371,7 +418,7 @@ async function main() {
   const linkSheetData = linkRows.map((r, i) => ({
     "#": i + 2, Supplier: r.supplier, "Original Description": r.description, "Supplier Price": r.price,
     "Supplier Qty": r.quantity ?? "", "Links To (ID)": r.targetId, "Links To (Name)": r.targetLabel,
-    "Match Type": r.matchType, "Match Confidence": r.matchConfidence ?? "",
+    "Match Type": r.matchType, "Match Confidence": r.matchConfidence ?? "", "Compatibility Check": r.compatibilityCheck,
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(linkSheetData), "Existing Links (verified)");
 
@@ -401,6 +448,8 @@ async function main() {
     { Metric: "Pairwise real-matcher equivalence flags", Value: pairwiseFlagged },
     { Metric: "Repeated UPCs among proposals — compatible", Value: upcCompatible },
     { Metric: "Repeated UPCs among proposals — INCOMPATIBLE (flagged)", Value: upcIncompatible },
+    { Metric: "Rows with residual supplier-logistics terms in identity (should be 0)", Value: tiered.filter((t) => t.r.flags.some((f) => f.startsWith("RESIDUAL LOGISTICS TERM"))).length },
+    { Metric: "Existing-catalog links independently flagged as INCOMPATIBLE (target has extra distinguishing words)", Value: incompatibleLinks.length },
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summarySheetData), "Summary");
 

@@ -279,27 +279,62 @@ function normalizeForMatching(text: string): string {
     .replace(/\bextrait\s*de\s*parfum\b|\bpure\s*parfum\b/gi, "extrait");
 }
 
-// A bare integer immediately after one of these is a numbered EDITION
-// identifier, not noise — see contentTokens below.
-const EDITION_NUMBER_MARKERS = new Set(["no", "no.", "number", "num", "num."]);
+// Supplier logistics/packaging noise that must NEVER factor into a
+// product's canonical identity — confirmed directly against Miami
+// Trading Zone's own row convention ("...(SKU) - COUNTRY - QTYpcs
+// ByBox"): the SAME physical fragrance re-listed from a different
+// shipment (different country of origin, different carton quantity)
+// would otherwise get a DIFFERENT identity signature, risking a
+// duplicate Master Product for one real item, or — going the other
+// direction — a genuinely different item coincidentally sharing all
+// this trailing boilerplate matching too easily. Strips only the
+// trailing "- COUNTRY - QTYpcs ByBox" shape (free-text country name,
+// not a hardcoded list) plus the literal word "bybox" and any glued
+// "Npcs"/"Npc" quantity token wherever they appear, as a second,
+// redundant safety net. Applied ONLY to the text used for identity
+// computation — never touches the stored description/name, which stays
+// the original supplier wording verbatim.
+const LOGISTICS_SUFFIX_PATTERN = /\s*-\s*[a-z][a-z .]*?-\s*\d+\s*pcs?\s*bybox\s*$/i;
+
+function stripSupplierLogistics(text: string): string {
+  return text.replace(LOGISTICS_SUFFIX_PATTERN, " ").replace(/\bbybox\b/gi, " ");
+}
 
 function contentTokens(fullText: string): string[] {
-  const rawTokens = tokenize(normalizeForMatching(fullText));
+  const logisticsStripped = stripSupplierLogistics(fullText);
+  const rawTokens = tokenize(normalizeForMatching(logisticsStripped));
+  // A bare digit that appeared inside parentheses/brackets in the
+  // ORIGINAL text is a SKU/lot code, never part of the product's own
+  // name — tracked by value (not position) so only bare-digit
+  // filtering is affected; any non-digit word inside brackets (e.g. a
+  // genuine color/variant marker) is left completely untouched.
+  const bracketedText = logisticsStripped.match(/\([^)]*\)|\[[^\]]*\]/g)?.join(" ") ?? "";
+  const bracketedDigits = new Set(tokenize(bracketedText).filter((t) => /^\d+$/.test(t)));
+
   const kept: string[] = [];
   for (let i = 0; i < rawTokens.length; i++) {
     const t = rawTokens[i];
     if (STOPWORDS.has(t) || SIZE_TOKEN_PATTERN.test(t) || UNIT_WORDS.has(t)) continue;
+    if (/^\d+pcs?$/.test(t)) continue; // glued quantity, e.g. "20pcs" — always noise
     if (/^\d+$/.test(t)) {
-      // A bare integer is usually noise (a stray SKU/quantity number in
-      // the free text) and gets dropped — EXCEPT immediately after a
-      // numbered-edition marker ("No. 1", "No 8"), where the number IS
-      // the product's own distinguishing identity. Confirmed directly
-      // against production data: "Off White Solution No. 1" through
-      // "No. 4" (four genuinely different UPCs) and "Taif Al Emarat
-      // Romance No 1" through "No 8" were producing IDENTICAL core-name
-      // tokens and thus identical identity signatures before this fix —
-      // a real, severe false-merge bug this filter was silently causing.
-      if (i > 0 && EDITION_NUMBER_MARKERS.has(rawTokens[i - 1])) kept.push(t);
+      // A bare integer is preserved by default — it is usually the
+      // product's own distinguishing name/edition number ("1981",
+      // "212", "Toy 2", "No. 4") — EXCEPT when it's a SKU/lot code seen
+      // inside parens/brackets, or immediately followed by a quantity/
+      // size unit, both of which are genuine noise, never identity.
+      //
+      // Confirmed as a real, severe bug in BOTH directions before this
+      // fix: "Off White Solution No. 1" through "No. 4" (four different
+      // UPCs) collapsed into one identical signature (false MERGE on
+      // creation), and "GUESS 1981(M)6.0oz Body Spray" — with "1981"
+      // stripped, leaving no distinguishing content at all — scored
+      // 0.98 against the unrelated "GUESS DARE HOMME(M)6.0oz Body
+      // Spray" and would have LINKED two different real fragrances'
+      // prices together (false MATCH against an existing product).
+      if (bracketedDigits.has(t)) continue;
+      const next = rawTokens[i + 1];
+      if (next === "pcs" || next === "pc" || next === "piece" || next === "pieces" || next === "ml" || next === "oz" || next === "fl") continue;
+      kept.push(t);
       continue;
     }
     kept.push(t);
