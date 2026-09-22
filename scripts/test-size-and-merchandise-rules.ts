@@ -82,5 +82,71 @@ check(
   true
 );
 
+// --- Numbered-edition core-name preservation (e.g. "Off White Solution
+// No. 1"..."No. 4") -- confirmed directly against production data as a
+// real bug: contentTokens' blanket "strip bare digits" rule was
+// silently dropping the ONLY thing distinguishing four different real
+// UPCs, collapsing them into one identical identity signature. ---
+check(
+  "'No. 1' vs 'No. 4' produce DIFFERENT core-name tokens (positive: distinguishing edition number preserved)",
+  JSON.stringify(extractAttributes("OFF WHITE SOLUTION No. 1 3.4 EDP U", "OFF WHITE").coreNameTokens) ===
+    JSON.stringify(extractAttributes("OFF WHITE SOLUTION No. 4 3.4 EDP U", "OFF WHITE").coreNameTokens),
+  false
+);
+check(
+  "'No 1' vs 'No 8' (no period) also produce DIFFERENT core-name tokens",
+  JSON.stringify(extractAttributes("TAIF AL EMARAT ROMANCE No 1 2.5 EDP U", "TAIF AL EMARAT").coreNameTokens) ===
+    JSON.stringify(extractAttributes("TAIF AL EMARAT ROMANCE No 8 2.5 EDP U", "TAIF AL EMARAT").coreNameTokens),
+  false
+);
+check(
+  "the edition number itself is actually present as a token (not just 'different somehow')",
+  extractAttributes("OFF WHITE SOLUTION No. 1 3.4 EDP U", "OFF WHITE").coreNameTokens.includes("1"),
+  true
+);
+check(
+  "negative: a bare number NOT preceded by No./No/Number is still stripped as noise (unchanged prior behavior)",
+  JSON.stringify(extractAttributes("SOME BRAND FRAGRANCE 500 EDP U", "SOME BRAND").coreNameTokens) ===
+    JSON.stringify(extractAttributes("SOME BRAND FRAGRANCE 999 EDP U", "SOME BRAND").coreNameTokens),
+  true
+);
+check(
+  "negative: a stray quantity-shaped number elsewhere in the row is still stripped, e.g. '12pcs' itself is untouched but a loose count is not treated as an edition number",
+  extractAttributes("SOME BRAND FRAGRANCE 100ML EDP 12 PIECES", "SOME BRAND").coreNameTokens.includes("12"),
+  false
+);
+
+// --- Bare "SET" gift-set detection (no "gift"/"of" qualifier) --
+// confirmed directly against production data as a real bug: every
+// Dolce & Gabbana Devotion bundle row was parsing as isGiftSet=false,
+// meaning the hard gate meant to stop a bundle being treated as (or
+// matched against) its primary component's standalone bottle wasn't
+// firing at all for this common wording. ---
+check(
+  "bare 'SET' + multiple '+'-joined components -> isGiftSet true",
+  extractAttributes("DOLCE & GABBANA DEVOTION (W) SET EDP 100ML + SG 50ML + BL 50ML", "DOLCE & GABBANA").isGiftSet,
+  true
+);
+check(
+  "'PCS SET' (plural) + '+'-joined components -> isGiftSet true",
+  extractAttributes("D&G DEVOTION POUR HOMME 3 PCS SET 3.3 Oz EAU DE PARFUM SPR+1.6 Oz S.GEL+2.6 Oz DEO STICK", "D&G").isGiftSet,
+  true
+);
+check(
+  "negative: a standalone bottle with no '+' and no set-shaped word stays isGiftSet false",
+  extractAttributes("DOLCE & GABBANA DEVOTION (W) EDP 100ML", "DOLCE & GABBANA").isGiftSet,
+  false
+);
+check(
+  "negative: a standalone bottle whose description happens to contain '+' for an unrelated reason, but no 'set' word, stays isGiftSet false",
+  extractAttributes("SOME BRAND FRAGRANCE 100ML EDP (A+ GRADE)", "SOME BRAND").isGiftSet,
+  false
+);
+check(
+  "existing 'gift set' phrasing still recognized (unchanged prior behavior)",
+  extractAttributes("CHANEL COCO GIFT SET EDP 100ML", "CHANEL").isGiftSet,
+  true
+);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

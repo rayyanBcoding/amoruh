@@ -66,7 +66,27 @@ const CONCENTRATION_PATTERNS: [RegExp, string][] = [
 ];
 
 const TESTER_PATTERN = /\btester\b|\btstr\b|\bw\/?o\s*box\b|\bwithout\s*box\b/;
-const GIFT_SET_PATTERN = /\bgift\s*set\b|\bset\s*of\b|\bcoffret\b|\b\d\s*pc\s*set\b|\bkit\b/;
+const GIFT_SET_PATTERN = /\bgift\s*set\b|\bset\s*of\b|\bcoffret\b|\b\d\s*pcs?\s*set\b|\bkit\b/;
+
+/** GIFT_SET_PATTERN alone misses a common real supplier shape: a bare
+ *  "SET" with no "gift"/"of" qualifier, describing a genuine multi-
+ *  component bundle (main bottle + travel spray, or + shower gel/body
+ *  lotion). Confirmed directly against production data as a real,
+ *  severe gap: "DOLCE & GABBANA DEVOTION (W) SET EDP 100ML + SG 50ML +
+ *  BL 50ML" and "D&G DEVOTION POUR HOMME 3 PCS SET 3.3 Oz...SPR+1.6
+ *  Oz S.GEL+2.6 Oz DEO STICK" were BOTH parsing as isGiftSet=false —
+ *  meaning the hard gate that exists specifically to stop a bundle
+ *  being treated as, or matched against, its primary component's
+ *  standalone bottle was silently not firing for this wording. A bare
+ *  "set" is only trusted alongside a "+" elsewhere in the text (every
+ *  real case surveyed lists 2+ components joined by "+"), so a
+ *  fragrance whose own name coincidentally contains "set" with no
+ *  actual bundle content is never misclassified. */
+function isGiftSetText(fullText: string): boolean {
+  const n = normalize(fullText);
+  if (GIFT_SET_PATTERN.test(n)) return true;
+  return /\bset\b/.test(n) && n.includes("+");
+}
 // "refill"/"recharge" only — deliberately NOT matching "refillable" (a
 // normal bottle sold as refillable is still a standalone bottle sale,
 // not the standalone-refill-pack SKU this exists to distinguish). Word
@@ -259,14 +279,32 @@ function normalizeForMatching(text: string): string {
     .replace(/\bextrait\s*de\s*parfum\b|\bpure\s*parfum\b/gi, "extrait");
 }
 
+// A bare integer immediately after one of these is a numbered EDITION
+// identifier, not noise — see contentTokens below.
+const EDITION_NUMBER_MARKERS = new Set(["no", "no.", "number", "num", "num."]);
+
 function contentTokens(fullText: string): string[] {
-  return [
-    ...new Set(
-      tokenize(normalizeForMatching(fullText)).filter(
-        (t) => !STOPWORDS.has(t) && !SIZE_TOKEN_PATTERN.test(t) && !UNIT_WORDS.has(t) && !/^\d+$/.test(t)
-      )
-    ),
-  ].sort();
+  const rawTokens = tokenize(normalizeForMatching(fullText));
+  const kept: string[] = [];
+  for (let i = 0; i < rawTokens.length; i++) {
+    const t = rawTokens[i];
+    if (STOPWORDS.has(t) || SIZE_TOKEN_PATTERN.test(t) || UNIT_WORDS.has(t)) continue;
+    if (/^\d+$/.test(t)) {
+      // A bare integer is usually noise (a stray SKU/quantity number in
+      // the free text) and gets dropped — EXCEPT immediately after a
+      // numbered-edition marker ("No. 1", "No 8"), where the number IS
+      // the product's own distinguishing identity. Confirmed directly
+      // against production data: "Off White Solution No. 1" through
+      // "No. 4" (four genuinely different UPCs) and "Taif Al Emarat
+      // Romance No 1" through "No 8" were producing IDENTICAL core-name
+      // tokens and thus identical identity signatures before this fix —
+      // a real, severe false-merge bug this filter was silently causing.
+      if (i > 0 && EDITION_NUMBER_MARKERS.has(rawTokens[i - 1])) kept.push(t);
+      continue;
+    }
+    kept.push(t);
+  }
+  return [...new Set(kept)].sort();
 }
 
 /** Extracts structured attributes from a combined brand+name/description
@@ -283,7 +321,7 @@ export function extractAttributes(fullText: string, brand: string): StructuredAt
   const sizeMl = parseSizeMl(fullText);
   const concentration = parseConcentration(fullText);
   const isTester = TESTER_PATTERN.test(normalize(fullText));
-  const isGiftSet = GIFT_SET_PATTERN.test(normalize(fullText));
+  const isGiftSet = isGiftSetText(fullText);
   const isRefill = REFILL_PATTERN.test(normalize(fullText));
   const productForm = classifyProductForm(fullText);
 
