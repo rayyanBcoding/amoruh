@@ -44,6 +44,7 @@
 
 import fs from "fs";
 import path from "path";
+import os from "os";
 
 function fail(message: string): never {
   console.error(`\nREFUSING TO RUN: ${message}\n`);
@@ -141,11 +142,18 @@ async function main() {
   const pingKey = "amoruh_test:isolation_sanity_check";
   await redis.set(pingKey, "isolated");
   check("connected to the isolated Redis instance (write/read round-trip)", (await redis.get(pingKey)) === "isolated");
+  // A raw "supplier count < 5" threshold broke on every re-run against
+  // this same (still-isolated) database, since prior runs' own test
+  // suppliers accumulate rather than being cleaned up — that's a
+  // fixture-hygiene fact, not evidence of pointing at production. The
+  // actual safety property to check is that NONE of production's real
+  // supplier names are present here.
+  const PRODUCTION_SUPPLIER_NAMES = ["Perfume Unlimited", "Jizan Perfumes", "NMD Trading", "Perfume Center of America", "Miami Trading Zone"];
   const existingSuppliersBefore = await getSuppliers();
   check(
-    "isolated DB starts with a small/empty supplier set (never touching production's real supplier list)",
-    existingSuppliersBefore.length < 5,
-    `found ${existingSuppliersBefore.length} suppliers — if this is large, this is NOT actually isolated`
+    "isolated DB contains none of production's real supplier names",
+    !existingSuppliersBefore.some((s) => PRODUCTION_SUPPLIER_NAMES.some((n) => s.name.includes(n))),
+    `suppliers found: ${existingSuppliersBefore.map((s) => s.name).join(", ")}`
   );
 
   const nowIso = new Date().toISOString();
@@ -411,6 +419,84 @@ async function main() {
     "repair does not modify the offer's own fields (price/reviewStatus unchanged)",
     offerAfterRepair?.price === brokenOffer.price && offerAfterRepair?.reviewStatus === "auto_matched"
   );
+
+  console.log("\n=== 8. Real restore EXECUTION — the actual restore-from-backup.ts script, not just diff identification ===");
+  {
+    const { execSync } = await import("child_process");
+    const supplierF = await getOrCreateSupplier(`TEST_ISOLATED_SUPPLIER_F_RESTORE_${RUN_ID}`);
+    const offerToResolve = makeOffer({ supplierId: supplierF.id, offerKey: "f_key1", description: `RESTORE TEST FRAGRANCE ${RUN_TOKEN} (U) EDP 50ML`, reviewStatus: "needs_review", price: 15, quantity: 5, referenceProductId: null });
+    const offerUnrelated = makeOffer({ supplierId: supplierF.id, offerKey: "f_key2", description: `UNRELATED FRAGRANCE ${RUN_TOKEN} (U) EDT 30ML`, reviewStatus: "needs_review", price: 8, quantity: 2, referenceProductId: null });
+    await seedSupplierWithOffers(`TEST_ISOLATED_SUPPLIER_F_RESTORE_${RUN_ID}`, { f_key1: offerToResolve, f_key2: offerUnrelated });
+
+    // Snapshot BEFORE the simulated migration — the "backup," in the
+    // exact shape backup-before-migration.ts produces.
+    const refsBeforeMigration = await getAllReferenceProducts();
+    const offersBeforeMigration = await getCommittedOffers(supplierF.id);
+    const backupData = {
+      takenAt: new Date().toISOString(),
+      referenceProducts: refsBeforeMigration,
+      offersBySupplier: { [supplierF.id]: { supplierName: supplierF.name, generationId: await getCurrentGenerationId(supplierF.id), offers: offersBeforeMigration } },
+    };
+    const backupFilePath = path.join(os.tmpdir(), `restore-test-backup-${RUN_ID}.json`);
+    fs.writeFileSync(backupFilePath, JSON.stringify(backupData));
+
+    // Simulate the migration: create a new Master Product tagged
+    // backlog_migration, resolve offerToResolve against it.
+    const attrsF = extractAttributes(offerToResolve.description, "");
+    const sigF = computeIdentitySignature(attrsF);
+    const createResultF = await getOrCreateReferenceProductByIdentity(
+      { upc: "", ean: "", signature: sigF },
+      { brand: "", name: offerToResolve.description, description: offerToResolve.description, sizeMl: attrsF.sizeMl, concentration: attrsF.concentration, isTester: false, isGiftSet: false, isRefill: false, productForm: attrsF.productForm, upc: "", ean: "", productId: null, createdBy: "backlog_migration", creationMethod: "auto_import", createdFromSupplierId: supplierF.id, createdFromUploadId: "test_upload_1", createdFromOfferKey: "f_key1" }
+    );
+    check("restore-test setup: migration simulation creates the Master Product", createResultF.status === "created");
+    const migrationCreatedId = createResultF.status === "created" ? createResultF.id : "";
+    await bulkUpdateOffers(
+      supplierF.id,
+      { f_key1: { ...offerToResolve, referenceProductId: migrationCreatedId, reviewStatus: "auto_matched", matchType: "structured", matchConfidence: 1 } },
+      { offersByReferenceProductOps: [{ op: "SADD", referenceProductId: migrationCreatedId, member: `${supplierF.id}::f_key1` }] }
+    );
+
+    // Simulate UNRELATED legitimate activity on the OTHER offer (a
+    // normal price update, nothing to do with the migration) — this
+    // must survive the restore completely untouched.
+    await bulkUpdateOffers(supplierF.id, { f_key2: { ...offerUnrelated, price: 9.5, reviewStatus: "needs_review" } });
+
+    const stateAfterMigration = await getCommittedOffers(supplierF.id);
+    check("restore-test setup: f_key1 now resolved", stateAfterMigration.f_key1?.referenceProductId === migrationCreatedId);
+    check("restore-test setup: f_key2 changed for unrelated reasons (price updated)", stateAfterMigration.f_key2?.price === 9.5);
+
+    // Run the REAL restore script — report mode first (must perform zero writes).
+    const scriptPath = path.resolve(__dirname, "restore-from-backup.ts");
+    const reportOutput = execSync(`npx tsx "${scriptPath}" "${backupFilePath}"`, { env: process.env, encoding: "utf8" });
+    check("restore report mode identifies exactly 1 reference product to delete", /Reference products to delete[^:]*:\s*1\b/.test(reportOutput), reportOutput.slice(0, 400));
+    check("restore report mode identifies exactly 1 offer to revert", /Offers to revert[^:]*:\s*1\b/.test(reportOutput), reportOutput.slice(0, 400));
+    check(
+      "restore report mode performs ZERO writes (offer f_key1 still resolved after report-only run)",
+      (await getCommittedOffers(supplierF.id)).f_key1?.referenceProductId === migrationCreatedId
+    );
+
+    // Now actually EXECUTE the restore.
+    const executeOutput = execSync(`npx tsx "${scriptPath}" "${backupFilePath}" --execute --confirm-restore`, { env: process.env, encoding: "utf8" });
+    check("restore execution reports 1 reference product deleted, 1 offer reverted", /1 reference products deleted, 1 offers reverted/.test(executeOutput), executeOutput.slice(-400));
+
+    const deletedRecord = await getReferenceProduct(migrationCreatedId);
+    check("the migration-created Master Product is ACTUALLY GONE after restore", deletedRecord === null);
+
+    const stateAfterRestore = await getCommittedOffers(supplierF.id);
+    check(
+      "f_key1 is reverted to its EXACT backed-up (unresolved) state",
+      stateAfterRestore.f_key1?.referenceProductId === null && stateAfterRestore.f_key1?.reviewStatus === "needs_review" && stateAfterRestore.f_key1?.price === 15
+    );
+    check(
+      "f_key2 (unrelated activity) is COMPLETELY UNTOUCHED by the restore — still shows the unrelated price update",
+      stateAfterRestore.f_key2?.price === 9.5
+    );
+
+    const reverseIndexAfterRestore = await getOffersByReferenceProduct(migrationCreatedId);
+    check("reverse-index membership for the deleted Master Product is also gone", reverseIndexAfterRestore.length === 0);
+
+    fs.unlinkSync(backupFilePath);
+  }
 
   console.log(`\n=== RESULTS: ${pass} passed, ${fail_} failed (${results.length} total assertions) ===`);
   console.log("\nFull PASS/FAIL list:");

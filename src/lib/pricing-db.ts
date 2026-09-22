@@ -466,6 +466,49 @@ export async function getReferenceProductByEan(ean: string): Promise<PricingRefe
   return id ? getReferenceProduct(id) : null;
 }
 
+/** Deletes exactly one Master/Reference Product and its UPC/EAN/
+ *  signature pointer keys + index membership — the write-side
+ *  counterpart to recovery-diff.ts's read-only identification, for
+ *  targeted, selective restore (e.g. undoing a specific migration run's
+ *  own creations). Never called from any live request path.
+ *
+ *  Safety: before touching a pointer key, re-reads it and confirms it
+ *  STILL points at this exact id. A pointer that's since been repointed
+ *  to a different (legitimately newer) record is left completely
+ *  untouched — this is what stops a restore from ever damaging
+ *  unrelated activity that happened after the record being removed was
+ *  created. Returns which parts were actually deleted vs. skipped, so
+ *  the caller can report precisely what happened rather than assume. */
+export async function deleteReferenceProductAndPointers(
+  id: string,
+  signature: string
+): Promise<{ deletedRecord: boolean; deletedUpcPointer: boolean; deletedEanPointer: boolean; deletedSignaturePointer: boolean; deletedFromIndex: boolean }> {
+  const record = await getReferenceProduct(id);
+  if (!record) {
+    return { deletedRecord: false, deletedUpcPointer: false, deletedEanPointer: false, deletedSignaturePointer: false, deletedFromIndex: false };
+  }
+
+  const [upcOwner, eanOwner, sigOwner] = await Promise.all([
+    record.upc ? redis.get<string>(KEYS.referenceProductByUpc(record.upc)) : Promise.resolve(null),
+    record.ean ? redis.get<string>(KEYS.referenceProductByEan(record.ean)) : Promise.resolve(null),
+    redis.get<string>(KEYS.referenceProductBySignature(signature)),
+  ]);
+
+  const ops: Promise<unknown>[] = [redis.del(KEYS.referenceProduct(id)), redis.zrem(KEYS.referenceProductsIndex, id)];
+  if (record.upc && upcOwner === id) ops.push(redis.del(KEYS.referenceProductByUpc(record.upc)));
+  if (record.ean && eanOwner === id) ops.push(redis.del(KEYS.referenceProductByEan(record.ean)));
+  if (sigOwner === id) ops.push(redis.del(KEYS.referenceProductBySignature(signature)));
+  await Promise.all(ops);
+
+  return {
+    deletedRecord: true,
+    deletedUpcPointer: Boolean(record.upc) && upcOwner === id,
+    deletedEanPointer: Boolean(record.ean) && eanOwner === id,
+    deletedSignaturePointer: sigOwner === id,
+    deletedFromIndex: true,
+  };
+}
+
 export async function createReferenceProduct(
   input: Omit<PricingReferenceProduct, "id" | "createdAt">
 ): Promise<PricingReferenceProduct> {
