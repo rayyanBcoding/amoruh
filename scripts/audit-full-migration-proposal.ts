@@ -225,13 +225,22 @@ async function main() {
       // Fixed by stripping parenthesized/bracketed content (where every
       // real SKU/count code in this dataset actually lives) before
       // looking for a candidate at all.
+      //
+      // Second cut still false-positived on "4711" (4711 Floral
+      // Collection) and "21" (Forever 21) -- both CORRECTLY recognized
+      // as the row's own BRAND (resolveEffectiveBrand), and therefore
+      // correctly absent from coreNameTokens (which excludes brand
+      // words by design) while still fully preserved in brandToken.
+      // "Not in coreNameTokens" alone doesn't mean "dropped" -- fixed to
+      // also check brandToken before concluding a number was lost.
       {
         const withoutBracketedContent = o.description.replace(/\([^)]*\)|\[[^\]]*\]/g, " ");
         const rawTokens = tokenize(withoutBracketedContent.toLowerCase());
+        const brandTokens = attrs.brandToken.split(/\s+/);
         for (let i = 0; i < rawTokens.length; i++) {
           const t = rawTokens[i];
           if (!/^\d+$/.test(t)) continue;
-          if (attrs.coreNameTokens.includes(t)) continue; // already preserved
+          if (attrs.coreNameTokens.includes(t) || brandTokens.includes(t)) continue; // already preserved, in either field
           const prev = rawTokens[i - 1];
           const next = rawTokens[i + 1];
           if (prev === "no" || prev === "no.") continue; // covered by the flag above
