@@ -73,12 +73,31 @@ async function main() {
   // fed an impoverished row, upstream of any single fix). Flags any
   // link where the TARGET carries meaningful distinguishing words the
   // ROW's own text doesn't have at all.
-  function checkLinkCompatibility(rowAttrs: StructuredAttributes, targetAttrs: StructuredAttributes): string {
-    const rowWords = new Set(rowAttrs.coreNameTokens.filter((t) => t.length > 1));
-    const targetWords = targetAttrs.coreNameTokens.filter((t) => t.length > 1);
-    const targetOnly = targetWords.filter((t) => !rowWords.has(t));
-    if (targetOnly.length === 0) return "compatible — target has no distinguishing word the row lacks";
-    return `VERIFY — target has extra distinguishing word(s) not present in the row's own text: ${targetOnly.join(", ")}`;
+  // First cut of this check flagged EVERY link (7/7) on trivial
+  // wording differences ("sp" vs "spray", a brand-field data-quality
+  // quirk on one specific record) that were never the actual risk —
+  // rebuilt to surface the REAL signal instead: the exact precondition
+  // that caused the confirmed Guess-1981/Dare-Homme false match was the
+  // ROW's own core name (after stripping its brand) being so sparse
+  // that almost any same-brand/size candidate would score high via
+  // subset containment. Hard gates (brand/size/concentration/form/
+  // tester/giftset/refill) are already enforced by matchSupplierRow
+  // before a row ever reaches "auto_matched" at all — re-deriving them
+  // here would just repeat, not add, verification. What's NOT re-
+  // checked anywhere else is "was there enough real text to trust the
+  // score in the first place," so that's what this reports.
+  const TRIVIAL_ABBREVIATIONS = new Set(["sp", "spr", "edp", "edt", "edc", "tst", "l", "m", "w", "u", "b", "c"]);
+  function checkLinkCompatibility(rowAttrs: StructuredAttributes, targetAttrs: StructuredAttributes, matchConfidence: number | null): string {
+    const meaningfulRowWords = rowAttrs.coreNameTokens.filter((t) => t.length > 2 && !TRIVIAL_ABBREVIATIONS.has(t));
+    const sparse = meaningfulRowWords.length <= 2;
+    const lowConfidence = matchConfidence !== null && matchConfidence < 0.95;
+    if (sparse) {
+      return `VERIFY — row's own text has very little distinguishing content after removing brand/boilerplate (only: ${meaningfulRowWords.join(", ") || "none"}) — the exact pattern that caused a real false match elsewhere in this catalog (Guess 1981 / Dare Homme); confirm this isn't the same risk.`;
+    }
+    if (lowConfidence) {
+      return `VERIFY — structural match confidence ${matchConfidence!.toFixed(2)} is below the stricter 0.95 review bar (still above the 0.85 auto-match threshold) — worth a second look.`;
+    }
+    return `compatible — row's own text (${meaningfulRowWords.join(", ")}) has substantive distinguishing content and confidence is high`;
   }
   type AmbiguousRow = { supplier: string; description: string; reason: string };
 
@@ -123,7 +142,7 @@ async function main() {
         const compatibilityCheck = withinBatch
           ? "n/a — within-batch dedup, not an existing-catalog link"
           : targetAttrsForCompat
-            ? checkLinkCompatibility(rowAttrsForCompat, targetAttrsForCompat)
+            ? checkLinkCompatibility(rowAttrsForCompat, targetAttrsForCompat, freshMatch.matchConfidence)
             : "target not found — verify manually";
         const linkRow: LinkRow = {
           supplier: s.name, description: o.description, price: o.price, quantity: o.quantity,
