@@ -130,7 +130,11 @@ async function main() {
       if (freshMatch.reviewStatus === "auto_matched" && (freshMatch.productId || freshMatch.referenceProductId)) {
         const targetId = freshMatch.productId ?? freshMatch.referenceProductId!;
         const withinBatch = targetId.startsWith("dryrun_");
-        const targetRef = pool.find((rp) => rp.id === targetId);
+        // A within-batch target is a placeholder only ever pushed to the
+        // GROWING runningPool, never the static original `pool` — look
+        // it up there so its identity is available for the same
+        // compatibility check genuine links get, not skipped.
+        const targetRef = withinBatch ? runningPool.find((rp) => rp.id === targetId) : pool.find((rp) => rp.id === targetId);
         const targetProduct = products.find((p) => p.id === targetId);
         const rowEffectiveBrand = resolveEffectiveBrand(row, products, runningPool);
         const rowAttrsForCompat = extractAttributes(`${o.brand} ${o.description}`, rowEffectiveBrand);
@@ -139,11 +143,9 @@ async function main() {
           : targetRef
             ? extractReferenceProductAttributes(targetRef)
             : null;
-        const compatibilityCheck = withinBatch
-          ? "n/a — within-batch dedup, not an existing-catalog link"
-          : targetAttrsForCompat
-            ? checkLinkCompatibility(rowAttrsForCompat, targetAttrsForCompat, freshMatch.matchConfidence)
-            : "target not found — verify manually";
+        const compatibilityCheck = targetAttrsForCompat
+          ? checkLinkCompatibility(rowAttrsForCompat, targetAttrsForCompat, freshMatch.matchConfidence)
+          : "target not found — verify manually";
         const linkRow: LinkRow = {
           supplier: s.name, description: o.description, price: o.price, quantity: o.quantity,
           targetId, targetLabel: targetRef ? `${targetRef.brand} ${targetRef.name}` : targetProduct ? `${targetProduct.brand} ${targetProduct.name}` : "(this batch's own proposed creation — see New Master Products sheet)",
@@ -366,6 +368,12 @@ async function main() {
   console.log(`INCOMPATIBLE (target has a distinguishing word not in the row's own text — verify before trusting): ${incompatibleLinks.length}`);
   incompatibleLinks.forEach((r) => console.log(`  - "${r.description}" -> "${r.targetLabel}" | ${r.compatibilityCheck}`));
 
+  const incompatibleWithinBatch = withinBatchDedupRows.filter((r) => r.compatibilityCheck.startsWith("VERIFY"));
+  console.log("\n=== Within-batch dedup compatibility audit (same check, applied to same-batch matches) ===");
+  console.log(`${withinBatchDedupRows.length} within-batch dedups checked.`);
+  console.log(`INCOMPATIBLE: ${incompatibleWithinBatch.length}`);
+  incompatibleWithinBatch.forEach((r) => console.log(`  - "${r.description}" -> "${r.targetLabel}" | ${r.compatibilityCheck}`));
+
   // --- Three-tier classification ---
   type Tier = "SAFE TO CREATE" | "NEEDS CORRECTION" | "TRULY AMBIGUOUS";
   function classify(r: CreationRow): { tier: Tier; correction: string } {
@@ -453,7 +461,7 @@ async function main() {
   const withinBatchData = withinBatchDedupRows.map((r, i) => ({
     "#": i + 2, Supplier: r.supplier, "Original Description": r.description, "Supplier Price": r.price,
     "Supplier Qty": r.quantity ?? "", "Dedups Against (this batch's own proposal)": r.targetLabel,
-    "Match Type": r.matchType, "Match Confidence": r.matchConfidence ?? "",
+    "Match Type": r.matchType, "Match Confidence": r.matchConfidence ?? "", "Compatibility Check": r.compatibilityCheck,
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(withinBatchData), "Within-Batch Dedup");
 
@@ -478,6 +486,7 @@ async function main() {
     { Metric: "Repeated UPCs among proposals — INCOMPATIBLE (flagged)", Value: upcIncompatible },
     { Metric: "Rows with residual supplier-logistics terms in identity (should be 0)", Value: tiered.filter((t) => t.r.flags.some((f) => f.startsWith("RESIDUAL LOGISTICS TERM"))).length },
     { Metric: "Existing-catalog links independently flagged as INCOMPATIBLE (target has extra distinguishing words)", Value: incompatibleLinks.length },
+    { Metric: "Within-batch dedups independently flagged as INCOMPATIBLE", Value: incompatibleWithinBatch.length },
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summarySheetData), "Summary");
 

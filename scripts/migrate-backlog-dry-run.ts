@@ -70,8 +70,19 @@ async function main() {
   let dedupedWithinBacklog = 0;
   let stillAmbiguous = 0;
   let stillConflicting = 0;
+  // A row can be structurally eligible for auto-creation (checkAutoCreateEligibility
+  // allows a real, verified barcode to anchor identity even with no
+  // recognized brand — correct, standing behavior for the live upload
+  // path). For THIS bulk backlog migration specifically, a human review
+  // pass (per the migration proposal report) requires brand assignment
+  // before creation — held back here, not created, until a later
+  // targeted re-run once brands are confirmed. Tracked separately from
+  // stillAmbiguous so the reconciliation report shows exactly how many
+  // and why.
+  let heldForBrandAssignment = 0;
   const invalidExamples: string[] = [];
   const conflictExamples: string[] = [];
+  const brandHoldExamples: string[] = [];
   // Miami-specific slices of the same creation/link logs, required by
   // the spec to show its size-parsing fix's real effect separately.
   const miamiCreationLog: string[] = [];
@@ -181,6 +192,13 @@ async function main() {
       if (!eligibility.eligible) {
         stillAmbiguous++;
         track(`ineligible: ${eligibility.reason}`);
+        continue;
+      }
+
+      if (!effectiveBrand || effectiveBrand.trim().toUpperCase() === "UNDEFINED") {
+        heldForBrandAssignment++;
+        track(`held for brand assignment (barcode=${plausibleUpc || plausibleEan || "none"})`);
+        if (brandHoldExamples.length < 20) brandHoldExamples.push(`[${s.name}] "${o.description}"`);
         continue;
       }
 
@@ -312,10 +330,13 @@ async function main() {
   console.log(`Linked to an EXISTING Master/real Product: ${linkedToExisting}`);
   console.log(`New Master Products created: ${createdNew}`);
   console.log(`Deduped against another row created earlier IN THIS batch: ${dedupedWithinBacklog}`);
+  console.log(`Held for brand assignment (eligible via barcode alone, but NOT created until a human confirms the brand — see report): ${heldForBrandAssignment}`);
   console.log(`Still genuinely ambiguous/incomplete (left in Match Review): ${stillAmbiguous}`);
   console.log(`Identity conflicts (UPC vs signature disagreement, or barcode_conflict): ${stillConflicting}`);
-  const reconciledTotal = invalidRowCount + linkedToExisting + createdNew + dedupedWithinBacklog + stillAmbiguous + stillConflicting;
-  console.log(`\nRECONCILIATION: ${totalExamined} examined = ${invalidRowCount} invalid + ${linkedToExisting} linked + ${createdNew} created + ${dedupedWithinBacklog} deduped + ${stillAmbiguous} ambiguous + ${stillConflicting} conflicts = ${reconciledTotal} -> ${totalExamined === reconciledTotal ? "MATCH" : "MISMATCH — INVESTIGATE"}`);
+  const reconciledTotal = invalidRowCount + linkedToExisting + createdNew + dedupedWithinBacklog + heldForBrandAssignment + stillAmbiguous + stillConflicting;
+  console.log(`\nRECONCILIATION: ${totalExamined} examined = ${invalidRowCount} invalid + ${linkedToExisting} linked + ${createdNew} created + ${dedupedWithinBacklog} deduped + ${heldForBrandAssignment} held-for-brand + ${stillAmbiguous} ambiguous + ${stillConflicting} conflicts = ${reconciledTotal} -> ${totalExamined === reconciledTotal ? "MATCH" : "MISMATCH — INVESTIGATE"}`);
+  console.log(`\nHeld-for-brand-assignment examples (up to 20):`);
+  brandHoldExamples.forEach((l) => console.log(`  - ${l}`));
   console.log(`\nInvalid/non-product examples:`);
   invalidExamples.forEach((l) => console.log(`  - ${l}`));
   console.log(`\nLink examples:`);
