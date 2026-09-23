@@ -170,6 +170,16 @@ export function tokenize(text: string): string[] {
     .filter(Boolean);
 }
 
+/** Token set for the reference-product search index (searchReferenceProducts) —
+ *  same tokenize() the rest of the matcher uses, minus stopwords and
+ *  single-character noise, deduped. Kept here (not duplicated in
+ *  pricing-db.ts) so index tokens and match-scoring tokens are always
+ *  generated the same way. */
+export function buildSearchTokens(text: string): string[] {
+  const tokens = tokenize(text).filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+  return [...new Set(tokens)];
+}
+
 // Standard fragrance-industry NOMINAL bottle sizes — the size a bottle
 // is actually marketed as (e.g. "100ml"), not the literal mathematical
 // oz->ml conversion (3.4oz * 29.5735 = 100.55ml). Using the nominal

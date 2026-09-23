@@ -434,6 +434,12 @@ export interface OfferComparisonRow {
   price: number;
   currency: string;
   priceUsd: number;
+  /** Whether priceUsd came from a real, resolved FX rate. When false,
+   *  priceUsd is the raw `price` value used only for display (so the
+   *  row isn't blank) — it must NEVER be trusted for ranking or a "best
+   *  price"/leaderboard-win decision, since that would silently compare
+   *  a non-USD price as if it were USD. isActionableOffer enforces this. */
+  priceUsdValid: boolean;
   currentlyListed: boolean;
   quantity: number | null;
   isStale: boolean;
@@ -448,4 +454,93 @@ export interface OfferComparisonRow {
    *  shows useful context ("this was $3 cheaper, but it's stale") —
    *  never implies a nonActionable row is itself a valid comparison. */
   differenceFromBestUsd: number | null;
+}
+
+/** One supplier's actionable offer on a competitive Master Product —
+ *  the per-supplier row behind a leaderboard entry's offer list. */
+export interface LeaderboardOfferRow {
+  supplierId: string;
+  supplierName: string;
+  offerKey: string;
+  priceUsd: number;
+  quantity: number | null;
+  uploadedAt: string;
+}
+
+/** One Master Product with 2+ distinct eligible suppliers — the unit
+ *  Supplier Price Leaders / Buying Opportunities / the drill-down table
+ *  are all built from. identityKey is a productId when isCarried is
+ *  true, a referenceProductId otherwise (never both — the linked-pair
+ *  dedup rule). Savings here are PER-UNIT price advantages only — never
+ *  a quantity-multiplied or projected/realized order-savings figure. */
+export interface LeaderboardProductEntry {
+  identityKey: string;
+  isCarried: boolean;
+  brand: string;
+  name: string;
+  sizeMl: number | null;
+  concentration: string | null;
+  productForm: string;
+  upc: string;
+  ean: string;
+  winningSupplierIds: string[]; // length 1 unless isTie
+  isTie: boolean;
+  bestPriceUsd: number;
+  secondBestPriceUsd: number | null;
+  /** bestPriceUsd's per-unit advantage over secondBestPriceUsd — null on
+   *  a tie (no advantage to report) or if there's genuinely no 2nd offer
+   *  (shouldn't happen for a competitive product, but kept optional for
+   *  safety). */
+  perUnitAdvantageUsd: number | null;
+  perUnitAdvantagePct: number | null;
+  eligibleSupplierCount: number;
+  offers: LeaderboardOfferRow[]; // every actionable supplier's representative offer, sorted by price
+}
+
+/** A Master Product with exactly one eligible supplier — tracked
+ *  separately, never counted as a competitive "win." */
+export interface LeaderboardSingleSupplierEntry {
+  identityKey: string;
+  isCarried: boolean;
+  brand: string;
+  name: string;
+  sizeMl: number | null;
+  concentration: string | null;
+  supplierId: string;
+  supplierName: string;
+  priceUsd: number;
+}
+
+export interface SupplierLeaderboardSummary {
+  supplierId: string;
+  supplierName: string;
+  /** Denominator for winRate — Master Products with 2+ eligible
+   *  suppliers where THIS supplier is one of them. */
+  competitiveProductCount: number;
+  outrightWins: number;
+  ties: number;
+  winRate: number;
+  /** Per-unit price-advantage aggregates over won (non-tied) products
+   *  only — a comparison signal, NEVER a projected or realized order-
+   *  savings figure. No quantity multiplication is applied anywhere. */
+  avgPerUnitSavingsUsd: number;
+  totalPerUnitSavingsUsd: number;
+  singleSupplierOnlyCount: number;
+  currentEligibleOfferCount: number;
+}
+
+export interface LeaderboardTotals {
+  competitiveProductCount: number;
+  outrightWinProductCount: number;
+  tiedProductCount: number;
+}
+
+export interface LeaderboardData {
+  computedAt: string;
+  generationFingerprint: string;
+  catalogVersion: number;
+  suppliers: SupplierLeaderboardSummary[];
+  totals: LeaderboardTotals;
+  competitiveProducts: LeaderboardProductEntry[];
+  singleSupplierProducts: LeaderboardSingleSupplierEntry[];
 }

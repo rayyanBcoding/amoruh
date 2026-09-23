@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
 import { FocusedResolutionModal } from "@/components/pricing/FocusedResolutionModal";
+import { SupplierPriceLeaders } from "@/components/pricing/SupplierPriceLeaders";
+import { BuyingOpportunities } from "@/components/pricing/BuyingOpportunities";
+import { SupplierFreshnessPanel } from "@/components/pricing/SupplierFreshnessPanel";
 import { formatCurrency } from "@/lib/format";
 import type { MatchReviewItem } from "@/lib/pricing-types";
 
@@ -21,25 +24,21 @@ interface SupplierBreakdown {
   ignored: number;
 }
 
+interface FreshnessEntry {
+  supplierId: string;
+  supplierName: string;
+  filename: string | null;
+  completedAt: string | null;
+  daysSinceLastCommit: number | null;
+  status: "current" | "stale" | "never";
+}
+
 interface DashboardData {
   uploadsToday: number;
   /** Rolling count of Master Products auto-created across the recent
    *  uploads shown — an audit figure, never a call to action. */
   recentAutoCreated: number;
-  recentUploads: {
-    id: string;
-    supplierId: string;
-    filename: string;
-    status: string;
-    uploadType: string;
-    totalRows: number;
-    autoMatched: number;
-    autoCreated: number;
-    needsReview: number;
-    notAProduct: number;
-    startedAt: string;
-    isLive: boolean;
-  }[];
+  freshness: FreshnessEntry[];
   matchReview: {
     reviewRequired: number;
     /** EVERY genuinely ambiguous offer, flagged or not — quiet,
@@ -61,8 +60,29 @@ interface DashboardData {
 // Product AMORUH has never stocked; and a still-unresolved supplier
 // offer that hasn't matched anything yet.
 type SearchResult =
-  | { type: "product"; productId: string; brand: string; name: string; size: string; sku: string; score: number }
-  | { type: "reference_product"; referenceProductId: string; brand: string; name: string; sizeMl: number | null; concentration: string | null }
+  | {
+      type: "product";
+      productId: string;
+      brand: string;
+      name: string;
+      size: string;
+      sku: string;
+      score: number;
+      carried: true;
+      bestPriceUsd: number | null;
+      eligibleSupplierCount: number;
+    }
+  | {
+      type: "reference_product";
+      referenceProductId: string;
+      brand: string;
+      name: string;
+      sizeMl: number | null;
+      concentration: string | null;
+      carried: false;
+      bestPriceUsd: number | null;
+      eligibleSupplierCount: number;
+    }
   | {
       type: "unresolved_offer";
       supplierId: string;
@@ -94,21 +114,38 @@ export default function PricingDashboardPage() {
       .catch(() => {});
   }, []);
 
-  const runSearch = async (q: string) => {
+  // Debounced (250ms, same idiom as LinkTrackedItemSearch in
+  // MatchReviewResolutionPanel.tsx) + a request-sequence-number guard so
+  // a fast typist never has an older, slower response overwrite a newer
+  // one — no shared debounce hook or AbortController exists anywhere in
+  // this codebase, so this mirrors the established inline pattern rather
+  // than introducing a new one.
+  const searchSeq = useRef(0);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const handleQueryChange = (q: string) => {
     setQuery(q);
     if (!q.trim()) {
+      searchSeq.current++; // supersede any in-flight request
       setResults([]);
-      return;
-    }
-    setSearching(true);
-    try {
-      const res = await fetch(`/api/pricing/search?q=${encodeURIComponent(q)}`);
-      const body = await res.json();
-      setResults(body.results ?? []);
-    } finally {
       setSearching(false);
     }
   };
+  useEffect(() => {
+    if (!query.trim()) return;
+    const mySeq = ++searchSeq.current;
+    const handle = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch(`/api/pricing/search?q=${encodeURIComponent(query)}`);
+        const body = await res.json();
+        if (mySeq !== searchSeq.current) return; // a newer keystroke already superseded this request
+        setResults(body.results ?? []);
+      } finally {
+        if (mySeq === searchSeq.current) setSearching(false);
+      }
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [query, refreshNonce]);
 
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const sendForReview = async (supplierId: string, offerKey: string) => {
@@ -186,7 +223,7 @@ export default function PricingDashboardPage() {
           </label>
           <input
             value={query}
-            onChange={(e) => runSearch(e.target.value)}
+            onChange={(e) => handleQueryChange(e.target.value)}
             placeholder="e.g. aventis creed, sauvage elixir…"
             className="w-full rounded-xl border border-ld-border bg-ld-bg-elevated px-4 py-3 text-sm text-ld-white placeholder:text-ld-muted/60 outline-none focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/15"
           />
@@ -200,16 +237,19 @@ export default function PricingDashboardPage() {
                     <button
                       key={`product:${r.productId}`}
                       onClick={() => router.push(`/pricing/products/${r.productId}`)}
-                      className="block w-full rounded-lg px-3 py-2 text-left text-sm text-ld-white hover:bg-ld-bg-elevated"
+                      className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm text-ld-white hover:bg-ld-bg-elevated"
                     >
-                      {r.name.toUpperCase().startsWith(r.brand.trim().toUpperCase()) ? (
-                        r.name
-                      ) : (
-                        <>
-                          <span className="font-semibold">{r.brand}</span> {r.name}
-                        </>
-                      )}{" "}
-                      <span className="text-ld-muted">({r.size})</span>
+                      <span>
+                        {r.name.toUpperCase().startsWith(r.brand.trim().toUpperCase()) ? (
+                          r.name
+                        ) : (
+                          <>
+                            <span className="font-semibold">{r.brand}</span> {r.name}
+                          </>
+                        )}{" "}
+                        <span className="text-ld-muted">({r.size})</span>
+                      </span>
+                      <SearchPricePreview bestPriceUsd={r.bestPriceUsd} eligibleSupplierCount={r.eligibleSupplierCount} carried />
                     </button>
                   );
                 }
@@ -230,9 +270,7 @@ export default function PricingDashboardPage() {
                         )}
                         {r.sizeMl ? <span className="text-ld-muted"> ({r.sizeMl}ml{r.concentration ? ` ${r.concentration}` : ""})</span> : null}
                       </span>
-                      <span className="shrink-0 rounded-full bg-ld-purple/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-ld-purple">
-                        Master Product — Not Carried
-                      </span>
+                      <SearchPricePreview bestPriceUsd={r.bestPriceUsd} eligibleSupplierCount={r.eligibleSupplierCount} carried={false} />
                     </button>
                   );
                 }
@@ -311,9 +349,17 @@ export default function PricingDashboardPage() {
           above) — searchable, not a required task. Resolution is only needed if you try to order one.
         </p>
 
+        <div className="mt-6">
+          <SupplierPriceLeaders />
+        </div>
+
+        <div className="mt-6">
+          <BuyingOpportunities />
+        </div>
+
         {data && data.matchReview.bySupplier.length > 0 && (
-          <div className="glass-panel mt-4 rounded-2xl p-5">
-            <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-ld-muted">Per-Supplier Breakdown</p>
+          <div className="glass-panel mt-6 rounded-2xl p-5">
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-widest text-ld-muted">Per-Supplier Match Review Breakdown</p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[700px] text-sm">
                 <thead>
@@ -345,41 +391,8 @@ export default function PricingDashboardPage() {
           </div>
         )}
 
-        <div className="glass-panel mt-6 rounded-2xl p-5">
-          <h2 className="mb-4 font-display text-lg font-bold text-ld-white">Recent Uploads</h2>
-          {!data || data.recentUploads.length === 0 ? (
-            <p className="text-sm text-ld-muted">No supplier price lists uploaded yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {data.recentUploads.map((u) => (
-                <div key={u.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-ld-bg-elevated px-4 py-3 text-sm">
-                  <div>
-                    <span className="font-semibold text-ld-white">{u.filename}</span>{" "}
-                    <span className="text-ld-muted">
-                      · {u.uploadType} · {new Date(u.startedAt).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="text-ld-green">{u.autoMatched} matched</span>
-                    <span className="text-ld-purple">{u.autoCreated} new</span>
-                    <span className={u.needsReview > 0 ? "font-semibold text-ld-amber" : "text-ld-muted"}>{u.needsReview} review</span>
-                    {u.notAProduct > 0 && <span className="text-ld-muted">{u.notAProduct} skipped</span>}
-                    <span
-                      className={
-                        u.status === "failed"
-                          ? "font-bold uppercase text-ld-red"
-                          : u.isLive
-                            ? "font-bold uppercase text-ld-green"
-                            : "font-bold uppercase text-ld-muted"
-                      }
-                    >
-                      {u.status === "failed" ? "Failed" : u.isLive ? "Live" : "Superseded"}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="mt-6">
+          <SupplierFreshnessPanel freshness={data?.freshness ?? []} />
         </div>
       </main>
 
@@ -391,11 +404,37 @@ export default function PricingDashboardPage() {
             setResolutionItem(null);
             // Refresh so the "Sent for Review"/badge state in the search
             // results reflects whatever just happened.
-            if (query.trim()) runSearch(query);
+            if (query.trim()) setRefreshNonce((n) => n + 1);
           }}
         />
       )}
     </div>
+  );
+}
+
+/** Per-search-result price preview: lowest eligible current supplier
+ *  price, count of eligible suppliers, an availability indicator, and
+ *  carried/not-carried — computed server-side (search route) only for
+ *  the small, already-ranked/limited final result set, never per
+ *  scanned candidate. */
+function SearchPricePreview({ bestPriceUsd, eligibleSupplierCount, carried }: { bestPriceUsd: number | null; eligibleSupplierCount: number; carried: boolean }) {
+  return (
+    <span className="flex shrink-0 flex-col items-end gap-0.5 text-right">
+      {bestPriceUsd !== null ? (
+        <span className="text-xs font-semibold text-ld-green">
+          {formatCurrency(bestPriceUsd)} · {eligibleSupplierCount} supplier{eligibleSupplierCount === 1 ? "" : "s"}
+        </span>
+      ) : (
+        <span className="text-xs text-ld-muted">No actionable offer</span>
+      )}
+      <span
+        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
+          carried ? "bg-ld-green/15 text-ld-green" : "bg-ld-purple/15 text-ld-purple"
+        }`}
+      >
+        {carried ? "Carried" : "Master Product — Not Carried"}
+      </span>
+    </span>
   );
 }
 

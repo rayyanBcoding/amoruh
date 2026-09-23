@@ -1,5 +1,10 @@
 import { redis } from "./kv";
 import type {
+  LeaderboardData,
+  LeaderboardOfferRow,
+  LeaderboardProductEntry,
+  LeaderboardSingleSupplierEntry,
+  LeaderboardTotals,
   MatchReviewBucket,
   MatchReviewItem,
   MatchReviewSummary,
@@ -11,6 +16,7 @@ import type {
   SupplierAlias,
   SupplierOfferCurrent,
   SupplierOfferSnapshot,
+  SupplierLeaderboardSummary,
   SupplierPriceUpload,
   UploadStatus,
 } from "./pricing-types";
@@ -18,16 +24,18 @@ import { getSuppliers } from "./intake-db";
 import { getUsdRate, convertToUsd } from "./pricing-fx";
 import {
   BARCODE_CONFLICT_TEXT_FLOOR,
+  buildSearchTokens,
   extractAttributes,
   extractProductAttributes,
   extractReferenceProductAttributes,
   isPlausibleBarcode,
   isValidProductRow,
   matchAgainstMasterCandidates,
+  quickTextSimilarity,
   resolveEffectiveBrand,
   type MasterCandidate,
 } from "./pricing-matching";
-import { bigramSimilarity } from "./intake-matching";
+import { bigramSimilarity, normalize } from "./intake-matching";
 import { getProducts } from "./db";
 
 // ---------------------------------------------------------------------
@@ -85,6 +93,23 @@ const KEYS = {
    *  supplier offer for this Master Product," same as offersByProduct
    *  already does for real Products. */
   offersByReferenceProduct: (referenceProductId: string) => `amoruh:pricing:offers_by_reference_product:${referenceProductId}`,
+  /** Reference-product search index (searchReferenceProducts): one SET
+   *  per token -> member reference-product ids, plus one sorted set of
+   *  every distinct token (score 0, pure lexicographic ordering) used
+   *  for ZRANGEBYLEX prefix lookups so a partially-typed word ("burber")
+   *  still finds "burberry" before the word is finished. Rebuildable in
+   *  full from getAllReferenceProducts() — see scripts/rebuild-search-index.ts. */
+  searchToken: (token: string) => `amoruh:pricing:search:token:${token}`,
+  searchTokenIndex: "amoruh:pricing:search:token_index",
+  /** Supplier price leaderboard cache — see computeSupplierPriceLeaderboard. */
+  leaderboard: "amoruh:pricing:leaderboard:v1",
+  leaderboardMeta: "amoruh:pricing:leaderboard:meta",
+  /** Monotonic counter bumped by every write path that changes offer/
+   *  Master-Product eligibility WITHOUT going through commitGeneration
+   *  (relinking, unlinking, manual resolution, reference-product
+   *  creation) — the second of the two signals the leaderboard cache
+   *  verifies before trusting itself as current. */
+  catalogVersion: "amoruh:pricing:catalog_version",
 } as const;
 
 export function newId(prefix: string): string {
@@ -332,7 +357,13 @@ export async function commitGeneration(input: {
     ...input.offersByProductOps.flatMap((o) => [o.op, o.member]),
     ...refOps.flatMap((o) => [o.op, o.member]),
   ];
-  return redis.eval<(string | number)[], "OK" | "STALE_GENERATION">(COMMIT_SCRIPT, keys, args);
+  const result = await redis.eval<(string | number)[], "OK" | "STALE_GENERATION">(COMMIT_SCRIPT, keys, args);
+  // Belt-and-suspenders: the leaderboard's generationFingerprint check
+  // already catches this on its own (this supplier's seq just changed),
+  // but bumping the shared counter too keeps a single, uniform
+  // "something changed" signal across every write path.
+  if (result === "OK") await bumpCatalogVersion();
+  return result;
 }
 
 // ---------------------------------------------------------------------
@@ -385,6 +416,7 @@ export async function resolveOfferManually(input: {
     ...refOps.flatMap((o) => [o.op, o.member]),
   ];
   await redis.eval<(string | number)[], string>(RESOLVE_OFFER_SCRIPT, keys, args);
+  await bumpCatalogVersion();
 }
 
 /** One-time BULK primitive for a large reclassification sweep (e.g. the
@@ -522,7 +554,9 @@ export async function createReferenceProduct(
     redis.zadd(KEYS.referenceProductsIndex, { score: Date.now(), member: product.id }),
     product.upc ? redis.set(KEYS.referenceProductByUpc(product.upc), product.id) : Promise.resolve(),
     product.ean ? redis.set(KEYS.referenceProductByEan(product.ean), product.id) : Promise.resolve(),
+    indexReferenceProductForSearch(product),
   ]);
+  await bumpCatalogVersion();
   return product;
 }
 
@@ -549,6 +583,7 @@ export async function linkReferenceProductToProduct(
   if (existing.productId === productId) return { ok: true, referenceProduct: existing };
   const updated: PricingReferenceProduct = { ...existing, productId };
   await redis.set(KEYS.referenceProduct(referenceProductId), updated);
+  await bumpCatalogVersion();
   return { ok: true, referenceProduct: updated };
 }
 
@@ -566,17 +601,65 @@ export async function getReferenceProducts(params: { limit?: number; cursor?: nu
   return { items, nextCursor };
 }
 
-const REFERENCE_SEARCH_PAGE_SIZE = 200;
-// Protection against a pathological collection with zero matches, NOT a
-// definition of search scope — a real collection (even "thousands" of
-// listings) is scanned to completion well under this. A reference
-// product created long ago must be exactly as findable as one created
-// moments ago; this must never silently become "search the newest N."
-const REFERENCE_SEARCH_MAX_SCANNED = 20000;
+/** Adds/refreshes one reference product's membership in the search
+ *  token index (per-token id SETs + the lexicographic token_index for
+ *  prefix lookups). Called after every reference-product creation.
+ *  Fire-and-forget-safe and idempotent (SADD/ZADD) — if it ever fails or
+ *  drifts, scripts/rebuild-search-index.ts rebuilds the whole index from
+ *  getAllReferenceProducts() from scratch. Deliberately NOT part of the
+ *  atomic get-or-create Lua script (GET_OR_CREATE_REFERENCE_PRODUCT_SCRIPT)
+ *  — same accepted pattern as backfillOfferByReferenceProduct's own
+ *  "predates/self-heals the index" doc comment. */
+export async function indexReferenceProductForSearch(product: PricingReferenceProduct): Promise<void> {
+  const tokens = buildSearchTokens(`${product.brand} ${product.name} ${product.description}`);
+  if (tokens.length === 0) return;
+  const [first, ...rest] = tokens.map((t) => ({ score: 0, member: t }));
+  await Promise.all([...tokens.map((t) => redis.sadd(KEYS.searchToken(t), product.id)), redis.zadd(KEYS.searchTokenIndex, first, ...rest)]);
+}
 
-/** Exact UPC/EAN hit first (O(1)); otherwise pages the FULL index in
- *  bounded chunks, checking brand/name/description/upc/ean/concentration,
- *  until `limit` matches are found or the index is exhausted. */
+const PREFIX_TOKEN_LIMIT = 50;
+const REFERENCE_SEARCH_EXACT_SCORE = 2; // above any possible fuzzy score (max 1) -- always ranks first
+// Applied ONLY to the looser union fallback below -- candidates found via
+// the primary token/prefix INTERSECTION are already precise by
+// construction (every query word is a real, indexed word of that
+// record, or a genuine prefix of one), so gating them by a generic fuzzy
+// score would do exactly what broke "burber" -> Burberry: a short
+// prefix scores low against a long multi-word record even though the
+// match itself is exact and correct. The score is still computed for
+// ranking (best match first), just never used to exclude a primary hit.
+const REFERENCE_SEARCH_FALLBACK_MIN_SCORE = 0.35;
+
+async function idsForToken(token: string): Promise<string[]> {
+  return redis.smembers(KEYS.searchToken(token)) as Promise<string[]>;
+}
+
+/** Every id whose record has TOKEN as an exact word, or has some word
+ *  starting with TOKEN (prefix expansion via the lexicographic index) —
+ *  used for the last, possibly-still-being-typed query word. */
+async function idsForTokenOrPrefix(token: string): Promise<Set<string>> {
+  const prefixTokens = await redis.zrange<string[]>(KEYS.searchTokenIndex, `[${token}`, `[${token}\xff`, { byLex: true, offset: 0, count: PREFIX_TOKEN_LIMIT });
+  const idSets = await Promise.all(prefixTokens.map(idsForToken));
+  const ids = new Set<string>();
+  for (const set of idSets) for (const id of set) ids.add(id);
+  return ids;
+}
+
+function intersect(sets: Set<string>[]): Set<string> {
+  if (sets.length === 0) return new Set();
+  let result = sets[0];
+  for (const s of sets.slice(1)) result = new Set([...result].filter((id) => s.has(id)));
+  return result;
+}
+
+/** Exact UPC/EAN hit first (O(1)); otherwise an indexed lookup —
+ *  intersecting exact-token candidates for every complete query word,
+ *  and prefix-expanding (ZRANGEBYLEX) only the LAST word so a
+ *  partially-typed word ("burber") still finds "burberry" — instead of
+ *  a full-catalog substring scan. If that precise intersection comes up
+ *  empty (e.g. a typo on a non-last word), falls back to a looser union
+ *  of every query word's candidates, scored and floored so that looser
+ *  path doesn't surface unrelated results. MGETs only the small
+ *  candidate set found this way — never the full catalog. */
 export async function searchReferenceProducts(query: string, limit = 20): Promise<PricingReferenceProduct[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
@@ -585,26 +668,44 @@ export async function searchReferenceProducts(query: string, limit = 20): Promis
   if (byUpc) return [byUpc];
   if (byEan) return [byEan];
 
-  const q = trimmed.toLowerCase();
-  const results: PricingReferenceProduct[] = [];
-  let cursor = 0;
-  let scanned = 0;
-  while (results.length < limit && scanned < REFERENCE_SEARCH_MAX_SCANNED) {
-    const ids = (await redis.zrange(KEYS.referenceProductsIndex, cursor, cursor + REFERENCE_SEARCH_PAGE_SIZE - 1)) as string[];
-    if (ids.length === 0) break; // index exhausted
-    const records = await Promise.all(ids.map(getReferenceProduct));
-    for (const r of records) {
-      if (!r) continue;
-      const haystack = `${r.brand} ${r.name} ${r.description} ${r.upc} ${r.ean} ${r.concentration ?? ""}`.toLowerCase();
-      if (haystack.includes(q)) {
-        results.push(r);
-        if (results.length >= limit) break;
-      }
-    }
-    scanned += ids.length;
-    cursor += REFERENCE_SEARCH_PAGE_SIZE;
+  const queryTokens = buildSearchTokens(trimmed);
+  if (queryTokens.length === 0) return [];
+
+  const completeTokens = queryTokens.slice(0, -1);
+  const lastToken = queryTokens[queryTokens.length - 1];
+
+  const [exactSets, lastTokenCandidates] = await Promise.all([
+    Promise.all(completeTokens.map(idsForToken)).then((sets) => sets.map((s) => new Set(s))),
+    idsForTokenOrPrefix(lastToken),
+  ]);
+
+  let candidateIds = intersect([...exactSets, lastTokenCandidates]);
+  let fallback = false;
+  if (candidateIds.size === 0) {
+    // Loose fallback: union of every token's own candidates (each still
+    // index-bounded, never a full scan), scored+floored since this path
+    // is deliberately less precise than the primary intersection.
+    fallback = true;
+    const allSets = await Promise.all([...completeTokens, lastToken].map((t) => idsForTokenOrPrefix(t)));
+    candidateIds = new Set<string>();
+    for (const s of allSets) for (const id of s) candidateIds.add(id);
   }
-  return results;
+  if (candidateIds.size === 0) return [];
+
+  const records = (await Promise.all([...candidateIds].map(getReferenceProduct))).filter((r): r is PricingReferenceProduct => r !== null);
+  const qNormalized = normalize(trimmed);
+
+  const scored = records
+    .map((r) => {
+      const nameNormalized = normalize(`${r.brand} ${r.name}`);
+      const exact = nameNormalized === qNormalized;
+      const score = exact ? REFERENCE_SEARCH_EXACT_SCORE : quickTextSimilarity(trimmed, `${r.brand} ${r.name} ${r.description}`);
+      return { record: r, score };
+    })
+    .filter((s) => !fallback || s.score >= REFERENCE_SEARCH_FALLBACK_MIN_SCORE)
+    .sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, limit).map((s) => s.record);
 }
 
 /** Fetches the ENTIRE reference-product catalog — the matching pool a
@@ -733,6 +834,8 @@ export async function getOrCreateReferenceProductByIdentity(
   const raw = await redis.eval<(string | number)[], string>(GET_OR_CREATE_REFERENCE_PRODUCT_SCRIPT, keys, args);
   if (raw.startsWith("CONFLICT:")) return { status: "conflict", ids: raw.slice("CONFLICT:".length).split(",") };
   if (raw.startsWith("EXISTING:")) return { status: "existing", id: raw.slice("EXISTING:".length) };
+  await indexReferenceProductForSearch(product);
+  await bumpCatalogVersion();
   return { status: "created", id: raw.slice("CREATED:".length), product };
 }
 
@@ -760,6 +863,27 @@ function ageDaysOf(uploadedAt: string): number {
   return (Date.now() - new Date(uploadedAt).getTime()) / (1000 * 60 * 60 * 24);
 }
 
+/** The one authoritative "is this offer eligible to be a Best Price /
+ *  leaderboard win" rule — every price-comparison surface (the two
+ *  detail-page comparison functions below, and the Supplier Price
+ *  Leaders / Buying Opportunities aggregation) calls this SAME function
+ *  rather than re-deriving the condition, so there is never a second,
+ *  competing "best price" definition.
+ *
+ *  priceUsdValid is checked deliberately: a missing/failed FX rate must
+ *  exclude the offer entirely rather than letting it silently compare
+ *  as if its raw non-USD price were USD (a confirmed pre-existing gap —
+ *  see the priceUsdValid doc comment in pricing-types.ts). */
+export function isActionableOffer(r: OfferComparisonRow): boolean {
+  return (
+    r.currentlyListed &&
+    (r.quantity === null || r.quantity > 0) &&
+    !r.isStale &&
+    r.priceUsdValid &&
+    (r.reviewStatus === "auto_matched" || r.reviewStatus === "confirmed")
+  );
+}
+
 /** Splits raw comparison rows into actionable/nonActionable, sorts both
  *  by USD price ascending, and stamps every row with its
  *  differenceFromBestUsd relative to the actionable best (never the
@@ -772,15 +896,7 @@ function splitAndRankComparisonRows(rows: OfferComparisonRow[]): {
   nonActionable: OfferComparisonRow[];
   bestPrice: OfferComparisonRow | null;
 } {
-  const actionableBase = rows
-    .filter(
-      (r) =>
-        r.currentlyListed &&
-        (r.quantity === null || r.quantity > 0) &&
-        !r.isStale &&
-        (r.reviewStatus === "auto_matched" || r.reviewStatus === "confirmed")
-    )
-    .sort((a, b) => a.priceUsd - b.priceUsd);
+  const actionableBase = rows.filter(isActionableOffer).sort((a, b) => a.priceUsd - b.priceUsd);
   const nonActionableBase = rows.filter((r) => !actionableBase.includes(r)).sort((a, b) => a.priceUsd - b.priceUsd);
 
   const best = actionableBase[0] ?? null;
@@ -871,7 +987,7 @@ export async function getProductOfferComparison(productId: string): Promise<Prod
     const offer = offers[i];
     if (!offer) continue;
     const rate = await getUsdRate(offer.currency);
-    const priceUsd = convertToUsd(offer.price, rate?.rate ?? null) ?? offer.price;
+    const converted = convertToUsd(offer.price, rate?.rate ?? null);
     const ageDays = ageDaysOf(offer.uploadedAt);
     rows.push({
       supplierId: refs[i].supplierId,
@@ -879,7 +995,8 @@ export async function getProductOfferComparison(productId: string): Promise<Prod
       offerKey: offer.offerKey,
       price: offer.price,
       currency: offer.currency,
-      priceUsd,
+      priceUsd: converted ?? offer.price,
+      priceUsdValid: converted !== null,
       currentlyListed: offer.currentlyListed,
       quantity: offer.quantity,
       isStale: ageDays > DEFAULT_FRESHNESS_THRESHOLD_DAYS,
@@ -982,7 +1099,7 @@ export async function getReferenceProductOfferComparison(referenceProductId: str
     const offer = offers[i];
     if (!offer) continue;
     const rate = await getUsdRate(offer.currency);
-    const priceUsd = convertToUsd(offer.price, rate?.rate ?? null) ?? offer.price;
+    const converted = convertToUsd(offer.price, rate?.rate ?? null);
     const ageDays = ageDaysOf(offer.uploadedAt);
     rows.push({
       supplierId: refs[i].supplierId,
@@ -990,7 +1107,8 @@ export async function getReferenceProductOfferComparison(referenceProductId: str
       offerKey: offer.offerKey,
       price: offer.price,
       currency: offer.currency,
-      priceUsd,
+      priceUsd: converted ?? offer.price,
+      priceUsdValid: converted !== null,
       currentlyListed: offer.currentlyListed,
       quantity: offer.quantity,
       isStale: ageDays > DEFAULT_FRESHNESS_THRESHOLD_DAYS,
@@ -1280,40 +1398,453 @@ export interface UnresolvedOfferSearchResult {
  *  `limit` per the same reasoning as searchReferenceProducts — this
  *  scans every supplier's committed offers, which at this business's
  *  scale is a bounded, occasional-search cost, not a hot path. */
+const UNRESOLVED_OFFER_SEARCH_MIN_SCORE = 0.35;
+
+/** Ranked, word-order-tolerant search (quickTextSimilarity, same as the
+ *  real-Product path) over every supplier's offers in parallel — an
+ *  order of magnitude smaller population than the reference-product
+ *  catalog (low thousands, not 13,000+), so a full ranked scan stays
+ *  cheap without a dedicated index; re-benchmark and add one here too if
+ *  that ever stops holding. Exact UPC/EAN still matches at full
+ *  priority via the score bonus below. Scans every supplier's offers to
+ *  completion (never truncates early once `limit` looks satisfied) so
+ *  ranking is correct across the WHOLE population, not just the first
+ *  supplier scanned. */
 export async function searchUnresolvedOffers(query: string, limit = 20): Promise<UnresolvedOfferSearchResult[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
-  const q = trimmed.toLowerCase();
+  const qUpper = trimmed.toUpperCase();
 
   const suppliers = await getSuppliers();
-  const results: UnresolvedOfferSearchResult[] = [];
-  for (const s of suppliers) {
-    if (results.length >= limit) break;
-    const offers = Object.values(await getCommittedOffers(s.id));
-    for (const o of offers) {
-      if (results.length >= limit) break;
+  const offersBySupplier = await Promise.all(suppliers.map((s) => getCommittedOffers(s.id)));
+
+  const scored: { offer: SupplierOfferCurrent; supplierId: string; supplierName: string; score: number }[] = [];
+  for (let i = 0; i < suppliers.length; i++) {
+    const s = suppliers[i];
+    for (const o of Object.values(offersBySupplier[i])) {
       if (o.currentlyListed === false) continue;
       if (o.productId || o.referenceProductId) continue;
       if (!UNRESOLVED_STATUSES.includes(o.reviewStatus)) continue;
-      const haystack = `${o.description} ${o.brand} ${o.supplierSku} ${o.upc} ${o.ean}`.toLowerCase();
-      if (!haystack.includes(q)) continue;
-      results.push({
-        supplierId: s.id,
-        supplierName: s.name,
-        offerKey: o.offerKey,
-        description: o.description,
-        brand: o.brand,
-        supplierSku: o.supplierSku,
-        upc: o.upc,
-        ean: o.ean,
-        price: o.price,
-        currency: o.currency,
-        quantity: o.quantity,
-        uploadedAt: o.uploadedAt,
-        reviewStatus: o.reviewStatus,
-        reviewRequestedAt: o.reviewRequestedAt ?? null,
-      });
+      const exactCode = (o.upc.trim().toUpperCase() === qUpper && qUpper.length > 0) || (o.ean.trim().toUpperCase() === qUpper && qUpper.length > 0);
+      const score = exactCode ? 2 : quickTextSimilarity(trimmed, `${o.brand} ${o.description} ${o.supplierSku}`);
+      if (score < UNRESOLVED_OFFER_SEARCH_MIN_SCORE) continue;
+      scored.push({ offer: o, supplierId: s.id, supplierName: s.name, score });
     }
   }
-  return results;
+  scored.sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, limit).map(({ offer: o, supplierId, supplierName }) => ({
+    supplierId,
+    supplierName,
+    offerKey: o.offerKey,
+    description: o.description,
+    brand: o.brand,
+    supplierSku: o.supplierSku,
+    upc: o.upc,
+    ean: o.ean,
+    price: o.price,
+    currency: o.currency,
+    quantity: o.quantity,
+    uploadedAt: o.uploadedAt,
+    reviewStatus: o.reviewStatus,
+    reviewRequestedAt: o.reviewRequestedAt ?? null,
+  }));
+}
+
+// ---------------------------------------------------------------------
+// Supplier Price Leaders / Buying Opportunities leaderboard.
+//
+// Reuses isActionableOffer (the SAME rule the detail-page comparison
+// functions use) rather than a second "best price" definition. Computed
+// as one bulk in-memory pass over every supplier's current offers
+// (fetched in parallel, once) instead of a per-product comparison-
+// function call — a live regression test earlier in this project
+// confirmed that calling getReferenceProductOfferComparison per product
+// at catalog scale takes minutes, not milliseconds; this must never be
+// repeated for a page load.
+// ---------------------------------------------------------------------
+
+/** Bumped by every write path that changes offer/Master-Product
+ *  eligibility WITHOUT going through commitGeneration (relinking,
+ *  unlinking, manual resolution, reference-product creation) — the
+ *  second of the two signals (alongside each supplier's own generation
+ *  seq) the leaderboard cache verifies before trusting itself as
+ *  current. Failure-safe: if the INCR itself fails, the leaderboard
+ *  cache is deleted directly as an independent fallback so a partial
+ *  failure never leaves stale data looking current. The business
+ *  operation that called this must never fail because of it. */
+export async function bumpCatalogVersion(): Promise<void> {
+  try {
+    await redis.incr(KEYS.catalogVersion);
+  } catch (err) {
+    console.error("bumpCatalogVersion: INCR failed, falling back to direct cache invalidation", err);
+    try {
+      await redis.del(KEYS.leaderboard, KEYS.leaderboardMeta);
+    } catch (err2) {
+      console.error("bumpCatalogVersion: fallback cache DEL also failed — leaderboard may serve stale data until its TTL backstop expires", err2);
+    }
+  }
+}
+
+interface LeaderboardFingerprint {
+  generationFingerprint: string;
+  catalogVersion: number;
+}
+
+async function getCurrentLeaderboardFingerprint(suppliers: { id: string }[]): Promise<LeaderboardFingerprint> {
+  const [seqs, catalogVersion] = await Promise.all([
+    Promise.all(suppliers.map((s) => getCurrentGenerationSeq(s.id))),
+    redis.get<number>(KEYS.catalogVersion),
+  ]);
+  return {
+    generationFingerprint: suppliers.map((s, i) => `${s.id}:${seqs[i]}`).join(","),
+    catalogVersion: catalogVersion ?? 0,
+  };
+}
+
+interface IdentityMeta {
+  isCarried: boolean;
+  brand: string;
+  name: string;
+  sizeMl: number | null;
+  concentration: string | null;
+  productForm: string;
+  upc: string;
+  ean: string;
+}
+
+/** Pure aggregation — no cache read/write. Fetches every supplier's
+ *  offers, the full reference-product catalog, and every real product
+ *  ONCE, then groups in memory.
+ *
+ *  Deliberately scoped to getSuppliers()'s current list — an offer whose
+ *  stored supplierId doesn't resolve to any real current supplier
+ *  (confirmed live: a small number of reference products carry offer
+ *  history from suppliers that were since deleted, e.g. test suppliers
+ *  created and removed during this project's own development) is never
+ *  counted as an "eligible supplier" here, correctly. Note this differs
+ *  from the older getProductOfferComparison/getReferenceProductOfferComparison
+ *  detail-page functions, which trust the offers_by_product/
+ *  offers_by_reference_product reverse index directly via getCurrentOffer
+ *  without cross-checking the offer's supplier still exists — a
+ *  pre-existing characteristic of those functions, not something this
+ *  leaderboard should inherit or fix here. */
+async function computeSupplierPriceLeaderboardData(): Promise<Omit<LeaderboardData, "computedAt" | "generationFingerprint" | "catalogVersion">> {
+  const suppliers = await getSuppliers();
+  const [offersBySupplier, referenceProducts, products] = await Promise.all([
+    Promise.all(suppliers.map((s) => getCommittedOffers(s.id))),
+    getAllReferenceProducts(),
+    getProducts(),
+  ]);
+  const supplierById = new Map(suppliers.map((s) => [s.id, s]));
+  const referenceProductById = new Map(referenceProducts.map((rp) => [rp.id, rp]));
+  const productById = new Map(products.map((p) => [p.id, p]));
+
+  // Batch FX rates once per distinct currency present, instead of once
+  // per offer.
+  const currencies = new Set<string>();
+  for (const offers of offersBySupplier) for (const o of Object.values(offers)) currencies.add(o.currency);
+  const rateByCurrency = new Map<string, number | null>();
+  await Promise.all(
+    [...currencies].map(async (c) => {
+      const r = await getUsdRate(c);
+      rateByCurrency.set(c, r?.rate ?? null);
+    })
+  );
+
+  interface Group {
+    meta: IdentityMeta;
+    rowsBySupplier: Map<string, OfferComparisonRow>; // cheapest actionable row per supplier
+  }
+  const groups = new Map<string, Group>();
+  const supplierEligibleOfferCount = new Map<string, number>();
+
+  function resolveIdentity(o: SupplierOfferCurrent): { key: string; meta: IdentityMeta } | null {
+    if (o.productId) {
+      const p = productById.get(o.productId);
+      return {
+        key: o.productId,
+        meta: {
+          isCarried: true,
+          brand: p?.brand ?? "",
+          name: p?.name ?? "",
+          sizeMl: null,
+          concentration: p?.concentration || null,
+          productForm: "fragrance",
+          upc: p?.barcode ?? "",
+          ean: p?.barcode ?? "",
+        },
+      };
+    }
+    if (o.referenceProductId) {
+      const rp = referenceProductById.get(o.referenceProductId);
+      if (!rp) return null;
+      if (rp.productId) {
+        // Linked-pair rule: represented by the real Product's identity only.
+        const p = productById.get(rp.productId);
+        return {
+          key: rp.productId,
+          meta: {
+            isCarried: true,
+            brand: p?.brand ?? rp.brand,
+            name: p?.name ?? rp.name,
+            sizeMl: rp.sizeMl,
+            concentration: p?.concentration || rp.concentration,
+            productForm: rp.productForm,
+            upc: p?.barcode ?? rp.upc,
+            ean: p?.barcode ?? rp.ean,
+          },
+        };
+      }
+      return {
+        key: rp.id,
+        meta: {
+          isCarried: false,
+          brand: rp.brand,
+          name: rp.name,
+          sizeMl: rp.sizeMl,
+          concentration: rp.concentration,
+          productForm: rp.productForm,
+          upc: rp.upc,
+          ean: rp.ean,
+        },
+      };
+    }
+    return null;
+  }
+
+  for (let i = 0; i < suppliers.length; i++) {
+    const supplierId = suppliers[i].id;
+    for (const o of Object.values(offersBySupplier[i])) {
+      const identity = resolveIdentity(o);
+      if (!identity) continue; // unresolved offer -- never counted as a confirmed win
+
+      const rate = rateByCurrency.get(o.currency) ?? null;
+      const converted = convertToUsd(o.price, rate);
+      const ageDays = ageDaysOf(o.uploadedAt);
+      const row: OfferComparisonRow = {
+        supplierId,
+        supplierName: supplierById.get(supplierId)?.name ?? "Unknown Supplier",
+        offerKey: o.offerKey,
+        price: o.price,
+        currency: o.currency,
+        priceUsd: converted ?? o.price,
+        priceUsdValid: converted !== null,
+        currentlyListed: o.currentlyListed,
+        quantity: o.quantity,
+        isStale: ageDays > DEFAULT_FRESHNESS_THRESHOLD_DAYS,
+        ageDays: Math.round(ageDays * 10) / 10,
+        uploadedAt: o.uploadedAt,
+        reviewStatus: o.reviewStatus,
+        differenceFromBestUsd: null,
+      };
+      if (!isActionableOffer(row)) continue;
+
+      let group = groups.get(identity.key);
+      if (!group) {
+        group = { meta: identity.meta, rowsBySupplier: new Map() };
+        groups.set(identity.key, group);
+      }
+      const existing = group.rowsBySupplier.get(supplierId);
+      if (!existing || row.priceUsd < existing.priceUsd) {
+        if (!existing) supplierEligibleOfferCount.set(supplierId, (supplierEligibleOfferCount.get(supplierId) ?? 0) + 1);
+        group.rowsBySupplier.set(supplierId, row);
+      }
+    }
+  }
+
+  const competitiveProducts: LeaderboardProductEntry[] = [];
+  const singleSupplierProducts: LeaderboardSingleSupplierEntry[] = [];
+  const perSupplier = new Map<
+    string,
+    { competitiveProductCount: number; outrightWins: number; ties: number; totalPerUnitSavingsUsd: number; winCount: number; singleSupplierOnlyCount: number }
+  >();
+  const ensureSupplier = (id: string) => {
+    if (!perSupplier.has(id)) perSupplier.set(id, { competitiveProductCount: 0, outrightWins: 0, ties: 0, totalPerUnitSavingsUsd: 0, winCount: 0, singleSupplierOnlyCount: 0 });
+    return perSupplier.get(id)!;
+  };
+
+  for (const [key, group] of groups) {
+    const rows = [...group.rowsBySupplier.values()].sort((a, b) => a.priceUsd - b.priceUsd);
+    if (rows.length < 2) {
+      if (rows.length === 1) {
+        const r = rows[0];
+        singleSupplierProducts.push({
+          identityKey: key,
+          isCarried: group.meta.isCarried,
+          brand: group.meta.brand,
+          name: group.meta.name,
+          sizeMl: group.meta.sizeMl,
+          concentration: group.meta.concentration,
+          supplierId: r.supplierId,
+          supplierName: r.supplierName,
+          priceUsd: r.priceUsd,
+        });
+        ensureSupplier(r.supplierId).singleSupplierOnlyCount++;
+      }
+      continue;
+    }
+
+    for (const r of rows) ensureSupplier(r.supplierId).competitiveProductCount++;
+
+    const bestPriceUsd = Math.round(rows[0].priceUsd * 100) / 100;
+    const winners = rows.filter((r) => Math.round(r.priceUsd * 100) / 100 === bestPriceUsd);
+    const isTie = winners.length > 1;
+    const secondBestRow = rows[winners.length] ?? null;
+    const secondBestPriceUsd = secondBestRow ? secondBestRow.priceUsd : null;
+    const perUnitAdvantageUsd = !isTie && secondBestPriceUsd !== null ? Math.round((secondBestPriceUsd - bestPriceUsd) * 100) / 100 : null;
+    const perUnitAdvantagePct = !isTie && secondBestPriceUsd !== null && secondBestPriceUsd > 0 ? Math.round(((secondBestPriceUsd - bestPriceUsd) / secondBestPriceUsd) * 1000) / 10 : null;
+
+    if (isTie) {
+      for (const w of winners) ensureSupplier(w.supplierId).ties++;
+    } else {
+      const w = winners[0];
+      const s = ensureSupplier(w.supplierId);
+      s.outrightWins++;
+      if (perUnitAdvantageUsd !== null) {
+        s.totalPerUnitSavingsUsd += perUnitAdvantageUsd;
+        s.winCount++;
+      }
+    }
+
+    const offers: LeaderboardOfferRow[] = rows.map((r) => ({
+      supplierId: r.supplierId,
+      supplierName: r.supplierName,
+      offerKey: r.offerKey,
+      priceUsd: r.priceUsd,
+      quantity: r.quantity,
+      uploadedAt: r.uploadedAt,
+    }));
+
+    competitiveProducts.push({
+      identityKey: key,
+      isCarried: group.meta.isCarried,
+      brand: group.meta.brand,
+      name: group.meta.name,
+      sizeMl: group.meta.sizeMl,
+      concentration: group.meta.concentration,
+      productForm: group.meta.productForm,
+      upc: group.meta.upc,
+      ean: group.meta.ean,
+      winningSupplierIds: winners.map((w) => w.supplierId),
+      isTie,
+      bestPriceUsd,
+      secondBestPriceUsd,
+      perUnitAdvantageUsd,
+      perUnitAdvantagePct,
+      eligibleSupplierCount: rows.length,
+      offers,
+    });
+  }
+
+  const supplierSummaries: SupplierLeaderboardSummary[] = suppliers.map((s) => {
+    const stats = perSupplier.get(s.id) ?? { competitiveProductCount: 0, outrightWins: 0, ties: 0, totalPerUnitSavingsUsd: 0, winCount: 0, singleSupplierOnlyCount: 0 };
+    return {
+      supplierId: s.id,
+      supplierName: s.name,
+      competitiveProductCount: stats.competitiveProductCount,
+      outrightWins: stats.outrightWins,
+      ties: stats.ties,
+      winRate: stats.competitiveProductCount > 0 ? Math.round((stats.outrightWins / stats.competitiveProductCount) * 1000) / 10 : 0,
+      avgPerUnitSavingsUsd: stats.winCount > 0 ? Math.round((stats.totalPerUnitSavingsUsd / stats.winCount) * 100) / 100 : 0,
+      totalPerUnitSavingsUsd: Math.round(stats.totalPerUnitSavingsUsd * 100) / 100,
+      singleSupplierOnlyCount: stats.singleSupplierOnlyCount,
+      currentEligibleOfferCount: supplierEligibleOfferCount.get(s.id) ?? 0,
+    };
+  });
+
+  const outrightWinProductCount = competitiveProducts.filter((p) => !p.isTie).length;
+  const tiedProductCount = competitiveProducts.filter((p) => p.isTie).length;
+  const totals: LeaderboardTotals = {
+    competitiveProductCount: competitiveProducts.length,
+    outrightWinProductCount,
+    tiedProductCount,
+  };
+
+  return { suppliers: supplierSummaries, totals, competitiveProducts, singleSupplierProducts };
+}
+
+const PUBLISH_LEADERBOARD_SCRIPT = `
+local existingMeta = redis.call('GET', KEYS[1])
+if existingMeta then
+  local decoded = cjson.decode(existingMeta)
+  if tonumber(decoded.catalogVersion) > tonumber(ARGV[1]) then
+    return 'STALE'
+  end
+end
+redis.call('SET', KEYS[1], ARGV[2])
+redis.call('SET', KEYS[2], ARGV[3])
+return 'OK'
+`;
+
+/** Compare-and-set publish — never lets an older computation overwrite
+ *  a newer one. Compares only the small meta blob (catalogVersion), not
+ *  the full leaderboard payload, in Lua. */
+async function publishLeaderboardIfNewer(data: LeaderboardData): Promise<void> {
+  const meta = { catalogVersion: data.catalogVersion, generationFingerprint: data.generationFingerprint, computedAt: data.computedAt };
+  await redis.eval<(string | number)[], "OK" | "STALE">(
+    PUBLISH_LEADERBOARD_SCRIPT,
+    [KEYS.leaderboardMeta, KEYS.leaderboard],
+    [String(data.catalogVersion), JSON.stringify(meta), JSON.stringify(data)]
+  );
+}
+
+async function recomputeAndPublishLeaderboard(): Promise<LeaderboardData> {
+  const suppliers = await getSuppliers();
+  const before = await getCurrentLeaderboardFingerprint(suppliers);
+  let computed = await computeSupplierPriceLeaderboardData();
+  let fingerprint = before;
+
+  // Re-verify immediately before publishing/returning -- if anything
+  // changed DURING computation, recompute once more rather than publish
+  // a result that's already stale by the time it's done.
+  const after = await getCurrentLeaderboardFingerprint(suppliers);
+  if (after.generationFingerprint !== before.generationFingerprint || after.catalogVersion !== before.catalogVersion) {
+    computed = await computeSupplierPriceLeaderboardData();
+    fingerprint = await getCurrentLeaderboardFingerprint(suppliers);
+  }
+
+  const data: LeaderboardData = { ...computed, computedAt: new Date().toISOString(), ...fingerprint };
+  await publishLeaderboardIfNewer(data);
+
+  // If a concurrent, newer computation published in the meantime, return
+  // THAT instead of this caller's own (possibly now-stale) result.
+  const stored = await redis.get<LeaderboardData>(KEYS.leaderboard);
+  return stored && stored.catalogVersion >= data.catalogVersion ? stored : data;
+}
+
+/** The one entry point every leaderboard consumer (Supplier Price
+ *  Leaders, Buying Opportunities, the drill-down, search's price
+ *  preview) reads through. Verifies BOTH freshness signals before
+ *  trusting the cache; recomputes synchronously and republishes if
+ *  either is stale or missing — never knowingly returns stale data as
+ *  current. */
+export async function getSupplierPriceLeaderboard(): Promise<LeaderboardData> {
+  const suppliers = await getSuppliers();
+  const [cached, current] = await Promise.all([redis.get<LeaderboardData>(KEYS.leaderboard), getCurrentLeaderboardFingerprint(suppliers)]);
+  if (cached && cached.generationFingerprint === current.generationFingerprint && cached.catalogVersion === current.catalogVersion) {
+    return cached;
+  }
+  return recomputeAndPublishLeaderboard();
+}
+
+/** Lightweight accessor for search's price preview — one leaderboard
+ *  cache read (freshness-verified, recomputed if stale, same as any
+ *  other consumer), then O(1) in-memory map lookups. Never a live
+ *  per-result comparison-function call (confirmed live to cost 60+
+ *  seconds for a single search when it was tried that way). */
+export async function getPriceLeaderboardPreview(): Promise<{
+  byProductId: Map<string, { bestPriceUsd: number; eligibleSupplierCount: number }>;
+  byReferenceProductId: Map<string, { bestPriceUsd: number; eligibleSupplierCount: number }>;
+}> {
+  const board = await getSupplierPriceLeaderboard();
+  const byProductId = new Map<string, { bestPriceUsd: number; eligibleSupplierCount: number }>();
+  const byReferenceProductId = new Map<string, { bestPriceUsd: number; eligibleSupplierCount: number }>();
+  const assign = (map: Map<string, { bestPriceUsd: number; eligibleSupplierCount: number }>, key: string, bestPriceUsd: number, eligibleSupplierCount: number) =>
+    map.set(key, { bestPriceUsd, eligibleSupplierCount });
+
+  for (const p of board.competitiveProducts) assign(p.isCarried ? byProductId : byReferenceProductId, p.identityKey, p.bestPriceUsd, p.eligibleSupplierCount);
+  for (const p of board.singleSupplierProducts) assign(p.isCarried ? byProductId : byReferenceProductId, p.identityKey, p.priceUsd, 1);
+
+  return { byProductId, byReferenceProductId };
 }
