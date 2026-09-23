@@ -986,6 +986,16 @@ export async function getProductOfferComparison(productId: string): Promise<Prod
   for (let i = 0; i < refs.length; i++) {
     const offer = offers[i];
     if (!offer) continue;
+    // Only a currently-real, current supplier may appear in the default
+    // live comparison view — same eligibility check the leaderboard
+    // uses (computeSupplierPriceLeaderboardData only ever iterates
+    // getSuppliers()'s own list). An offer whose supplierId no longer
+    // resolves here is orphaned/historical (e.g. a deleted load-test
+    // supplier whose committed offers were never cleaned up) — it must
+    // never appear in actionable, nonActionable, or bestPrice. The
+    // underlying offer/generation data itself is untouched; this only
+    // excludes it from this read path.
+    if (!supplierById.has(refs[i].supplierId)) continue;
     const rate = await getUsdRate(offer.currency);
     const converted = convertToUsd(offer.price, rate?.rate ?? null);
     const ageDays = ageDaysOf(offer.uploadedAt);
@@ -1098,6 +1108,11 @@ export async function getReferenceProductOfferComparison(referenceProductId: str
   for (let i = 0; i < refs.length; i++) {
     const offer = offers[i];
     if (!offer) continue;
+    // Same current-supplier eligibility check as getProductOfferComparison
+    // and the leaderboard — an orphaned/historical supplierId must never
+    // appear in actionable, nonActionable, or bestPrice on this default
+    // live comparison view. See that function's comment for detail.
+    if (!supplierById.has(refs[i].supplierId)) continue;
     const rate = await getUsdRate(offer.currency);
     const converted = convertToUsd(offer.price, rate?.rate ?? null);
     const ageDays = ageDaysOf(offer.uploadedAt);
