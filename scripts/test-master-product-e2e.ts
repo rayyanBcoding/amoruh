@@ -212,21 +212,26 @@ console.log("\n=== Test F: genuine ambiguity stays searchable without a guessed 
 
 console.log("\n=== Test G: comparisons exclude uncertain offers from BEST PRICE (existing logic, re-confirmed) ===");
 {
-  // splitAndRankComparisonRows itself already filters to auto_matched/confirmed
-  // for actionable/bestPrice — re-verified directly against its own source
-  // rather than re-implemented here, since duplicating the filter would
-  // prove nothing about the real function.
+  // The auto_matched/confirmed filter was extracted out of
+  // splitAndRankComparisonRows into an exported isActionableOffer
+  // (Purchasing Intelligence Dashboard project) so the Supplier Price
+  // Leaders/Buying Opportunities bulk leaderboard reuses the EXACT same
+  // rule instead of a second "best price" definition — splitAndRank-
+  // ComparisonRows now calls isActionableOffer rather than inlining the
+  // check itself. Checking the new location, not the old one.
   const src = fs.readFileSync(new URL("../src/lib/pricing-db.ts", import.meta.url), "utf8");
-  const fnMatch = src.match(/function splitAndRankComparisonRows[\s\S]*?\n}\n/);
-  check("splitAndRankComparisonRows exists", Boolean(fnMatch));
+  const fnMatch = src.match(/function isActionableOffer[\s\S]*?\n}\n/);
+  check("isActionableOffer exists", Boolean(fnMatch));
   if (fnMatch) {
     const body = fnMatch[0];
     check(
       "actionable/bestPrice eligibility is gated to auto_matched/confirmed only",
       /reviewStatus\s*===\s*"auto_matched"/.test(body) && /reviewStatus\s*===\s*"confirmed"/.test(body),
-      "expected explicit auto_matched/confirmed checks in splitAndRankComparisonRows"
+      "expected explicit auto_matched/confirmed checks in isActionableOffer"
     );
   }
+  const splitFnMatch = src.match(/function splitAndRankComparisonRows[\s\S]*?\n}\n/);
+  check("splitAndRankComparisonRows exists and calls isActionableOffer", Boolean(splitFnMatch) && /isActionableOffer/.test(splitFnMatch![0]));
 }
 
 console.log("\n=== Test D: migration run twice creates zero duplicates (STATIC verification only) ===");

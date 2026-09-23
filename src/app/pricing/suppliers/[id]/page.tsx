@@ -6,6 +6,7 @@ import { upload } from "@vercel/blob/client";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
 import { ConfirmDangerAction } from "@/components/ConfirmDangerAction";
+import { SupplierPriceWinsTable } from "@/components/pricing/SupplierPriceWinsTable";
 import type { Supplier, SupplierColumnMapping } from "@/lib/intake-types";
 import type { SupplierPriceUpload, SupplierRawRow } from "@/lib/pricing-types";
 
@@ -436,6 +437,8 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
         </p>
 
         {error && <div className="glass-panel mb-6 rounded-xl border border-ld-red/30 p-4 text-sm text-ld-red">{error}</div>}
+
+        <SupplierPriceWinsTable supplierId={supplier.id} supplierName={supplier.name} />
 
         {editing && (
           <div className="glass-panel mb-6 rounded-2xl p-5">
