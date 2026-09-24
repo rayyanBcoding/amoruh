@@ -56,16 +56,24 @@ export function FocusedResolutionModal({ item: initialItem, onClose, onResolved 
     }
   };
 
-  const linkTracked = async (referenceProductId: string) => {
+  const linkTracked = async (referenceProductId: string, confirmOverride = false) => {
     setBusy(true);
     setError(null);
     try {
       const res = await fetch(`/api/pricing/suppliers/${item.supplierId}/offers/${encodeURIComponent(item.offerKey)}/link-reference-product`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ referenceProductId }),
+        body: JSON.stringify({ referenceProductId, confirmOverride }),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data?.requiresConfirmation) {
+        const warnings = (data.compatibility?.warnings ?? []).map((w: { message: string }) => `- ${w.message}`).join("\n");
+        setBusy(false);
+        if (window.confirm(`This doesn't look like the same product:\n\n${warnings}\n\nLink it anyway?`)) {
+          await linkTracked(referenceProductId, true);
+        }
+        return;
+      }
       if (!res.ok) throw new Error(data?.error ?? "Could not link this item.");
       setItem((prev) => ({ ...prev, referenceProductId }));
     } catch (err) {

@@ -540,7 +540,7 @@ function textScore(a: StructuredAttributes, b: StructuredAttributes): number {
  *  is what lets "Aventus by Creed 100ml" (no brand column) still
  *  confirm against a catalog product whose brand is "Creed". If
  *  NEITHER side has a brand at all, there's nothing to confirm against. */
-function brandsMatch(a: StructuredAttributes, b: StructuredAttributes): boolean {
+export function brandsMatch(a: StructuredAttributes, b: StructuredAttributes): boolean {
   if (a.brandToken && b.brandToken) {
     return a.brandToken === b.brandToken || bigramSimilarity(a.brandToken, b.brandToken) >= 0.8;
   }
@@ -564,7 +564,7 @@ function brandsMatch(a: StructuredAttributes, b: StructuredAttributes): boolean 
   return false;
 }
 
-function sizesMatch(a: number, b: number): boolean {
+export function sizesMatch(a: number, b: number): boolean {
   const diff = Math.abs(a - b);
   return diff <= 3 || diff / Math.max(a, b) <= 0.04;
 }
@@ -653,6 +653,125 @@ export function scoreStructuredMatch(a: StructuredAttributes, b: StructuredAttri
 
   const text = textScore(a, b);
   return { confidence: Math.min(1, 0.05 + text * 1.3), gate };
+}
+
+export interface ManualLinkWarning {
+  field: "brand" | "size" | "concentration" | "productForm" | "tester" | "giftSet" | "refill" | "barcode" | "name";
+  message: string;
+}
+
+// coreNameTokens (extractAttributes) is built for the general matcher
+// and deliberately leaves in things like bare "parfum" (a recognized
+// CONCENTRATION value, but only stripped from the token stream when it
+// appears as "eau de parfum" — a bare "PARFUM 125ml" survives), country
+// codes ("fr", "it") and single-letter gender markers ("u"/"w"/"m").
+// Confirmed directly against the real incident: "fr"+"parfum" shared
+// between "MISS DIOR ... PARFUM 125 ml FR" and "DIOR HOMME ... PARFUM
+// 125 ml FR" alone pushed token-set similarity to ~0.33 — just above a
+// 0.3 floor — even though the two fragrance NAMES share nothing. These
+// tokens are already compared separately (concentration/size are their
+// own dedicated checks above), so letting them inflate NAME similarity
+// specifically would under-warn on exactly the class of case this
+// safeguard exists to catch. Filtered locally, here only — the general
+// coreNameTokens extraction used throughout the rest of the matcher is
+// untouched.
+const NAME_COMPARISON_NOISE_TOKENS = new Set([
+  // Gender markers.
+  "u",
+  "w",
+  "m",
+  // Concentration words (already compared separately above).
+  "edt",
+  "edp",
+  "edc",
+  "cologne",
+  "extrait",
+  "parfum",
+  "eau",
+  "spray",
+  "sp",
+  "tester",
+  "tst",
+  // Country/region codes seen in this catalog's supplier text.
+  // Deliberately an explicit list, not a blanket 2-letter-token strip —
+  // a real flanker identifier can be 2 letters (e.g. Xerjoff's "XJ"
+  // line), and those must never be discarded.
+  "fr",
+  "it",
+  "es",
+  "uk",
+  "us",
+  "ae",
+  "de",
+  "se",
+  "tr",
+  "ca",
+]);
+function distinctiveNameTokens(tokens: string[]): string[] {
+  return tokens.filter((t) => !NAME_COMPARISON_NOISE_TOKENS.has(t));
+}
+
+export interface ManualLinkCompatibility {
+  /** True only when zero warnings were found. A manual link is never
+   *  blocked outright by this — it only gates whether the caller must
+   *  pass an explicit override before the link proceeds. */
+  compatible: boolean;
+  /** The same confidence scoreStructuredMatch would give this pair —
+   *  informational context alongside the specific warnings below, never
+   *  used to silently decide compatible/incompatible on its own. */
+  confidence: number;
+  warnings: ManualLinkWarning[];
+}
+
+/** Confirmed root cause of a real production incident (Miss Dior Master
+ *  Product carrying a Dior Homme offer): the manual "Link to tracked
+ *  item" action had NO structural check at all — an operator could link
+ *  any offer to any Master Product regardless of brand/name/size/
+ *  concentration/barcode mismatch, and the system trusted it at
+ *  confidence 1 with nothing surfaced. This computes the same per-field
+ *  comparison checkHardGates/scoreStructuredMatch already use internally,
+ *  but reports WHICH fields disagree (never just pass/fail) so a caller
+ *  can show a specific warning and require confirmation — reused
+ *  eligibility logic, not a second definition of "compatible." A
+ *  legitimate manual override (the whole point of this action existing)
+ *  must always remain possible; this never blocks outright. */
+export function checkManualLinkCompatibility(
+  offer: { attrs: StructuredAttributes; upc: string; ean: string },
+  target: { attrs: StructuredAttributes; upc: string; ean: string }
+): ManualLinkCompatibility {
+  const warnings: ManualLinkWarning[] = [];
+  const a = offer.attrs;
+  const b = target.attrs;
+
+  if (!brandsMatch(a, b)) {
+    warnings.push({ field: "brand", message: `Brand doesn't match: "${a.brandToken || "(unrecognized)"}" vs "${b.brandToken || "(unrecognized)"}"` });
+  }
+  if (a.sizeMl !== null && b.sizeMl !== null && !sizesMatch(a.sizeMl, b.sizeMl)) {
+    warnings.push({ field: "size", message: `Size doesn't match: ${a.sizeMl}ml vs ${b.sizeMl}ml` });
+  }
+  if (a.concentration && b.concentration && a.concentration !== b.concentration) {
+    warnings.push({ field: "concentration", message: `Concentration doesn't match: "${a.concentration}" vs "${b.concentration}"` });
+  }
+  if (a.productForm !== b.productForm) {
+    warnings.push({ field: "productForm", message: `Product form doesn't match: "${a.productForm}" vs "${b.productForm}"` });
+  }
+  if (a.isTester !== b.isTester) warnings.push({ field: "tester", message: `Tester status doesn't match (${a.isTester ? "tester" : "retail"} vs ${b.isTester ? "tester" : "retail"})` });
+  if (a.isGiftSet !== b.isGiftSet) warnings.push({ field: "giftSet", message: "Gift-set status doesn't match" });
+  if (a.isRefill !== b.isRefill) warnings.push({ field: "refill", message: "Refill status doesn't match" });
+
+  const offerCode = (offer.upc || offer.ean).trim().toUpperCase();
+  const targetCode = (target.upc || target.ean).trim().toUpperCase();
+  if (isPlausibleBarcode(offerCode) && isPlausibleBarcode(targetCode) && offerCode !== targetCode) {
+    warnings.push({ field: "barcode", message: `Barcode doesn't match: ${offerCode} vs ${targetCode}` });
+  }
+
+  const nameSimilarity = tokenSetSimilarity(distinctiveNameTokens(a.coreNameTokens), distinctiveNameTokens(b.coreNameTokens));
+  if (nameSimilarity < 0.35) {
+    warnings.push({ field: "name", message: `Fragrance name looks very different (${Math.round(nameSimilarity * 100)}% word overlap)` });
+  }
+
+  const { confidence } = scoreStructuredMatch(a, b);
+  return { compatible: warnings.length === 0, confidence, warnings };
 }
 
 // ---------------------------------------------------------------------

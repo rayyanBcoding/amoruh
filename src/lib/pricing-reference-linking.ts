@@ -9,7 +9,7 @@ import {
   resolveOfferManually,
   type OffersByReferenceProductOp,
 } from "./pricing-db";
-import { extractAttributes, isPlausibleBarcode } from "./pricing-matching";
+import { extractAttributes, isPlausibleBarcode, checkManualLinkCompatibility, type ManualLinkCompatibility } from "./pricing-matching";
 import type { PricingReferenceProduct } from "./pricing-types";
 
 // ---------------------------------------------------------------------
@@ -36,6 +36,13 @@ export interface ReferenceLinkResult {
    *  linked instead of creating a duplicate — surface this to the
    *  operator rather than silently doing either. */
   linkedExisting?: boolean;
+  /** Set instead of proceeding when linkOfferToReferenceProduct finds a
+   *  brand/size/concentration/form/tester/giftSet/refill/barcode/name
+   *  mismatch and the caller didn't pass confirmOverride — ok is false,
+   *  nothing was linked, and the caller must show these warnings and
+   *  re-call with confirmOverride: true to proceed. Never silently
+   *  assigns confidence 1 on an incompatible pair without this step. */
+  requiresConfirmation?: ManualLinkCompatibility;
 }
 
 async function applyReferenceLink(
@@ -186,13 +193,40 @@ export async function createReferenceProductForOffer(
   return { ok: true, referenceProduct };
 }
 
+/** The "Link to tracked item" search-and-pick action — an operator can
+ *  choose ANY existing Master Product here, unlike every other link path
+ *  in this file (which only ever links via an exact UPC/EAN match).
+ *  Confirmed root cause of a real incident: a Dior Homme offer was
+ *  manually linked to the Miss Dior Master Product, with no warning and
+ *  confidence set to 1. Every pick now runs checkManualLinkCompatibility
+ *  first (the same field-by-field check the rest of the matcher already
+ *  uses) — a clean pick proceeds exactly as before; an incompatible one
+ *  is refused with the specific warnings UNLESS the caller explicitly
+ *  passes confirmOverride: true, which is how a genuine override (the
+ *  reason this action exists at all) still gets through. */
 export async function linkOfferToReferenceProduct(
   supplierId: string,
   offerKey: string,
-  referenceProductId: string
+  referenceProductId: string,
+  confirmOverride = false
 ): Promise<ReferenceLinkResult> {
   const referenceProduct = await getReferenceProduct(referenceProductId);
   if (!referenceProduct) return { ok: false, error: "That tracked item no longer exists." };
+
+  if (!confirmOverride) {
+    const offer = await getCurrentOffer(supplierId, offerKey);
+    if (!offer) return { ok: false, error: "This supplier offer no longer exists." };
+    const offerAttrs = extractAttributes(`${offer.brand} ${offer.description}`, offer.brand);
+    const targetAttrs = extractAttributes(`${referenceProduct.brand} ${referenceProduct.description}`, referenceProduct.brand);
+    const compatibility = checkManualLinkCompatibility(
+      { attrs: offerAttrs, upc: offer.upc, ean: offer.ean },
+      { attrs: targetAttrs, upc: referenceProduct.upc, ean: referenceProduct.ean }
+    );
+    if (!compatibility.compatible) {
+      return { ok: false, requiresConfirmation: compatibility };
+    }
+  }
+
   const result = await applyReferenceLink(supplierId, offerKey, referenceProductId);
   if (!result.ok) return result;
   return { ok: true, referenceProduct };
