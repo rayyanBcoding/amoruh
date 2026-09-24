@@ -106,16 +106,24 @@ export default function MatchReviewPage() {
     }
   };
 
-  const linkTrackedItem = async (item: MatchReviewItem, referenceProductId: string) => {
+  const linkTrackedItem = async (item: MatchReviewItem, referenceProductId: string, confirmOverride = false) => {
     setBusyKey(itemKey(item));
     setError(null);
     try {
       const res = await fetch(`/api/pricing/suppliers/${item.supplierId}/offers/${encodeURIComponent(item.offerKey)}/link-reference-product`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ referenceProductId }),
+        body: JSON.stringify({ referenceProductId, confirmOverride }),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data?.requiresConfirmation) {
+        const warnings = (data.compatibility?.warnings ?? []).map((w: { message: string }) => `- ${w.message}`).join("\n");
+        setBusyKey(null);
+        if (window.confirm(`This doesn't look like the same product:\n\n${warnings}\n\nLink it anyway?`)) {
+          await linkTrackedItem(item, referenceProductId, true);
+        }
+        return;
+      }
       if (!res.ok) throw new Error(data?.error ?? "Could not link this item.");
       loadPage(0, false); // moves the item to the Tracked sub-view / updates counts
     } catch (err) {
