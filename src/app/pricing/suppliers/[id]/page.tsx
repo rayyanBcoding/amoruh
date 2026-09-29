@@ -103,6 +103,11 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
   // fetch takes a ticket before awaiting; its result is only applied if
   // no newer ticket has been issued by the time it resolves.
   const previewRequestSeq = useRef(0);
+  // Same stale-response guard, for the separate resumable matching-batch
+  // loop below — a header/column change must be able to abandon an
+  // in-flight batch loop for the OLD mapping without its later responses
+  // clobbering the new one's progress.
+  const matchRequestSeq = useRef(0);
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [uploads, setUploads] = useState<SupplierPriceUpload[]>([]);
   const [stage, setStage] = useState<Stage>("idle");
@@ -131,6 +136,10 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
   const [sanityCheck, setSanityCheck] = useState<SanityCheck | null>(null);
   const [matchPreview, setMatchPreview] = useState<MatchPreviewSummary | null>(null);
   const [importAnomaly, setImportAnomaly] = useState<ImportAnomalyAssessment | null>(null);
+  // Progress for the resumable matching-batch loop — null before it
+  // starts, {cursor, totalRows, done: false} while running, done: true
+  // once matchPreview/importAnomaly above hold the final aggregate.
+  const [matchProgress, setMatchProgress] = useState<{ cursor: number; totalRows: number; done: boolean } | null>(null);
   const [confirmAnomalyAnyway, setConfirmAnomalyAnyway] = useState(false);
   const [uploadType, setUploadType] = useState<"full" | "partial">("full");
   const [result, setResult] = useState<SupplierPriceUpload | null>(null);
@@ -224,9 +233,70 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
 
   const columnAt = (idx: number | undefined) => columns.find((c) => c.index === idx);
 
-  // Re-fetches the full preview pass whenever the header row or column
-  // map changes, so what's shown is never stale relative to the current
-  // selection. Never writes anything.
+  // Drives /api/pricing/parse-preview/match-batch in a loop until done —
+  // the resumable replacement for the single all-rows-in-one-request
+  // matching pass that used to time out on a large/new-supplier file
+  // (see that route's own comment). Never writes a supplier offer or
+  // Master Product; only ever reads and updates the throwaway matching-
+  // session cache server-side. Abandons itself cleanly if a newer
+  // matchRequestSeq (a header/column change, or a fresh file) starts a
+  // different run in the meantime.
+  const runMatchBatches = async (
+    hri: number,
+    hs: string[],
+    cm: SupplierColumnMapping["columnMap"],
+    sanityOk: boolean
+  ) => {
+    const myMatchSeq = ++matchRequestSeq.current;
+    setMatchPreview(null);
+    setImportAnomaly(null);
+    setConfirmAnomalyAnyway(false);
+    setMatchProgress(null);
+    if (!blobUrl || !sanityOk) return;
+
+    let cursor = 0;
+    let sessionId: string | undefined;
+    try {
+      while (true) {
+        const res = await fetch("/api/pricing/parse-preview/match-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ supplierId: id, blobUrl, headerRowIndex: hri, headerSignature: hs, columnMap: cm, cursor, sessionId }),
+        });
+        const data = await safeParseJsonResponse(res);
+        if (myMatchSeq !== matchRequestSeq.current) return; // superseded by a newer run
+
+        if (!res.ok) {
+          if (data?.sessionExpired) {
+            // Safe-resume contract: an expired/out-of-sync session just
+            // means starting the matching pass over from row 0, not a
+            // hard failure — nothing was ever written, so this is free.
+            cursor = 0;
+            sessionId = undefined;
+            continue;
+          }
+          throw new Error(data?.error ?? "Could not match this file against the catalog.");
+        }
+
+        cursor = data.cursor;
+        sessionId = data.sessionId ?? undefined;
+        setMatchProgress({ cursor, totalRows: data.totalRows, done: data.done });
+        setMatchPreview(data.runningTotals);
+        if (data.done) {
+          setImportAnomaly(data.importAnomaly ?? null);
+          return;
+        }
+      }
+    } catch (err) {
+      if (myMatchSeq === matchRequestSeq.current) {
+        setError(err instanceof Error ? err.message : "Could not match this file against the catalog.");
+      }
+    }
+  };
+
+  // Re-fetches the fast parse/mapping/sanity pass whenever the header
+  // row or column map changes, then (re)starts the matching-batch loop
+  // for the newly-confirmed mapping. Never writes anything.
   const refreshPreview = async (overrides: { headerRowIndex?: number; columnMap?: SupplierColumnMapping["columnMap"] }) => {
     if (!blobUrl) return;
     const myRequestSeq = ++previewRequestSeq.current;
@@ -259,10 +329,8 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
       setPreviewRows(data.previewRows);
       setTotalProductRows(data.totalProductRows);
       setSanityCheck(data.sanityCheck);
-      setMatchPreview(data.matchPreview ?? null);
-      setImportAnomaly(data.importAnomaly ?? null);
-      setConfirmAnomalyAnyway(false);
       setUploadType(data.defaultUploadType ?? "full");
+      void runMatchBatches(data.headerRowIndex, data.headerSignature, data.columnMap, Boolean(data.sanityCheck?.ok));
       return data;
     } catch (err) {
       if (myRequestSeq === previewRequestSeq.current) {
@@ -308,10 +376,8 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
       setPreviewRows(data.previewRows);
       setTotalProductRows(data.totalProductRows);
       setSanityCheck(data.sanityCheck);
-      setMatchPreview(data.matchPreview ?? null);
-      setImportAnomaly(data.importAnomaly ?? null);
-      setConfirmAnomalyAnyway(false);
       setUploadType(data.defaultUploadType ?? "full");
+      void runMatchBatches(data.headerRowIndex, data.headerSignature, data.columnMap, Boolean(data.sanityCheck?.ok));
 
       // Reuse only ever skips the column-mapping step — Preview is
       // always shown, regardless.
@@ -388,6 +454,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
   };
 
   const reset = () => {
+    matchRequestSeq.current++; // abandon any in-flight matching-batch loop
     setStage("idle");
     setBlobUrl(null);
     setColumns([]);
@@ -396,6 +463,7 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
     setSanityCheck(null);
     setMatchPreview(null);
     setImportAnomaly(null);
+    setMatchProgress(null);
     setConfirmAnomalyAnyway(false);
     setResult(null);
     setError(null);
@@ -685,10 +753,25 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                 </div>
               )}
 
+              {matchProgress && !matchProgress.done && (
+                <div className="rounded-xl border border-ld-border bg-ld-bg-elevated p-4">
+                  <p className="mb-2 text-xs font-semibold text-ld-white">
+                    Matching {matchProgress.cursor.toLocaleString()} of {matchProgress.totalRows.toLocaleString()} rows…
+                  </p>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-ld-border">
+                    <div
+                      className="h-full rounded-full bg-ld-purple transition-all"
+                      style={{ width: `${matchProgress.totalRows > 0 ? Math.min(100, (matchProgress.cursor / matchProgress.totalRows) * 100) : 0}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {matchPreview && (
                 <div>
                   <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-ld-muted">
                     What This Upload Would Do (matching-level, before you commit)
+                    {matchProgress && !matchProgress.done && " — running totals so far"}
                   </p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                     <PreviewStat label="Total Rows" value={matchPreview.totalRows} />
@@ -723,10 +806,17 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
                 <Button
                   variant="primary"
                   size="lg"
-                  disabled={!sanityCheck?.ok || loadingPreview || (Boolean(importAnomaly?.flagged) && !confirmAnomalyAnyway)}
+                  disabled={
+                    !sanityCheck?.ok ||
+                    loadingPreview ||
+                    Boolean(matchProgress && !matchProgress.done) ||
+                    (Boolean(importAnomaly?.flagged) && !confirmAnomalyAnyway)
+                  }
                   onClick={submitProcess}
                 >
-                  Process {totalProductRows.toLocaleString()} Product{totalProductRows === 1 ? "" : "s"}
+                  {matchProgress && !matchProgress.done
+                    ? "Matching…"
+                    : `Process ${totalProductRows.toLocaleString()} Product${totalProductRows === 1 ? "" : "s"}`}
                 </Button>
               </div>
             </div>

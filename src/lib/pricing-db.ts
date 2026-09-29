@@ -34,6 +34,7 @@ import {
   quickTextSimilarity,
   resolveEffectiveBrand,
   type MasterCandidate,
+  type MatchPreviewBatchState,
 } from "./pricing-matching";
 import { bigramSimilarity, normalize } from "./intake-matching";
 import { getProducts } from "./db";
@@ -110,7 +111,16 @@ const KEYS = {
    *  creation) — the second of the two signals the leaderboard cache
    *  verifies before trusting itself as current. */
   catalogVersion: "amoruh:pricing:catalog_version",
+  /** Resumable parse-preview matching session — see
+   *  /api/pricing/parse-preview/match-batch. Short-TTL only: nothing
+   *  here is ever the source of truth for anything (preview never
+   *  writes offers/Master Products), it's purely plumbing so a large
+   *  file's dry-run matching can be split across several bounded
+   *  requests instead of one that risks exceeding the function timeout. */
+  previewMatchSession: (sessionId: string) => `amoruh:pricing:preview_match_session:${sessionId}`,
 } as const;
+
+const PREVIEW_MATCH_SESSION_TTL_SECONDS = 900;
 
 export function newId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -177,6 +187,33 @@ export async function updateUploadProgress(uploadId: string, patch: Partial<Supp
 
 export async function markUploadFailed(uploadId: string, error: string): Promise<void> {
   await updateUploadProgress(uploadId, { status: "failed" as UploadStatus, error, completedAt: new Date().toISOString() });
+}
+
+// ---------------------------------------------------------------------
+// Resumable parse-preview matching sessions — see
+// /api/pricing/parse-preview/match-batch and stepMatchPreviewBatch
+// (pricing-matching.ts). Read-only from the rest of the app's
+// perspective: this is the ONLY Redis write parse-preview's matching
+// pass ever makes, and it's throwaway plumbing (short TTL, never read
+// by anything else, never referenced by a real offer/Master Product).
+// ---------------------------------------------------------------------
+
+export async function createPreviewMatchSession(state: MatchPreviewBatchState, cursor: number): Promise<string> {
+  const sessionId = newId("previewmatch");
+  await redis.set(KEYS.previewMatchSession(sessionId), { state, cursor }, { ex: PREVIEW_MATCH_SESSION_TTL_SECONDS });
+  return sessionId;
+}
+
+export async function getPreviewMatchSession(sessionId: string): Promise<{ state: MatchPreviewBatchState; cursor: number } | null> {
+  return (await redis.get<{ state: MatchPreviewBatchState; cursor: number }>(KEYS.previewMatchSession(sessionId))) ?? null;
+}
+
+export async function savePreviewMatchSession(sessionId: string, state: MatchPreviewBatchState, cursor: number): Promise<void> {
+  await redis.set(KEYS.previewMatchSession(sessionId), { state, cursor }, { ex: PREVIEW_MATCH_SESSION_TTL_SECONDS });
+}
+
+export async function deletePreviewMatchSession(sessionId: string): Promise<void> {
+  await redis.del(KEYS.previewMatchSession(sessionId));
 }
 
 export async function getUploadsForSupplier(supplierId: string, limit = 20): Promise<SupplierPriceUpload[]> {

@@ -1491,35 +1491,63 @@ export interface MatchPreviewSummary {
   nonProductRows: number;
 }
 
-export function computeMatchPreview(
+/** Resumable state for stepMatchPreviewBatch — carries everything a
+ *  batch needs to pick up exactly where the previous batch (in the same
+ *  preview pass) left off, so a large file's preview can be matched in
+ *  several bounded HTTP requests instead of one that risks exceeding
+ *  Vercel's function timeout (see /api/pricing/parse-preview/match-batch).
+ *  Cheap enough to serialize into a short-TTL Redis session between
+ *  batches: previewPoolAdditions only ever holds the synthetic
+ *  "would-create" entries actually proposed so far (a small subset of
+ *  rows), never the full reference-product catalog. */
+export interface MatchPreviewBatchState {
+  previewPoolAdditions: PricingReferenceProduct[];
+  previewIdSeq: number;
+  matchedProduct: number;
+  matchedReferenceProduct: number;
+  proposedNewMasterProducts: number;
+  requiresReview: number;
+  nonProductRows: number;
+}
+
+export function createEmptyMatchPreviewBatchState(): MatchPreviewBatchState {
+  return {
+    previewPoolAdditions: [],
+    previewIdSeq: 0,
+    matchedProduct: 0,
+    matchedReferenceProduct: 0,
+    proposedNewMasterProducts: 0,
+    requiresReview: 0,
+    nonProductRows: 0,
+  };
+}
+
+/** Processes exactly the given slice of rows and mutates `state` in
+ *  place — the single source of truth for preview matching, shared by
+ *  the resumable batch endpoint and by computeMatchPreview below (which
+ *  is just this run once, over every row, with a fresh state). Reuses
+ *  the SAME in-memory "would auto-create" pool trick computeMatchPreview
+ *  always has (plan §4/§5b): a genuine repeat of the same physical item
+ *  across rows — including across separate batches, since the caller
+ *  carries `state` forward — is only counted once, never twice. Never
+ *  writes to Redis; `referenceProducts` is the real catalog as of THIS
+ *  call, and `state.previewPoolAdditions` is layered on top of it fresh
+ *  every batch (rebuilding the bucketed pool each call was measured at
+ *  ~180ms against the current ~15,000-record catalog — negligible next
+ *  to the per-row matching cost this is here to bound). */
+export function stepMatchPreviewBatch(
   rows: { supplierSku: string; description: string; brand: string; upc: string; ean: string }[],
   products: Product[],
   aliases: SupplierAlias[],
-  referenceProducts: PricingReferenceProduct[]
-): MatchPreviewSummary {
-  let matchedProduct = 0;
-  let matchedReferenceProduct = 0;
-  let proposedNewMasterProducts = 0;
-  let requiresReview = 0;
-  let nonProductRows = 0;
-
-  // A local, in-memory-only "would auto-create" pool — mirrors the real
-  // upload's own mutable in-import list (plan §4/§5b) so a genuine
-  // repeat of the same physical item within this SAME preview is only
-  // counted once, not twice. Never written to Redis; discarded with this
-  // function call.
-  const previewPool = [...referenceProducts];
-  let previewIdSeq = 0;
-
-  // Built ONCE from the starting catalog, then grown incrementally in
-  // lockstep with previewPool below — never rebuilt per row, and brand-
-  // bucketed rather than a flat pool (see matchSupplierRow's
-  // precomputedBucketedPool comment for why both mattered).
+  referenceProducts: PricingReferenceProduct[],
+  state: MatchPreviewBatchState
+): void {
+  const previewPool = referenceProducts.concat(state.previewPoolAdditions);
   const candidatePool = buildBrandBucketedPool(buildMasterCandidatePool(products, previewPool));
 
   for (const row of rows) {
     if (!isValidProductRow(row)) {
-      nonProductRows++;
+      state.nonProductRows++;
       continue;
     }
 
@@ -1527,8 +1555,8 @@ export function computeMatchPreview(
     const match = matchSupplierRow({ offerKey, ...row }, products, aliases, previewPool, candidatePool);
 
     if (match.reviewStatus === "auto_matched") {
-      if (match.productId) matchedProduct++;
-      else matchedReferenceProduct++;
+      if (match.productId) state.matchedProduct++;
+      else state.matchedReferenceProduct++;
       continue;
     }
     if (match.reviewStatus === "new_candidate") {
@@ -1540,12 +1568,12 @@ export function computeMatchPreview(
       if (!eligibility.eligible) {
         // Incomplete/ambiguous — this is a genuine Match Review case,
         // not a separate "unsupported" limbo.
-        requiresReview++;
+        state.requiresReview++;
         continue;
       }
-      proposedNewMasterProducts++;
+      state.proposedNewMasterProducts++;
       const newReferenceProduct: PricingReferenceProduct = {
-        id: `preview_${previewIdSeq++}`,
+        id: `preview_${state.previewIdSeq++}`,
         brand: effectiveBrand,
         name: row.description,
         description: row.description,
@@ -1566,6 +1594,7 @@ export function computeMatchPreview(
         createdFromOfferKey: null,
       };
       previewPool.push(newReferenceProduct);
+      state.previewPoolAdditions.push(newReferenceProduct);
       addToBrandBucketedPool(candidatePool, {
         productId: null,
         referenceProductId: newReferenceProduct.id,
@@ -1576,10 +1605,26 @@ export function computeMatchPreview(
       continue;
     }
     // needs_review, alias_conflict, barcode_conflict
-    requiresReview++;
+    state.requiresReview++;
   }
+}
 
-  return { totalRows: rows.length, matchedProduct, matchedReferenceProduct, proposedNewMasterProducts, requiresReview, nonProductRows };
+export function computeMatchPreview(
+  rows: { supplierSku: string; description: string; brand: string; upc: string; ean: string }[],
+  products: Product[],
+  aliases: SupplierAlias[],
+  referenceProducts: PricingReferenceProduct[]
+): MatchPreviewSummary {
+  const state = createEmptyMatchPreviewBatchState();
+  stepMatchPreviewBatch(rows, products, aliases, referenceProducts, state);
+  return {
+    totalRows: rows.length,
+    matchedProduct: state.matchedProduct,
+    matchedReferenceProduct: state.matchedReferenceProduct,
+    proposedNewMasterProducts: state.proposedNewMasterProducts,
+    requiresReview: state.requiresReview,
+    nonProductRows: state.nonProductRows,
+  };
 }
 
 // ---------------------------------------------------------------------
