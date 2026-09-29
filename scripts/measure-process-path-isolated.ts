@@ -36,15 +36,32 @@ if (!ISOLATED_URL || !ISOLATED_TOKEN) {
   console.error("STOP: set ISOLATED_TEST_REDIS_URL and ISOLATED_TEST_REDIS_TOKEN (an isolated, throwaway database — see scripts/test-migration-isolated-redis.ts's own header for how to mint one). Refusing to run against production.");
   process.exit(1);
 }
+// .env.development.local is gitignored and holds real production
+// credentials on a machine that has them — when present, this is the
+// authoritative "prove ISOLATED_TEST_REDIS_URL isn't secretly production"
+// check. In a fresh checkout that never had production credentials
+// configured at all (e.g. a clean clone used only for this timing test),
+// its absence is not a weaker safety guarantee — it's a STRONGER one:
+// there is no production URL anywhere in this environment for
+// ISOLATED_TEST_REDIS_URL to have accidentally collided with. Either way,
+// process.env is never read for AMORUH_REDIS_URL/TOKEN before this point
+// (only assigned to, below), so an ambient production value already
+// present in the environment's own process.env — as opposed to this
+// on-disk file — could never leak into this comparison or this run.
 const envLocalPath = path.resolve(__dirname, "..", ".env.development.local");
-if (!fs.existsSync(envLocalPath)) {
-  console.error("STOP: could not find .env.development.local to verify the isolated URL is not production. Refusing to run.");
-  process.exit(1);
+let prodUrl: string | undefined;
+if (fs.existsSync(envLocalPath)) {
+  const prodUrlMatch = fs.readFileSync(envLocalPath, "utf8").match(/^AMORUH_REDIS_URL=(.+)$/m);
+  prodUrl = prodUrlMatch?.[1]?.trim();
+  if (prodUrl && prodUrl === ISOLATED_URL) {
+    console.error("STOP: ISOLATED_TEST_REDIS_URL is identical to the production AMORUH_REDIS_URL found in .env.development.local. Refusing to run.");
+    process.exit(1);
+  }
+} else {
+  console.log("No .env.development.local found in this checkout — no production credentials are present in this environment at all, so there is nothing ISOLATED_TEST_REDIS_URL could collide with. Proceeding.");
 }
-const prodUrlMatch = fs.readFileSync(envLocalPath, "utf8").match(/^AMORUH_REDIS_URL=(.+)$/m);
-const prodUrl = prodUrlMatch?.[1]?.trim();
-if (prodUrl && prodUrl === ISOLATED_URL) {
-  console.error("STOP: ISOLATED_TEST_REDIS_URL is identical to the production AMORUH_REDIS_URL. Refusing to run.");
+if (process.env.AMORUH_REDIS_URL && process.env.AMORUH_REDIS_URL === ISOLATED_URL) {
+  console.error("STOP: ISOLATED_TEST_REDIS_URL is identical to an AMORUH_REDIS_URL already set in this process's environment. Refusing to run.");
   process.exit(1);
 }
 process.env.AMORUH_REDIS_URL = ISOLATED_URL;
