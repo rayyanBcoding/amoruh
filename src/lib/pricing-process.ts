@@ -1,5 +1,6 @@
 import { getProducts } from "./db";
 import {
+  bumpCatalogVersion,
   commitGeneration,
   createUpload,
   getAliasesForSupplier,
@@ -7,6 +8,7 @@ import {
   getCommittedOffers,
   getOrCreateReferenceProductByIdentity,
   getUpload,
+  indexReferenceProductForSearch,
   markUploadFailed,
   newId,
   updateUploadProgress,
@@ -708,15 +710,54 @@ export async function processSupplierUpload(input: {
     // issued concurrently instead of one-at-a-time. Chunked (not one
     // unbounded Promise.all) to keep a sane bound on concurrent Redis
     // calls, mirroring writeSnapshotsBatch's own CHUNK size below.
+    //
+    // skipSearchIndexAndVersionBump: true — a newly-created reference
+    // product's search-token indexing and catalogVersion invalidation
+    // don't need to happen INSIDE each row's own atomic create call; they
+    // only need to happen once, for real, before this function returns.
+    // Doing them per-row here would mean every one of potentially
+    // thousands of new-item rows in a single upload pays for two EXTRA
+    // sequential Redis round trips on top of the atomic create script
+    // itself — moving them to one dedicated bulk pass right after this
+    // loop (below) cuts that back to a single wave, without changing
+    // atomic identity creation/dedup at all (untouched, still one script,
+    // still race-safe) and without skipping either side effect: every
+    // "created" product below is still indexed and the version is still
+    // bumped, just once for the whole batch instead of once per row.
     const PERSIST_CONCURRENCY = 100;
-    const persistResults = new Map<string, { status: "created" | "existing"; id: string } | { status: "conflict"; ids: string[] }>();
+    const persistResults = new Map<
+      string,
+      { status: "created"; id: string; product: PricingReferenceProduct } | { status: "existing"; id: string } | { status: "conflict"; ids: string[] }
+    >();
+    const newlyCreatedForIndexing: PricingReferenceProduct[] = [];
     for (let i = 0; i < pendingPersists.length; i += PERSIST_CONCURRENCY) {
       const chunk = pendingPersists.slice(i, i + PERSIST_CONCURRENCY);
-      const results = await Promise.all(chunk.map((p) => getOrCreateReferenceProductByIdentity(p.identity, p.newRecordInput)));
+      const results = await Promise.all(chunk.map((p) => getOrCreateReferenceProductByIdentity(p.identity, p.newRecordInput, { skipSearchIndexAndVersionBump: true })));
       chunk.forEach((p, idx) => {
         const r = results[idx];
-        persistResults.set(p.placeholderId, r.status === "conflict" ? { status: "conflict", ids: r.ids } : { status: r.status, id: r.id });
+        if (r.status === "conflict") {
+          persistResults.set(p.placeholderId, { status: "conflict", ids: r.ids });
+        } else if (r.status === "created") {
+          persistResults.set(p.placeholderId, { status: "created", id: r.id, product: r.product });
+          newlyCreatedForIndexing.push(r.product);
+        } else {
+          persistResults.set(p.placeholderId, { status: "existing", id: r.id });
+        }
       });
+    }
+    // The one dedicated bulk pass: every product actually created above
+    // becomes searchable, and the catalog-version counter is bumped
+    // exactly once for the whole upload (not once per created item) —
+    // still fires even if this generation's own commit later turns out
+    // stale, matching the existing invariant that a created reference
+    // product is real and permanent (never rolled back) regardless of
+    // whether the supplier generation that prompted it ends up current.
+    if (newlyCreatedForIndexing.length > 0) {
+      const INDEX_CONCURRENCY = 100;
+      for (let i = 0; i < newlyCreatedForIndexing.length; i += INDEX_CONCURRENCY) {
+        await Promise.all(newlyCreatedForIndexing.slice(i, i + INDEX_CONCURRENCY).map((p) => indexReferenceProductForSearch(p)));
+      }
+      await bumpCatalogVersion();
     }
 
     // Patch EVERY row that ended up referencing a placeholder — not just

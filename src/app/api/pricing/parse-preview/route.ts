@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
 import { getSupplier } from "@/lib/intake-db";
-import { getProducts } from "@/lib/db";
-import { getAliasesForSupplier, getAllReferenceProducts, getUploadsForSupplier } from "@/lib/pricing-db";
-import { computeMatchPreview } from "@/lib/pricing-matching";
-import { assessImportAnomalyRisk } from "@/lib/pricing-process";
 import {
   applyColumnMapping,
   buildColumnPreview,
@@ -32,13 +28,23 @@ interface Body {
   columnMap?: SupplierColumnMapping["columnMap"];
 }
 
-// POST /api/pricing/parse-preview — the full preview pass. Called once
-// on upload, then AGAIN every time the operator changes the header row
-// or any column choice, so the preview/counts/sanity check are never
-// stale relative to what's actually selected. Never writes anything —
-// see /api/pricing/process for the path that actually applies a
-// confirmed mapping (and re-verifies it independently rather than
-// trusting this response).
+// POST /api/pricing/parse-preview — fast parse + header/column mapping +
+// sanity check ONLY. Called once on upload, then AGAIN every time the
+// operator changes the header row or any column choice, so the mapping/
+// sanity check are never stale relative to what's actually selected.
+// Never writes anything.
+//
+// Structural matching (what USED to run here as matchPreview/
+// importAnomaly) has moved to /api/pricing/parse-preview/match-batch,
+// called by the client in bounded, resumable batches AFTER this fast
+// response lands — see that route's own comment. Splitting it out is
+// the actual fix for the confirmed Classic Wholesale 504: this route's
+// own cost (blob fetch + spreadsheet parse + sanity check) is small and
+// bounded regardless of catalog size; the matching pass is the part
+// whose cost scales with both row count and catalog size (confirmed up
+// to 22.48ms/row in the unrecognized-brand fallback case — see
+// scripts/measure-baseline-matching-costs.ts) and needed to be moved out
+// of any single fixed-duration request.
 export async function POST(req: Request) {
   let body: Body;
   try {
@@ -82,25 +88,6 @@ export async function POST(req: Request) {
   const sanityCheck = computeSanityChecks(parsedRows);
   const columns = buildColumnPreview(rawRows, headerRowIndex);
 
-  // Second line of defense — matching-level, on top of the header/
-  // mapping sanity check above. Never writes anything: a read-only
-  // dry-match pass over the parsed rows, extending this SAME Preview
-  // step rather than a third UI step (plan's "Import safety" section).
-  // Skipped when the mapping already fails sanity — there's nothing
-  // trustworthy to dry-match yet.
-  let matchPreview = null;
-  let importAnomaly = null;
-  if (sanityCheck.ok) {
-    const [products, aliases, referenceProducts, priorUploads] = await Promise.all([
-      getProducts(),
-      getAliasesForSupplier(body.supplierId),
-      getAllReferenceProducts(),
-      getUploadsForSupplier(body.supplierId, 10),
-    ]);
-    matchPreview = computeMatchPreview(parsedRows, products, aliases, referenceProducts);
-    importAnomaly = assessImportAnomalyRisk(matchPreview, priorUploads);
-  }
-
   return NextResponse.json({
     headerRowWindow: rawRows.slice(0, HEADER_WINDOW_ROWS),
     detectedHeaderRowIndex: headerResolution.headerRowIndex,
@@ -113,8 +100,6 @@ export async function POST(req: Request) {
     previewRows: parsedRows.slice(0, PREVIEW_ROW_COUNT),
     totalProductRows: parsedRows.length,
     sanityCheck,
-    matchPreview,
-    importAnomaly,
     defaultUploadType: supplier.defaultUploadType ?? "full",
   });
 }
