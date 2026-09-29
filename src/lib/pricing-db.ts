@@ -852,7 +852,22 @@ export type GetOrCreateReferenceProductResult =
 
 export async function getOrCreateReferenceProductByIdentity(
   identity: { upc: string; ean: string; signature: string },
-  newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt">
+  newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt">,
+  /** skipSearchIndexAndVersionBump: for a BULK caller (processSupplierUpload's
+   *  parallel auto-create persist pass) that will index every newly-created
+   *  product and bump catalogVersion itself, ONCE, in its own dedicated
+   *  pass after every row in the batch has been persisted — see that
+   *  call site's own comment for why. The atomic identity creation/dedup
+   *  script above is completely unaffected either way; this only ever
+   *  changes whether these two side effects happen inline here (the
+   *  default, correct for every other caller — Match Review's "Track for
+   *  Pricing," the backlog migration script, etc. — none of which create
+   *  more than a handful of records in one call) or are deferred to the
+   *  caller's own batched pass. Every "created" product is still indexed
+   *  and still eventually triggers a catalogVersion bump exactly once —
+   *  this never changes WHAT gets created or deduplicated, only WHEN
+   *  these two bookkeeping side effects run. */
+  options?: { skipSearchIndexAndVersionBump?: boolean }
 ): Promise<GetOrCreateReferenceProductResult> {
   const hasUpc = identity.upc.length > 0;
   const hasEan = identity.ean.length > 0;
@@ -871,8 +886,10 @@ export async function getOrCreateReferenceProductByIdentity(
   const raw = await redis.eval<(string | number)[], string>(GET_OR_CREATE_REFERENCE_PRODUCT_SCRIPT, keys, args);
   if (raw.startsWith("CONFLICT:")) return { status: "conflict", ids: raw.slice("CONFLICT:".length).split(",") };
   if (raw.startsWith("EXISTING:")) return { status: "existing", id: raw.slice("EXISTING:".length) };
-  await indexReferenceProductForSearch(product);
-  await bumpCatalogVersion();
+  if (!options?.skipSearchIndexAndVersionBump) {
+    await indexReferenceProductForSearch(product);
+    await bumpCatalogVersion();
+  }
   return { status: "created", id: raw.slice("CREATED:".length), product };
 }
 
