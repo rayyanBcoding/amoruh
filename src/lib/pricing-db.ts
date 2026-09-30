@@ -118,9 +118,26 @@ const KEYS = {
    *  file's dry-run matching can be split across several bounded
    *  requests instead of one that risks exceeding the function timeout. */
   previewMatchSession: (sessionId: string) => `amoruh:pricing:preview_match_session:${sessionId}`,
+  /** Resumable /api/pricing/process staging session — see
+   *  processSupplierUploadBatch (pricing-process.ts). Unlike the preview
+   *  session above, this one DOES accumulate real, eventually-written
+   *  state (candidateOffers, snapshots, aliases, reverse-index ops,
+   *  pending auto-creates) across several bounded requests — but nothing
+   *  in it is EVER visible to a reader until the final batch's normal
+   *  writeCandidateGeneration + commitGeneration calls run, which are
+   *  the exact same atomic, all-or-nothing calls the single-shot path
+   *  already used. An abandoned/expired session just means the staged
+   *  generation never gets written or committed — never a partial
+   *  publish, same guarantee the single-shot path already had for a
+   *  mid-request crash. */
+  processSession: (sessionId: string) => `amoruh:pricing:process_session:${sessionId}`,
 } as const;
 
 const PREVIEW_MATCH_SESSION_TTL_SECONDS = 900;
+// Longer than the preview session — a very large supplier file can take
+// several minutes end to end across many batches, and this session's
+// abandonment is still completely safe (see the key's own comment).
+const PROCESS_SESSION_TTL_SECONDS = 3600;
 
 export function newId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -214,6 +231,68 @@ export async function savePreviewMatchSession(sessionId: string, state: MatchPre
 
 export async function deletePreviewMatchSession(sessionId: string): Promise<void> {
   await redis.del(KEYS.previewMatchSession(sessionId));
+}
+
+// ---------------------------------------------------------------------
+// Resumable /api/pricing/process staging sessions — see
+// processSupplierUploadBatch (pricing-process.ts). See the key's own
+// comment above for the safety model. Defined here (not in
+// pricing-process.ts, which imports plenty from this file already) to
+// avoid a circular import.
+// ---------------------------------------------------------------------
+
+export interface ProcessSessionState {
+  uploadId: string;
+  generationId: string;
+  /** Fixed at session creation — the upload's own seq, used unchanged
+   *  by the final commitGeneration call, exactly like the single-shot
+   *  path's `upload.seq`. */
+  seq: number;
+  /** Row offset already processed — the outer wrapper around this same
+   *  state, saved/compared together so a stale/replayed batch call is
+   *  always caught the same way match-batch's session already is. */
+  cursor: number;
+  /** Snapshot of getCommittedOffers(supplierId) taken ONCE when this
+   *  session was created — never re-fetched per batch. Matches the
+   *  single-shot path's own semantics exactly: previousOfferIdentityIndex
+   *  reflects offer history as of the START of this upload, not a
+   *  moving target a same-supplier commit mid-run could otherwise
+   *  perturb between batches. Used only to rebuild that index fresh
+   *  each batch (cheap) — never mutated itself. */
+  previousOffers: Record<string, SupplierOfferCurrent>;
+  candidateOffers: Record<string, SupplierOfferCurrent>;
+  snapshots: SupplierOfferSnapshot[];
+  newAliases: SupplierAlias[];
+  offersByProductOps: OffersByProductOp[];
+  offersByReferenceProductOps: OffersByReferenceProductOp[];
+  pendingPersists: {
+    placeholderId: string;
+    identity: { upc: string; ean: string; signature: string };
+    newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt">;
+  }[];
+  placeholderUsage: Record<string, { rowIndex: number; offerKey: string }[]>;
+  touchedKeys: string[];
+  autoMatched: number;
+  autoCreated: number;
+  needsReview: number;
+  notAProduct: number;
+  pendingPersistSeq: number;
+}
+
+export async function createProcessSession(sessionId: string, state: ProcessSessionState): Promise<void> {
+  await redis.set(KEYS.processSession(sessionId), state, { ex: PROCESS_SESSION_TTL_SECONDS });
+}
+
+export async function getProcessSession(sessionId: string): Promise<ProcessSessionState | null> {
+  return (await redis.get<ProcessSessionState>(KEYS.processSession(sessionId))) ?? null;
+}
+
+export async function saveProcessSession(sessionId: string, state: ProcessSessionState): Promise<void> {
+  await redis.set(KEYS.processSession(sessionId), state, { ex: PROCESS_SESSION_TTL_SECONDS });
+}
+
+export async function deleteProcessSession(sessionId: string): Promise<void> {
+  await redis.del(KEYS.processSession(sessionId));
 }
 
 export async function getUploadsForSupplier(supplierId: string, limit = 20): Promise<SupplierPriceUpload[]> {

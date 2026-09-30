@@ -399,19 +399,41 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
     await refreshPreview({ headerRowIndex, columnMap: next }).catch(() => {});
   };
 
+  // Drives /api/pricing/process in a resumable batch loop — same
+  // pattern as runMatchBatches above, now for the actual commit. Every
+  // batch response carries the upload record's live progress
+  // (processedRows/totalRows), so the UI can show real progress exactly
+  // like preview matching does. An expired/out-of-sync session (410) is
+  // always safe to restart from row 0: no batch before the very last one
+  // ever writes anything durable beyond the upload record's own progress
+  // fields and a short-lived staging session — never a partial
+  // generation.
   const submitProcess = async () => {
     if (!blobUrl) return;
     setStage("processing");
     setError(null);
+    setResult(null);
     try {
-      const res = await fetch("/api/pricing/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ supplierId: id, blobUrl, filename, uploadType, headerRowIndex, headerSignature, columnMap }),
-      });
-      const data = await safeParseJsonResponse(res);
-      if (!res.ok) throw new Error(data?.error ?? "Could not process this upload.");
-      setResult(data);
+      let cursor = 0;
+      let sessionId: string | undefined;
+      while (true) {
+        const res = await fetch("/api/pricing/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ supplierId: id, blobUrl, filename, uploadType, headerRowIndex, headerSignature, columnMap, cursor, sessionId }),
+        });
+        const data = await safeParseJsonResponse(res);
+        if (res.status === 410 && data?.sessionExpired) {
+          cursor = 0;
+          sessionId = undefined;
+          continue;
+        }
+        if (!res.ok) throw new Error(data?.error ?? "Could not process this upload.");
+        setResult(data.upload);
+        if (data.done) break;
+        cursor = data.cursor;
+        sessionId = data.sessionId;
+      }
       setStage("done");
       load();
     } catch (err) {
@@ -429,22 +451,36 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
     setRetryingId(u.id);
     setError(null);
     try {
-      const res = await fetch("/api/pricing/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          supplierId: id,
-          blobUrl: u.blobUrl,
-          filename: u.filename,
-          uploadType: u.uploadType,
-          headerRowIndex: supplier.columnMapping.headerRowIndex,
-          headerSignature: supplier.columnMapping.headerSignature,
-          columnMap: supplier.columnMapping.columnMap,
-          retryUploadId: u.id,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Retry failed.");
+      let cursor = 0;
+      let sessionId: string | undefined;
+      while (true) {
+        const res = await fetch("/api/pricing/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            supplierId: id,
+            blobUrl: u.blobUrl,
+            filename: u.filename,
+            uploadType: u.uploadType,
+            headerRowIndex: supplier.columnMapping.headerRowIndex,
+            headerSignature: supplier.columnMapping.headerSignature,
+            columnMap: supplier.columnMapping.columnMap,
+            retryUploadId: u.id,
+            cursor,
+            sessionId,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 410 && data?.sessionExpired) {
+          cursor = 0;
+          sessionId = undefined;
+          continue;
+        }
+        if (!res.ok) throw new Error(data?.error ?? "Retry failed.");
+        if (data.done) break;
+        cursor = data.cursor;
+        sessionId = data.sessionId;
+      }
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Retry failed.");
@@ -822,7 +858,21 @@ export default function SupplierDetailPage({ params }: { params: Promise<{ id: s
             </div>
           )}
 
-          {stage === "processing" && <p className="animate-pulse text-sm text-ld-muted">Matching against the catalog…</p>}
+          {stage === "processing" && (
+            <div className="rounded-xl border border-ld-border bg-ld-bg-elevated p-4">
+              <p className="mb-2 text-xs font-semibold text-ld-white">
+                {result && result.totalRows > 0
+                  ? `Processing ${result.processedRows.toLocaleString()} of ${result.totalRows.toLocaleString()} rows…`
+                  : "Starting…"}
+              </p>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-ld-border">
+                <div
+                  className="h-full rounded-full bg-ld-purple transition-all"
+                  style={{ width: `${result && result.totalRows > 0 ? Math.min(100, (result.processedRows / result.totalRows) * 100) : 0}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {stage === "done" && result && (
             <div className="space-y-3">

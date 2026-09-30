@@ -2,20 +2,25 @@ import { getProducts } from "./db";
 import {
   bumpCatalogVersion,
   commitGeneration,
+  createProcessSession,
   createUpload,
+  deleteProcessSession,
   getAliasesForSupplier,
   getAllReferenceProducts,
   getCommittedOffers,
   getOrCreateReferenceProductByIdentity,
+  getProcessSession,
   getUpload,
   indexReferenceProductForSearch,
   markUploadFailed,
   newId,
+  saveProcessSession,
   updateUploadProgress,
   writeCandidateGeneration,
   writeSnapshotsBatch,
   type OffersByProductOp,
   type OffersByReferenceProductOp,
+  type ProcessSessionState,
 } from "./pricing-db";
 import {
   addToBrandBucketedPool,
@@ -34,6 +39,7 @@ import {
   findPreviousBySupplierItemIdentity,
   type BrandBucketedPool,
   type MatchPreviewSummary,
+  type PreviousOfferIdentityIndex,
 } from "./pricing-matching";
 import {
   applyColumnMapping,
@@ -51,6 +57,7 @@ import type {
   SupplierOfferCurrent,
   SupplierOfferSnapshot,
   SupplierPriceUpload,
+  SupplierRawRow,
 } from "./pricing-types";
 
 // ---------------------------------------------------------------------
@@ -64,42 +71,671 @@ import type {
 // referenced by any reader until commitGeneration succeeds. If this
 // throws at any point before that, the caller marks the upload "failed"
 // and the previously-committed generation is completely untouched.
+//
+// Two entry points share every real function below:
+//   - processSupplierUpload: the original single-shot version. Runs the
+//     whole file in one call — fine for a small upload, and kept as the
+//     ground-truth reference this module's own equivalence test compares
+//     the batched version against.
+//   - processSupplierUploadBatch: the resumable version /api/pricing/process
+//     actually uses now. Splits the SAME per-row loop across bounded,
+//     cursor-based calls (PROCESS_BATCH_SIZE rows each — measured safe
+//     against the real Classic Wholesale file: ~5s/500 rows, see
+//     scripts/measure-process-loop-real-file.ts), staging the loop's
+//     accumulated state in a short-lived Redis session between calls.
+//     The expensive persist/index/commit tail only ever runs ONCE, on
+//     the batch that reaches the end of the file — a partial generation
+//     can never publish, exactly like the single-shot path already
+//     guaranteed for a mid-request crash, just spread over more requests
+//     instead of one.
 // ---------------------------------------------------------------------
 
 const PROGRESS_UPDATE_INTERVAL = 200;
+const PROCESS_BATCH_SIZE = 500;
 
 // A real refprod_* id never starts with this — safe to distinguish a
 // not-yet-persisted placeholder from a real identity by prefix alone.
 const PENDING_PLACEHOLDER_PREFIX = "pending_";
+
+export class ProcessSessionExpiredError extends Error {
+  constructor() {
+    super("This processing session has expired or is out of sync — restart from the beginning.");
+    this.name = "ProcessSessionExpiredError";
+  }
+}
+
+// ---------------------------------------------------------------------
+// Shared building blocks
+// ---------------------------------------------------------------------
+
+async function parseAndValidateUploadFile(input: {
+  blobUrl: string;
+  headerRowIndex: number;
+  headerSignature: string[];
+  columnMap: SupplierColumnMapping["columnMap"];
+}): Promise<{ rows: SupplierRawRow[] }> {
+  const blobRes = await fetch(input.blobUrl);
+  if (!blobRes.ok) throw new Error("Could not download the uploaded file.");
+  const rawRows = parseSpreadsheetRaw(await blobRes.arrayBuffer());
+  if (rawRows.length === 0) throw new Error("This file appears to be empty.");
+
+  // Verify — never re-detect. If the confirmed header row no longer
+  // holds the confirmed header text (the file changed, or a stale/
+  // mismatched request), refuse rather than guessing a new mapping the
+  // operator never saw in Preview. Re-checked on EVERY batch call, not
+  // just the first — the same safety posture match-batch already uses.
+  if (!verifyHeaderSignature(rawRows, input.headerRowIndex, input.headerSignature)) {
+    throw new Error(
+      "Confirmed mapping no longer matches this file's header row — return to Preview and review the spreadsheet mapping."
+    );
+  }
+  const columnCount = sheetColumnCount(rawRows);
+  if (!columnMapInBounds(input.columnMap, columnCount)) {
+    throw new Error("Confirmed mapping no longer passes validation — return to Preview and review the spreadsheet mapping.");
+  }
+
+  const dataRows = rawRows.slice(input.headerRowIndex + 1);
+  const rows = applyColumnMapping(dataRows, input.columnMap, input.headerSignature);
+
+  // Re-run the SAME sanity checks Preview showed, server-side, before
+  // anything is written — never trust that the disabled Process button
+  // alone kept a bad mapping from reaching this point (stale browser
+  // state, a UI bug, a changed file, or a misfired retry could all
+  // otherwise bypass it).
+  const sanity = computeSanityChecks(rows);
+  if (!sanity.ok) {
+    throw new Error(`Confirmed mapping no longer passes validation — return to Preview and review the spreadsheet mapping. (${sanity.warnings.join(" ")})`);
+  }
+  return { rows };
+}
+
+export interface RowProcessingContext {
+  supplierId: string;
+  uploadId: string;
+  nowIso: string;
+  products: Awaited<ReturnType<typeof getProducts>>;
+  /** The supplier's aliases as of the START of this upload — fixed;
+   *  never includes this run's own newAliases (those are checked via
+   *  aliasesSoFar inside processRow, same as the original). */
+  existingAliases: SupplierAlias[];
+  /** Mutable — a row that auto-creates pushes its placeholder in
+   *  immediately, so a LATER row (in this batch or a later one, via the
+   *  caller re-applying prior placeholders each call) sees it through
+   *  the normal exact-match path. */
+  referenceProducts: PricingReferenceProduct[];
+  /** Mutable in lockstep with referenceProducts above. */
+  candidatePool: BrandBucketedPool;
+  previousOfferIdentityIndex: PreviousOfferIdentityIndex;
+}
+
+export interface RowProcessingState {
+  candidateOffers: Record<string, SupplierOfferCurrent>;
+  touchedKeys: Set<string>;
+  newAliases: SupplierAlias[];
+  offersByProductOps: OffersByProductOp[];
+  offersByReferenceProductOps: OffersByReferenceProductOp[];
+  snapshots: SupplierOfferSnapshot[];
+  autoMatched: number;
+  autoCreated: number;
+  needsReview: number;
+  notAProduct: number;
+  pendingPersistSeq: number;
+  pendingPersists: {
+    placeholderId: string;
+    identity: { upc: string; ean: string; signature: string };
+    newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt">;
+  }[];
+  /** Every row whose finalReferenceProductId ended up being a
+   *  placeholder — the ORIGINAL auto-create row (via pendingPersists)
+   *  AND any later row that matched against it normally. */
+  placeholderUsage: Map<string, { rowIndex: number; offerKey: string }[]>;
+}
+
+export function createEmptyRowProcessingState(): RowProcessingState {
+  return {
+    candidateOffers: {},
+    touchedKeys: new Set(),
+    newAliases: [],
+    offersByProductOps: [],
+    offersByReferenceProductOps: [],
+    snapshots: [],
+    autoMatched: 0,
+    autoCreated: 0,
+    needsReview: 0,
+    notAProduct: 0,
+    pendingPersistSeq: 0,
+    pendingPersists: [],
+    placeholderUsage: new Map(),
+  };
+}
+
+/** Processes exactly ONE row, mutating `state` and (for a genuinely new
+ *  identity) `ctx.referenceProducts`/`ctx.candidatePool` in place. This
+ *  is the single source of truth for per-row matching/auto-create
+ *  eligibility/carry-forward decisions — both processSupplierUpload and
+ *  processSupplierUploadBatch call this and nothing else for that
+ *  logic, so chunking can never itself change a decision. Never awaits
+ *  anything durable — getUsdRate's only real cost is a non-USD currency
+ *  rate lookup, and even that never mutates state that must survive a
+ *  chunk boundary in a way this function doesn't already return via its
+ *  mutations. */
+export async function processRow(row: SupplierRawRow, i: number, ctx: RowProcessingContext, state: RowProcessingState): Promise<void> {
+  // Non-product rows (headers/notes/totals/shipping/blank/category
+  // lines) are classified BEFORE any matching runs — they never enter
+  // Match Review, are never auto-created, and only ever show up as the
+  // nonProductRows import-summary count. Still recorded as a snapshot
+  // for audit ("here's exactly why row 47 was skipped"), same as every
+  // other row.
+  if (!isValidProductRow(row)) {
+    const offerKey = deriveOfferKey(row.supplierSku, row.description);
+    state.notAProduct++;
+    state.snapshots.push({
+      id: newId("offersnap"),
+      uploadId: ctx.uploadId,
+      rowIndex: i,
+      supplierId: ctx.supplierId,
+      offerKey,
+      raw: row,
+      productId: null,
+      candidateProductId: null,
+      candidateReferenceProductId: null,
+      matchType: "unmatched",
+      matchConfidence: null,
+      reviewStatus: "not_a_product",
+      referenceProductId: null,
+      rejectedCandidateProductIds: [],
+      currency: row.currency,
+      price: row.price,
+      fxRateAtUpload: null,
+      fxRateTimestamp: null,
+      priceUsdAtUpload: null,
+      uploadedAt: ctx.nowIso,
+    });
+    state.touchedKeys.add(offerKey);
+    state.candidateOffers[offerKey] = {
+      supplierId: ctx.supplierId,
+      offerKey,
+      supplierSku: row.supplierSku,
+      description: row.description,
+      brand: row.brand,
+      quantity: row.quantity,
+      currency: row.currency,
+      price: row.price,
+      fxRateAtUpload: null,
+      fxRateTimestamp: null,
+      priceUsdAtUpload: null,
+      upc: row.upc,
+      ean: row.ean,
+      productId: null,
+      candidateProductId: null,
+      candidateReferenceProductId: null,
+      matchType: "unmatched",
+      matchConfidence: null,
+      reviewStatus: "not_a_product",
+      referenceProductId: null,
+      rejectedCandidateProductIds: [],
+      reviewRequestedAt: null,
+      currentlyListed: true,
+      lastUploadId: ctx.uploadId,
+      uploadedAt: ctx.nowIso,
+    };
+    return;
+  }
+
+  const offerKey = deriveOfferKey(row.supplierSku, row.description);
+  const aliasesSoFar = ctx.existingAliases.concat(state.newAliases);
+  const match = matchSupplierRow(
+    { offerKey, supplierSku: row.supplierSku, description: row.description, brand: row.brand, upc: row.upc, ean: row.ean },
+    ctx.products,
+    aliasesSoFar,
+    ctx.referenceProducts,
+    ctx.candidatePool
+  );
+
+  const rate = await getUsdRate(row.currency);
+  const priceUsd = convertToUsd(row.price, rate?.rate ?? null);
+
+  // Direct offerKey lookup first — the normal, fast path, confirmed
+  // stable across real repeat uploads (see the Match Review audit).
+  // Only when that misses does the conservative identity fallback try
+  // to reconnect this row to its OWN prior supplier-item history under a
+  // different offerKey (e.g. the supplier reformatted their SKU
+  // column) — see findPreviousBySupplierItemIdentity's own comments for
+  // exactly what it will and won't reconnect.
+  let previous = state.candidateOffers[offerKey];
+  let reconnectedViaFallback = false;
+  if (!previous) {
+    const fallback = findPreviousBySupplierItemIdentity(
+      { upc: row.upc, ean: row.ean, brand: row.brand, description: row.description },
+      ctx.previousOfferIdentityIndex
+    );
+    if (fallback) {
+      previous = fallback;
+      reconnectedViaFallback = true;
+    }
+  }
+
+  // Carry-forward decision, applied on top of matchSupplierRow's own
+  // fresh result — never the other way around, so a genuinely stronger
+  // new signal (e.g. a UPC now cleanly resolves) always wins over stale
+  // carried-forward state:
+  //   - an intentionally "ignored" decision survives a re-upload unless
+  //     today's fresh match is a clean auto_matched (real new evidence
+  //     appeared);
+  //   - otherwise, if today's fresh match found nothing (new_candidate)
+  //     AND the identity fallback reconnected this row to a
+  //     previously-resolved item, adopt that prior resolution rather
+  //     than treating a reformatted-SKU row as brand new.
+  let finalReviewStatus = match.reviewStatus;
+  let finalProductId = match.productId;
+  let finalCandidateProductId = match.candidateProductId;
+  let finalCandidateReferenceProductId = match.candidateReferenceProductId;
+  let finalCompetingCandidates = match.competingCandidates;
+  let finalMatchType = match.matchType;
+  let finalMatchConfidence = match.matchConfidence;
+  if (previous?.reviewStatus === "ignored" && match.reviewStatus !== "auto_matched") {
+    finalReviewStatus = "ignored";
+    finalProductId = null;
+    finalCandidateProductId = null;
+    finalCandidateReferenceProductId = null;
+    finalCompetingCandidates = undefined;
+    finalMatchType = "unmatched";
+    finalMatchConfidence = null;
+  } else if (reconnectedViaFallback && match.reviewStatus === "new_candidate" && previous) {
+    finalReviewStatus = previous.reviewStatus;
+    finalProductId = previous.productId;
+    finalCandidateProductId = previous.candidateProductId;
+    finalCandidateReferenceProductId = previous.candidateReferenceProductId;
+    // Not carried from `previous` — competingCandidates is always
+    // recomputed fresh, never persisted state; a fallback-reconnected
+    // row simply has none.
+    finalCompetingCandidates = undefined;
+    finalMatchType = previous.matchType;
+    finalMatchConfidence = previous.matchConfidence;
+  }
+
+  // "No — Not a Match" carry-forward: an operator explicitly rejected
+  // THIS exact candidate for THIS exact supplier item before — never
+  // re-suggest it. Applied last, on top of whichever branch above
+  // produced the current candidate, so it catches a rejected product
+  // resurfacing via either the normal match or the identity fallback.
+  const rejectedIds = previous?.rejectedCandidateProductIds ?? [];
+  if (finalCandidateProductId && rejectedIds.includes(finalCandidateProductId)) {
+    finalCandidateProductId = null;
+    finalMatchConfidence = null;
+  }
+
+  // Corrected operating model: "no existing match" is never itself an
+  // end state. Every row that reaches here (matchSupplierRow found
+  // nothing) resolves immediately into exactly one of three real
+  // outcomes — no purgatory in between:
+  //  1. Already tracked (finalReferenceProductId set from a prior
+  //     "Track for Pricing" on an earlier generation) — matched, full
+  //     stop.
+  //  2. Structurally complete (checkAutoCreateEligibility passes) —
+  //     auto-create the Master Product and attach the offer. Expected,
+  //     routine catalog growth, never an error or a queue.
+  //  3. Genuinely incomplete/ambiguous — Match Review, because the
+  //     exact SKU truly cannot be determined yet. Auto-creating here
+  //     would lock in a guess.
+  let finalReferenceProductId = match.referenceProductId ?? (previous?.referenceProductId ?? null);
+  if (finalReviewStatus === "new_candidate") {
+    if (finalReferenceProductId) {
+      finalReviewStatus = "auto_matched";
+      finalMatchType = "manual";
+      finalMatchConfidence = 1;
+      finalCandidateProductId = null;
+      finalCandidateReferenceProductId = null;
+      finalCompetingCandidates = undefined;
+    } else {
+      // A supplier's own placeholder text ("NO BARCODE" etc.) must never
+      // become a stored identity pointer — treat it as absent here, same
+      // as everywhere else upc/ean is used as an identifier.
+      const plausibleUpc = isPlausibleBarcode(row.upc.trim().toUpperCase()) ? row.upc.trim() : "";
+      const plausibleEan = isPlausibleBarcode(row.ean.trim().toUpperCase()) ? row.ean.trim() : "";
+      const effectiveBrand = resolveEffectiveBrand(row, ctx.products, ctx.referenceProducts);
+      const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, effectiveBrand);
+      const eligibility = checkAutoCreateEligibility(rowAttrs, Boolean(plausibleUpc || plausibleEan));
+      if (!eligibility.eligible) {
+        finalReviewStatus = "needs_review";
+        finalMatchType = "unmatched";
+        finalMatchConfidence = null;
+        finalCandidateProductId = null;
+        finalCandidateReferenceProductId = null;
+        finalCompetingCandidates = undefined;
+      } else {
+        const signature = computeIdentitySignature(rowAttrs);
+        const placeholderId = `${PENDING_PLACEHOLDER_PREFIX}${state.pendingPersistSeq++}`;
+        const newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt"> = {
+          brand: effectiveBrand,
+          name: row.description.trim(),
+          description: row.description.trim(),
+          sizeMl: rowAttrs.sizeMl,
+          concentration: rowAttrs.concentration,
+          isTester: rowAttrs.isTester,
+          isGiftSet: rowAttrs.isGiftSet,
+          isRefill: rowAttrs.isRefill,
+          productForm: rowAttrs.productForm,
+          upc: plausibleUpc,
+          ean: plausibleEan,
+          productId: null,
+          createdBy: "auto_import",
+          creationMethod: "auto_import",
+          createdFromSupplierId: ctx.supplierId,
+          createdFromUploadId: ctx.uploadId,
+          createdFromOfferKey: offerKey,
+        };
+        state.pendingPersists.push({ placeholderId, identity: { upc: plausibleUpc, ean: plausibleEan, signature }, newRecordInput });
+
+        finalReferenceProductId = placeholderId;
+        finalReviewStatus = "auto_matched";
+        finalMatchType = "auto_created";
+        finalMatchConfidence = 1;
+        finalCandidateProductId = null;
+        finalCandidateReferenceProductId = null;
+        finalCompetingCandidates = undefined;
+
+        // Make this visible to every LATER row this same batch (and, via
+        // the caller re-applying pendingPersists next batch, every later
+        // batch too) — same purpose as the real record would serve.
+        const placeholderRecord: PricingReferenceProduct = { id: placeholderId, ...newRecordInput, createdAt: ctx.nowIso };
+        ctx.referenceProducts.push(placeholderRecord);
+        addToBrandBucketedPool(ctx.candidatePool, {
+          productId: null,
+          referenceProductId: placeholderId,
+          attrs: extractReferenceProductAttributes(placeholderRecord),
+          upc: placeholderRecord.upc,
+          ean: placeholderRecord.ean,
+        });
+      }
+    }
+  }
+
+  // Whether a genuinely-ambiguous item is flagged for the ACTIVE review
+  // queue is completely independent of the fresh match above.
+  const finalReviewRequestedAt = finalReviewStatus === "needs_review" ? (previous?.reviewRequestedAt ?? null) : null;
+
+  if (finalReferenceProductId && finalReferenceProductId.startsWith(PENDING_PLACEHOLDER_PREFIX)) {
+    const usage = state.placeholderUsage.get(finalReferenceProductId);
+    if (usage) usage.push({ rowIndex: i, offerKey });
+    else state.placeholderUsage.set(finalReferenceProductId, [{ rowIndex: i, offerKey }]);
+  }
+
+  state.snapshots.push({
+    id: newId("offersnap"),
+    uploadId: ctx.uploadId,
+    rowIndex: i,
+    supplierId: ctx.supplierId,
+    offerKey,
+    raw: row,
+    productId: finalProductId,
+    candidateProductId: finalCandidateProductId,
+    candidateReferenceProductId: finalCandidateReferenceProductId,
+    competingCandidates: finalCompetingCandidates,
+    matchType: finalMatchType,
+    matchConfidence: finalMatchConfidence,
+    reviewStatus: finalReviewStatus,
+    referenceProductId: finalReferenceProductId,
+    rejectedCandidateProductIds: rejectedIds,
+    reviewRequestedAt: finalReviewRequestedAt,
+    currency: row.currency,
+    price: row.price,
+    fxRateAtUpload: rate?.rate ?? null,
+    fxRateTimestamp: rate?.timestamp ?? null,
+    priceUsdAtUpload: priceUsd,
+    uploadedAt: ctx.nowIso,
+  });
+
+  state.touchedKeys.add(offerKey);
+  const nextOffer: SupplierOfferCurrent = {
+    supplierId: ctx.supplierId,
+    offerKey,
+    supplierSku: row.supplierSku,
+    description: row.description,
+    brand: row.brand,
+    quantity: row.quantity,
+    currency: row.currency,
+    price: row.price,
+    fxRateAtUpload: rate?.rate ?? null,
+    fxRateTimestamp: rate?.timestamp ?? null,
+    priceUsdAtUpload: priceUsd,
+    upc: row.upc,
+    ean: row.ean,
+    productId: finalProductId,
+    candidateProductId: finalCandidateProductId,
+    candidateReferenceProductId: finalCandidateReferenceProductId,
+    competingCandidates: finalCompetingCandidates,
+    matchType: finalMatchType,
+    matchConfidence: finalMatchConfidence,
+    reviewStatus: finalReviewStatus,
+    referenceProductId: finalReferenceProductId,
+    rejectedCandidateProductIds: rejectedIds,
+    reviewRequestedAt: finalReviewRequestedAt,
+    currentlyListed: true,
+    lastUploadId: ctx.uploadId,
+    uploadedAt: ctx.nowIso,
+  };
+  state.candidateOffers[offerKey] = nextOffer;
+
+  const member = `${ctx.supplierId}::${offerKey}`;
+  const priorSameKeyProductId = reconnectedViaFallback ? null : (previous?.productId ?? null);
+  if (priorSameKeyProductId && priorSameKeyProductId !== finalProductId) {
+    state.offersByProductOps.push({ op: "SREM", productId: priorSameKeyProductId, member });
+  }
+  if (finalProductId && priorSameKeyProductId !== finalProductId) {
+    state.offersByProductOps.push({ op: "SADD", productId: finalProductId, member });
+  }
+
+  const priorSameKeyReferenceProductId = reconnectedViaFallback ? null : (previous?.referenceProductId ?? null);
+  if (priorSameKeyReferenceProductId && priorSameKeyReferenceProductId !== finalReferenceProductId) {
+    state.offersByReferenceProductOps.push({ op: "SREM", referenceProductId: priorSameKeyReferenceProductId, member });
+  }
+  if (finalReferenceProductId && priorSameKeyReferenceProductId !== finalReferenceProductId) {
+    state.offersByReferenceProductOps.push({ op: "SADD", referenceProductId: finalReferenceProductId, member });
+  }
+
+  // A newly-confirmed high-confidence match (not already a learned
+  // alias) becomes one — so this exact supplier SKU/description never
+  // asks again.
+  if (
+    finalReviewStatus === "auto_matched" &&
+    finalMatchType !== "alias" &&
+    finalProductId &&
+    !aliasesSoFar.some((a) => a.offerKey === offerKey && a.productId === finalProductId)
+  ) {
+    state.newAliases.push({
+      id: newId("alias"),
+      supplierId: ctx.supplierId,
+      offerKey,
+      productId: finalProductId,
+      createdAt: ctx.nowIso,
+      source: "auto_high_confidence",
+    });
+  }
+
+  if (
+    reconnectedViaFallback &&
+    finalProductId &&
+    !aliasesSoFar.some((a) => a.offerKey === offerKey && a.productId === finalProductId)
+  ) {
+    state.newAliases.push({
+      id: newId("alias"),
+      supplierId: ctx.supplierId,
+      offerKey,
+      productId: finalProductId,
+      createdAt: ctx.nowIso,
+      source: "auto_high_confidence",
+    });
+  }
+
+  if (finalReviewStatus === "auto_matched") {
+    if (finalMatchType === "auto_created") state.autoCreated++;
+    else state.autoMatched++;
+  } else if (finalReviewStatus !== "ignored") {
+    state.needsReview++; // needs_review, alias_conflict, barcode_conflict
+  }
+}
+
+/** The persist/index/commit tail — identical in both entry points.
+ *  Reads `state`'s accumulated data (already complete by the time this
+ *  runs; the caller guarantees every row has been processed) and
+ *  performs the SAME atomic publish the single-shot path always did. */
+async function finalizeUpload(params: {
+  upload: SupplierPriceUpload;
+  uploadType: "full" | "partial";
+  existingAliases: SupplierAlias[];
+  generationId: string;
+  totalRows: number;
+  state: RowProcessingState;
+}): Promise<SupplierPriceUpload> {
+  const { upload, uploadType, existingAliases, generationId, totalRows, state } = params;
+
+  // Deferred parallel persist — resolves every placeholder queued above
+  // via the SAME atomic get-or-create script, concurrently. Chunked, not
+  // one unbounded Promise.all.
+  const PERSIST_CONCURRENCY = 100;
+  const persistResults = new Map<
+    string,
+    { status: "created"; id: string; product: PricingReferenceProduct } | { status: "existing"; id: string } | { status: "conflict"; ids: string[] }
+  >();
+  const newlyCreatedForIndexing: PricingReferenceProduct[] = [];
+  for (let i = 0; i < state.pendingPersists.length; i += PERSIST_CONCURRENCY) {
+    const chunk = state.pendingPersists.slice(i, i + PERSIST_CONCURRENCY);
+    const results = await Promise.all(chunk.map((p) => getOrCreateReferenceProductByIdentity(p.identity, p.newRecordInput, { skipSearchIndexAndVersionBump: true })));
+    chunk.forEach((p, idx) => {
+      const r = results[idx];
+      if (r.status === "conflict") {
+        persistResults.set(p.placeholderId, { status: "conflict", ids: r.ids });
+      } else if (r.status === "created") {
+        persistResults.set(p.placeholderId, { status: "created", id: r.id, product: r.product });
+        newlyCreatedForIndexing.push(r.product);
+      } else {
+        persistResults.set(p.placeholderId, { status: "existing", id: r.id });
+      }
+    });
+  }
+  // One dedicated bulk pass: every product actually created above
+  // becomes searchable, and catalogVersion is bumped exactly once for
+  // the whole upload — still fires even if this generation's own commit
+  // later turns out stale.
+  if (newlyCreatedForIndexing.length > 0) {
+    const INDEX_CONCURRENCY = 100;
+    for (let i = 0; i < newlyCreatedForIndexing.length; i += INDEX_CONCURRENCY) {
+      await Promise.all(newlyCreatedForIndexing.slice(i, i + INDEX_CONCURRENCY).map((p) => indexReferenceProductForSearch(p)));
+    }
+    await bumpCatalogVersion();
+  }
+
+  // Patch EVERY row that ended up referencing a placeholder — not just
+  // the row that originally queued it — with its now-resolved real
+  // identity, or, for a genuine identity conflict, revert to
+  // needs_review.
+  for (const [placeholderId, usedBy] of state.placeholderUsage) {
+    const result = persistResults.get(placeholderId);
+    if (!result) continue; // unreachable — every placeholder is queued in pendingPersists and gets a result above
+
+    if (result.status === "conflict") {
+      const conflictCandidates = result.ids.map((id) => ({ productId: null, referenceProductId: id }));
+      for (const { rowIndex, offerKey } of usedBy) {
+        const snapshot = state.snapshots[rowIndex];
+        const offer = state.candidateOffers[offerKey];
+        if (snapshot && snapshot.referenceProductId === placeholderId) {
+          if (snapshot.matchType === "auto_created") state.autoCreated--;
+          else state.autoMatched--;
+          state.needsReview++;
+          snapshot.referenceProductId = null;
+          snapshot.reviewStatus = "needs_review";
+          snapshot.matchType = "unmatched";
+          snapshot.matchConfidence = null;
+          snapshot.competingCandidates = conflictCandidates;
+        }
+        if (offer && offer.referenceProductId === placeholderId) {
+          offer.referenceProductId = null;
+          offer.reviewStatus = "needs_review";
+          offer.matchType = "unmatched";
+          offer.matchConfidence = null;
+          offer.competingCandidates = conflictCandidates;
+        }
+      }
+      for (let idx = state.offersByReferenceProductOps.length - 1; idx >= 0; idx--) {
+        if (state.offersByReferenceProductOps[idx].referenceProductId === placeholderId) state.offersByReferenceProductOps.splice(idx, 1);
+      }
+    } else {
+      for (const { rowIndex, offerKey } of usedBy) {
+        const snapshot = state.snapshots[rowIndex];
+        const offer = state.candidateOffers[offerKey];
+        if (snapshot && snapshot.referenceProductId === placeholderId) snapshot.referenceProductId = result.id;
+        if (offer && offer.referenceProductId === placeholderId) offer.referenceProductId = result.id;
+      }
+      for (const op of state.offersByReferenceProductOps) {
+        if (op.referenceProductId === placeholderId) op.referenceProductId = result.id;
+      }
+    }
+  }
+
+  // Full upload: anything from the previous generation this file never
+  // mentioned is no longer listed — kept, never deleted, still
+  // discoverable and still carrying its full history.
+  if (uploadType === "full") {
+    for (const [offerKey, offer] of Object.entries(state.candidateOffers)) {
+      if (!state.touchedKeys.has(offerKey) && offer.currentlyListed) {
+        state.candidateOffers[offerKey] = { ...offer, currentlyListed: false };
+      }
+    }
+  }
+
+  await writeCandidateGeneration(upload.supplierId, generationId, state.candidateOffers);
+  await writeSnapshotsBatch(state.snapshots);
+
+  const finishedUpload: SupplierPriceUpload = {
+    ...upload,
+    status: "completed",
+    processedRows: totalRows,
+    autoMatched: state.autoMatched,
+    autoCreated: state.autoCreated,
+    needsReview: state.needsReview,
+    newCandidates: 0, // legacy — always 0 under the corrected model
+    notAProduct: state.notAProduct,
+    completedAt: new Date().toISOString(),
+  };
+
+  const commitResult = await commitGeneration({
+    supplierId: upload.supplierId,
+    uploadId: upload.id,
+    seq: upload.seq,
+    generationId,
+    finishedUpload,
+    newAliases: existingAliases.concat(state.newAliases),
+    offersByProductOps: state.offersByProductOps,
+    offersByReferenceProductOps: state.offersByReferenceProductOps,
+  });
+
+  // STALE_GENERATION: this upload fully and correctly processed every
+  // row, but a newer upload (higher seq) already committed first — the
+  // script returns before writing anything (including the upload record
+  // itself), so persist the completed state here instead. Retained in
+  // history but deliberately never made current.
+  if (commitResult === "STALE_GENERATION") {
+    await updateUploadProgress(upload.id, finishedUpload);
+  }
+  return finishedUpload;
+}
+
+// ---------------------------------------------------------------------
+// Entry point 1 — single-shot (kept as the ground-truth reference; see
+// scripts/test-process-batch-equivalence.ts).
+// ---------------------------------------------------------------------
 
 export async function processSupplierUpload(input: {
   supplierId: string;
   filename: string;
   blobUrl: string;
   uploadType: "full" | "partial";
-  /** The EXACT mapping the operator confirmed in Preview — header row,
-   *  columns, and the header text they were looking at when they
-   *  approved it. This function never detects or suggests a header row
-   *  or column map itself; it only verifies this confirmed
-   *  configuration still applies to the freshly-refetched file. See
-   *  verifyHeaderSignature below. */
   headerRowIndex: number;
   headerSignature: string[];
   columnMap: SupplierColumnMapping["columnMap"];
-  /** Retry a specific FAILED upload by id instead of starting a new one.
-   *  Reuses the same id AND the same seq — a genuine retry re-stages
-   *  everything fresh (deterministic snapshot keys mean this can never
-   *  duplicate history) and competes for the commit with the SAME
-   *  ordering priority it originally had, rather than jumping the queue
-   *  with a brand-new, higher seq the way an unrelated new upload would. */
   retryUploadId?: string;
 }): Promise<SupplierPriceUpload> {
-  // The upload record is created FIRST, before the file is even fetched
-  // — so a failure at ANY point (can't download the blob, can't parse
-  // it, a bad row) is always visible as a real "failed" record, never
-  // silent. Fetching/parsing used to happen in the API route before
-  // this function was ever called, which meant those failures left no
-  // trace at all — fixed by moving that work inside this try block.
   let upload: SupplierPriceUpload;
   if (input.retryUploadId) {
     const existing = await getUpload(input.retryUploadId);
@@ -122,749 +758,233 @@ export async function processSupplierUpload(input: {
   }
 
   try {
-    const blobRes = await fetch(input.blobUrl);
-    if (!blobRes.ok) throw new Error("Could not download the uploaded file.");
-    const rawRows = parseSpreadsheetRaw(await blobRes.arrayBuffer());
-    if (rawRows.length === 0) throw new Error("This file appears to be empty.");
-
-    // Verify — never re-detect. If the confirmed header row no longer
-    // holds the confirmed header text (the file changed, or a stale/
-    // mismatched request), refuse rather than guessing a new mapping
-    // the operator never saw in Preview.
-    if (!verifyHeaderSignature(rawRows, input.headerRowIndex, input.headerSignature)) {
-      throw new Error(
-        "Confirmed mapping no longer matches this file's header row — return to Preview and review the spreadsheet mapping."
-      );
-    }
-    const columnCount = sheetColumnCount(rawRows);
-    if (!columnMapInBounds(input.columnMap, columnCount)) {
-      throw new Error("Confirmed mapping no longer passes validation — return to Preview and review the spreadsheet mapping.");
-    }
-
-    const dataRows = rawRows.slice(input.headerRowIndex + 1);
-    const rows = applyColumnMapping(dataRows, input.columnMap, input.headerSignature);
-
-    // Re-run the SAME sanity checks Preview showed, server-side, before
-    // anything is written — never trust that the disabled Process
-    // button alone kept a bad mapping from reaching this point (stale
-    // browser state, a UI bug, a changed file, or a misfired retry
-    // could all otherwise bypass it).
-    const sanity = computeSanityChecks(rows);
-    if (!sanity.ok) {
-      throw new Error(`Confirmed mapping no longer passes validation — return to Preview and review the spreadsheet mapping. (${sanity.warnings.join(" ")})`);
-    }
-
+    const { rows } = await parseAndValidateUploadFile(input);
     await updateUploadProgress(upload.id, { totalRows: rows.length });
 
     const [products, existingAliases, previousOffers, referenceProducts] = await Promise.all([
       getProducts(),
       getAliasesForSupplier(input.supplierId),
       getCommittedOffers(input.supplierId),
-      // Mutable for the duration of this upload — a row that auto-creates
-      // (or reuses, via the identity get-or-create) a Master Product is
-      // pushed in immediately, so a LATER row in this SAME file for the
-      // same physical item sees it through the normal exact-match path
-      // instead of independently re-running auto-creation (plan §4/§5b).
       getAllReferenceProducts(),
     ]);
 
-    // Built ONCE from the starting catalog, then grown incrementally in
-    // lockstep with referenceProducts below — never rebuilt per row.
-    // Confirmed as a real, severe perf regression at the current catalog
-    // scale (~8,300 reference products): rebuilding it inside
-    // matchSupplierRow on every row cost ~80ms/row, so a several-
-    // hundred-row supplier upload took 30-80+ seconds of pure candidate-
-    // pool construction alone. Brand-bucketed on top of that (not a flat
-    // array) — even built once, scoring every row against the full pool
-    // still measured 9-14ms/row, confirmed to independently exceed 60s
-    // for a several-thousand-row upload with many new/changed rows (a
-    // 6,352-row worst-case replay of Jizan's real data took 86s on this
-    // step alone). See narrowPoolForRow's own comment for why bucketing
-    // by brand can't silently drop a true match.
     const candidatePool: BrandBucketedPool = buildBrandBucketedPool(buildMasterCandidatePool(products, referenceProducts));
-
-    // Built ONCE from the starting offer history — never recomputed per
-    // row. Confirmed as a real, severe hidden cost at Jizan's scale
-    // (6,352 committed offers): the identity fallback below used to call
-    // extractAttributes (regex parsing) on every previous offer, on
-    // every row that missed the direct offerKey lookup — for a
-    // reformatted-SKU file where most/all rows miss, that's millions of
-    // redundant re-parses of the SAME previous-offer set, easily
-    // exceeding Vercel's 60s function timeout on its own. This index
-    // reflects offer history as of the START of this upload (matching
-    // findPreviousBySupplierItemIdentity's own documented purpose —
-    // reconnecting to a PRIOR upload's identity — not to a sibling row
-    // processed earlier in this same pass).
     const previousOfferIdentityIndex = buildPreviousOfferIdentityIndex(previousOffers);
 
-    const candidateOffers: Record<string, SupplierOfferCurrent> = { ...previousOffers };
-    const touchedKeys = new Set<string>();
-    const newAliases: SupplierAlias[] = [];
-    const offersByProductOps: OffersByProductOp[] = [];
-    const offersByReferenceProductOps: OffersByReferenceProductOp[] = [];
-    const snapshots: SupplierOfferSnapshot[] = [];
-    let autoMatched = 0;
-    let autoCreated = 0;
-    let needsReview = 0;
-    const newCandidates = 0; // legacy — always 0 under the corrected model, see SupplierPriceUpload's own doc comment
-    let notAProduct = 0;
-    const nowIso = new Date().toISOString();
-
-    // Auto-creates are deferred and persisted in a single parallel pass
-    // AFTER the main loop, not awaited inline per row — confirmed as the
-    // single largest remaining bottleneck (see the caller's own comment
-    // on candidatePool above for the matching-cost fix; this is the
-    // SEPARATE, larger cost on top of it): getOrCreateReferenceProductByIdentity
-    // is one real Redis round trip per call, measured at ~60ms sequential
-    // vs ~4ms/call effective when parallelized. For Jizan's real
-    // 6,352-row file (2,091 genuinely new items in one real test run),
-    // sequential awaiting cost ~125s on its own — independently enough
-    // to exceed Vercel's 60s timeout regardless of every other fix.
-    // A placeholder id stands in for the row's identity during the main
-    // loop (visible to LATER rows' own matching, exactly as a real id
-    // would be, via referenceProducts/candidatePool) and is resolved to
-    // a real id — or reverted to needs_review on a genuine conflict — in
-    // the small patch pass after the parallel persist below. Safe even
-    // if two placeholder rows turn out to be the same physical item
-    // without matching each other during the main loop: the parallel
-    // persist calls are the SAME atomic, idempotent get-or-create script
-    // used today, so they still converge on one real record regardless —
-    // this only changes WHEN and how concurrently those calls happen,
-    // never what they check or create.
-    let pendingPersistSeq = 0;
-    const pendingPersists: {
-      placeholderId: string;
-      identity: { upc: string; ean: string; signature: string };
-      newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt">;
-    }[] = [];
-    // Every row whose finalReferenceProductId ended up being a
-    // placeholder — the ORIGINAL auto-create row (via pendingPersists)
-    // AND any later row that matched against it normally (see the
-    // comment where this is populated, right before each snapshot push).
-    const placeholderUsage = new Map<string, { rowIndex: number; offerKey: string }[]>();
+    const ctx: RowProcessingContext = {
+      supplierId: input.supplierId,
+      uploadId: upload.id,
+      nowIso: new Date().toISOString(),
+      products,
+      existingAliases,
+      referenceProducts,
+      candidatePool,
+      previousOfferIdentityIndex,
+    };
+    const state = createEmptyRowProcessingState();
+    state.candidateOffers = { ...previousOffers };
 
     for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-
-      // Non-product rows (headers/notes/totals/shipping/blank/category
-      // lines) are classified BEFORE any matching runs — they never
-      // enter Match Review, are never auto-created, and only ever show
-      // up as the nonProductRows import-summary count. Still recorded
-      // as a snapshot for audit ("here's exactly why row 47 was
-      // skipped"), same as every other row.
-      if (!isValidProductRow(row)) {
-        const offerKey = deriveOfferKey(row.supplierSku, row.description);
-        notAProduct++;
-        snapshots.push({
-          id: newId("offersnap"),
-          uploadId: upload.id,
-          rowIndex: i,
-          supplierId: input.supplierId,
-          offerKey,
-          raw: row,
-          productId: null,
-          candidateProductId: null,
-          candidateReferenceProductId: null,
-          matchType: "unmatched",
-          matchConfidence: null,
-          reviewStatus: "not_a_product",
-          referenceProductId: null,
-          rejectedCandidateProductIds: [],
-          currency: row.currency,
-          price: row.price,
-          fxRateAtUpload: null,
-          fxRateTimestamp: null,
-          priceUsdAtUpload: null,
-          uploadedAt: nowIso,
-        });
-        touchedKeys.add(offerKey);
-        candidateOffers[offerKey] = {
-          supplierId: input.supplierId,
-          offerKey,
-          supplierSku: row.supplierSku,
-          description: row.description,
-          brand: row.brand,
-          quantity: row.quantity,
-          currency: row.currency,
-          price: row.price,
-          fxRateAtUpload: null,
-          fxRateTimestamp: null,
-          priceUsdAtUpload: null,
-          upc: row.upc,
-          ean: row.ean,
-          productId: null,
-          candidateProductId: null,
-          candidateReferenceProductId: null,
-          matchType: "unmatched",
-          matchConfidence: null,
-          reviewStatus: "not_a_product",
-          referenceProductId: null,
-          rejectedCandidateProductIds: [],
-          reviewRequestedAt: null,
-          currentlyListed: true,
-          lastUploadId: upload.id,
-          uploadedAt: nowIso,
-        };
-        if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
-          await updateUploadProgress(upload.id, { processedRows: i + 1 });
-        }
-        continue;
-      }
-
-      const offerKey = deriveOfferKey(row.supplierSku, row.description);
-      const aliasesSoFar = existingAliases.concat(newAliases);
-      const match = matchSupplierRow(
-        { offerKey, supplierSku: row.supplierSku, description: row.description, brand: row.brand, upc: row.upc, ean: row.ean },
-        products,
-        aliasesSoFar,
-        referenceProducts,
-        candidatePool
-      );
-
-      const rate = await getUsdRate(row.currency);
-      const priceUsd = convertToUsd(row.price, rate?.rate ?? null);
-
-      // Direct offerKey lookup first — the normal, fast path, confirmed
-      // stable across real repeat uploads (see the Match Review audit).
-      // Only when that misses does the conservative identity fallback
-      // try to reconnect this row to its OWN prior supplier-item history
-      // under a different offerKey (e.g. the supplier reformatted their
-      // SKU column) — see findPreviousBySupplierItemIdentity's own
-      // comments for exactly what it will and won't reconnect.
-      let previous = candidateOffers[offerKey];
-      let reconnectedViaFallback = false;
-      if (!previous) {
-        const fallback = findPreviousBySupplierItemIdentity(
-          { upc: row.upc, ean: row.ean, brand: row.brand, description: row.description },
-          previousOfferIdentityIndex
-        );
-        if (fallback) {
-          previous = fallback;
-          reconnectedViaFallback = true;
-        }
-      }
-
-      // Carry-forward decision, applied on top of matchSupplierRow's own
-      // fresh result — never the other way around, so a genuinely
-      // stronger new signal (e.g. a UPC now cleanly resolves) always
-      // wins over stale carried-forward state:
-      //   - an intentionally "ignored" decision survives a re-upload
-      //     unless today's fresh match is a clean auto_matched (real new
-      //     evidence appeared);
-      //   - otherwise, if today's fresh match found nothing
-      //     (new_candidate) AND the identity fallback reconnected this
-      //     row to a previously-resolved item, adopt that prior
-      //     resolution rather than treating a reformatted-SKU row as
-      //     brand new.
-      let finalReviewStatus = match.reviewStatus;
-      let finalProductId = match.productId;
-      let finalCandidateProductId = match.candidateProductId;
-      let finalCandidateReferenceProductId = match.candidateReferenceProductId;
-      let finalCompetingCandidates = match.competingCandidates;
-      let finalMatchType = match.matchType;
-      let finalMatchConfidence = match.matchConfidence;
-      // Confirmed as a real, live bug (not by design, despite the
-      // original comment here): matchSupplierRow's own Step 2 (exact
-      // UPC/EAN against an existing Master Product) and Step 3
-      // (structural match against the reference-product candidate pool)
-      // both independently discover and return a fresh
-      // match.referenceProductId — but this previously started ONLY
-      // from `previous?.referenceProductId`, silently discarding that
-      // fresh discovery for any offerKey with no prior state (i.e.
-      // every brand-new row). reviewStatus/matchType/matchConfidence
-      // were all set correctly ("auto_matched"/"structured"/high
-      // confidence, even candidateReferenceProductId was set right) —
-      // only the actual link was never persisted, leaving the
-      // comparison page silently empty. Mirrors finalProductId's own
-      // (correct) pattern exactly: prefer the fresh match, fall back to
-      // whatever this offerKey already carried only when the fresh
-      // match found nothing new this time (preserving a manual "Track
-      // for Pricing" link across uploads that don't independently
-      // rediscover it, per this comment's original, still-valid intent
-      // for THAT case).
-      let finalReferenceProductId = match.referenceProductId ?? (previous?.referenceProductId ?? null);
-
-      if (previous?.reviewStatus === "ignored" && match.reviewStatus !== "auto_matched") {
-        finalReviewStatus = "ignored";
-        finalProductId = null;
-        finalCandidateProductId = null;
-        finalCandidateReferenceProductId = null;
-        finalCompetingCandidates = undefined;
-        finalMatchType = "unmatched";
-        finalMatchConfidence = null;
-      } else if (reconnectedViaFallback && match.reviewStatus === "new_candidate" && previous) {
-        finalReviewStatus = previous.reviewStatus;
-        finalProductId = previous.productId;
-        finalCandidateProductId = previous.candidateProductId;
-        finalCandidateReferenceProductId = previous.candidateReferenceProductId;
-        // Not carried from `previous` — competingCandidates is always
-        // recomputed fresh, never persisted state (see its own comment on
-        // SupplierOfferCurrent); a fallback-reconnected row simply has none.
-        finalCompetingCandidates = undefined;
-        finalMatchType = previous.matchType;
-        finalMatchConfidence = previous.matchConfidence;
-      }
-
-      // "No — Not a Match" carry-forward: an operator explicitly rejected
-      // THIS exact candidate for THIS exact supplier item before — never
-      // re-suggest it. Applied last, on top of whichever branch above
-      // produced the current candidate, so it catches a rejected product
-      // resurfacing via either the normal match or the identity fallback.
-      // Blocks only this specific productId — a different candidate (via
-      // a stronger real signal, e.g. a UPC now present) is unaffected.
-      // The row STAYS needs_review with the candidate cleared (never
-      // demoted to "new_candidate" limbo — there is no such limbo under
-      // the corrected model): a rejected guess doesn't resolve the
-      // underlying ambiguity, it just means "not that one," so the row
-      // is still exactly what it was — a genuine Match Review item — an
-      // operator can search/link/track it manually, or a stronger signal
-      // on a later upload can resolve it automatically.
-      const rejectedIds = previous?.rejectedCandidateProductIds ?? [];
-      if (finalCandidateProductId && rejectedIds.includes(finalCandidateProductId)) {
-        finalCandidateProductId = null;
-        finalMatchConfidence = null;
-      }
-
-      // Corrected operating model: "no existing match" is never itself
-      // an end state. Every row that reaches here (matchSupplierRow
-      // found nothing) resolves immediately into exactly one of three
-      // real outcomes — no purgatory in between:
-      //
-      //  1. Already tracked (finalReferenceProductId set from a prior
-      //     "Track for Pricing" on an earlier generation) — that was
-      //     already a deliberate human identity decision; it's matched,
-      //     full stop, not left sitting unresolved just because this
-      //     row's own auto-creation branch never ran for it.
-      //  2. Structurally complete (checkAutoCreateEligibility passes) —
-      //     auto-create the Master Product and attach the offer. This is
-      //     expected, routine catalog growth, never an error or a queue.
-      //  3. Genuinely incomplete/ambiguous (e.g. "DIOR SAUVAGE 100ML",
-      //     no concentration stated, no authoritative UPC) — Match
-      //     Review, because the exact SKU truly cannot be determined
-      //     yet. Auto-creating here would lock in a guess.
-      if (finalReviewStatus === "new_candidate") {
-        if (finalReferenceProductId) {
-          finalReviewStatus = "auto_matched";
-          finalMatchType = "manual";
-          finalMatchConfidence = 1;
-          finalCandidateProductId = null;
-          finalCandidateReferenceProductId = null;
-          finalCompetingCandidates = undefined;
-        } else {
-          // A supplier's own placeholder text ("NO BARCODE" etc.) must
-          // never become a stored identity pointer — it isn't a real,
-          // uniquely-shared barcode, so treat it as absent here, same
-          // as everywhere else upc/ean is used as an identifier. Computed
-          // up front — a real plausible barcode is also the "verified
-          // identity evidence" checkAutoCreateEligibility requires when
-          // no brand (of its own or recognized from the text) exists.
-          const plausibleUpc = isPlausibleBarcode(row.upc.trim().toUpperCase()) ? row.upc.trim() : "";
-          const plausibleEan = isPlausibleBarcode(row.ean.trim().toUpperCase()) ? row.ean.trim() : "";
-          const effectiveBrand = resolveEffectiveBrand(row, products, referenceProducts);
-          const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, effectiveBrand);
-          const eligibility = checkAutoCreateEligibility(rowAttrs, Boolean(plausibleUpc || plausibleEan));
-          if (!eligibility.eligible) {
-            // Genuine ambiguity/incompleteness — a real Match Review
-            // case, not "new_candidate" limbo.
-            finalReviewStatus = "needs_review";
-            finalMatchType = "unmatched";
-            finalMatchConfidence = null;
-            finalCandidateProductId = null;
-            finalCandidateReferenceProductId = null;
-            finalCompetingCandidates = undefined;
-          } else {
-            const signature = computeIdentitySignature(rowAttrs);
-            const placeholderId = `${PENDING_PLACEHOLDER_PREFIX}${pendingPersistSeq++}`;
-            const newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt"> = {
-              brand: effectiveBrand,
-              name: row.description.trim(),
-              description: row.description.trim(),
-              sizeMl: rowAttrs.sizeMl,
-              concentration: rowAttrs.concentration,
-              isTester: rowAttrs.isTester,
-              isGiftSet: rowAttrs.isGiftSet,
-              isRefill: rowAttrs.isRefill,
-              productForm: rowAttrs.productForm,
-              upc: plausibleUpc,
-              ean: plausibleEan,
-              productId: null,
-              createdBy: "auto_import",
-              creationMethod: "auto_import",
-              createdFromSupplierId: input.supplierId,
-              createdFromUploadId: upload.id,
-              createdFromOfferKey: offerKey,
-            };
-            pendingPersists.push({
-              placeholderId,
-              identity: { upc: plausibleUpc, ean: plausibleEan, signature },
-              newRecordInput,
-            });
-
-            // Optimistic — the real outcome (created / resolved to an
-            // existing record / a genuine identity conflict) is only
-            // known after the deferred parallel persist pass below. A
-            // conflict retroactively reverts this exact row to
-            // needs_review once that's known (see the patch pass).
-            finalReferenceProductId = placeholderId;
-            finalReviewStatus = "auto_matched";
-            finalMatchType = "auto_created";
-            finalMatchConfidence = 1;
-            finalCandidateProductId = null;
-            finalCandidateReferenceProductId = null;
-            finalCompetingCandidates = undefined;
-
-            // Make this visible to every LATER row in this same upload —
-            // same purpose as the real record would serve — so a repeat
-            // of the same physical item later in this file takes the
-            // normal exact-match path instead of queuing a second
-            // redundant persist for what the parallel pass will discover
-            // is the same identity anyway.
-            const placeholderRecord: PricingReferenceProduct = { id: placeholderId, ...newRecordInput, createdAt: nowIso };
-            referenceProducts.push(placeholderRecord);
-            addToBrandBucketedPool(candidatePool, {
-              productId: null,
-              referenceProductId: placeholderId,
-              attrs: extractReferenceProductAttributes(placeholderRecord),
-              upc: placeholderRecord.upc,
-              ean: placeholderRecord.ean,
-            });
-          }
-        }
-      }
-
-      // Whether a genuinely-ambiguous item is flagged for the ACTIVE
-      // review queue is completely independent of the fresh match above
-      // — it only ever changes via an explicit "Send for Review" or a
-      // workflow's requestIdentityResolution call (pricing-product-
-      // linking.ts), never by re-matching. Carried forward across
-      // re-uploads while still needs_review (a flag doesn't silently
-      // vanish on the next price list); cleared the instant the row
-      // resolves to anything else, matched or not.
-      const finalReviewRequestedAt = finalReviewStatus === "needs_review" ? (previous?.reviewRequestedAt ?? null) : null;
-
-      // Track EVERY row referencing a placeholder — not just the row
-      // that originally queued it in pendingPersists. Confirmed as a
-      // real gap: a LATER row in this same file legitimately matches an
-      // EARLIER row's placeholder through the completely normal
-      // structural-match path (matchSupplierRow Step 3), not through the
-      // auto-create branch — that's by design (a repeat item should
-      // reuse the earlier identity, exactly like it would a real one).
-      // But that later row is never in pendingPersists, so only patching
-      // pendingPersists's own rows left every OTHER row pointing at that
-      // same placeholder stuck with an unresolved id forever.
-      if (finalReferenceProductId && finalReferenceProductId.startsWith(PENDING_PLACEHOLDER_PREFIX)) {
-        const rows = placeholderUsage.get(finalReferenceProductId);
-        if (rows) rows.push({ rowIndex: i, offerKey });
-        else placeholderUsage.set(finalReferenceProductId, [{ rowIndex: i, offerKey }]);
-      }
-
-      snapshots.push({
-        id: newId("offersnap"),
-        uploadId: upload.id,
-        rowIndex: i,
-        supplierId: input.supplierId,
-        offerKey,
-        raw: row,
-        productId: finalProductId,
-        candidateProductId: finalCandidateProductId,
-        candidateReferenceProductId: finalCandidateReferenceProductId,
-        competingCandidates: finalCompetingCandidates,
-        matchType: finalMatchType,
-        matchConfidence: finalMatchConfidence,
-        reviewStatus: finalReviewStatus,
-        referenceProductId: finalReferenceProductId,
-        rejectedCandidateProductIds: rejectedIds,
-        reviewRequestedAt: finalReviewRequestedAt,
-        currency: row.currency,
-        price: row.price,
-        fxRateAtUpload: rate?.rate ?? null,
-        fxRateTimestamp: rate?.timestamp ?? null,
-        priceUsdAtUpload: priceUsd,
-        uploadedAt: nowIso,
-      });
-
-      touchedKeys.add(offerKey);
-      const nextOffer: SupplierOfferCurrent = {
-        supplierId: input.supplierId,
-        offerKey,
-        supplierSku: row.supplierSku,
-        description: row.description,
-        brand: row.brand,
-        quantity: row.quantity,
-        currency: row.currency,
-        price: row.price,
-        fxRateAtUpload: rate?.rate ?? null,
-        fxRateTimestamp: rate?.timestamp ?? null,
-        priceUsdAtUpload: priceUsd,
-        upc: row.upc,
-        ean: row.ean,
-        productId: finalProductId,
-        candidateProductId: finalCandidateProductId,
-        candidateReferenceProductId: finalCandidateReferenceProductId,
-        competingCandidates: finalCompetingCandidates,
-        matchType: finalMatchType,
-        matchConfidence: finalMatchConfidence,
-        reviewStatus: finalReviewStatus,
-        // Carried forward exactly like productId — re-uploading a
-        // supplier's sheet must never silently wipe out a tracked link an
-        // operator set via "Track for Pricing" / "Link to tracked item"
-        // on a prior generation — and now also set fresh by auto-creation
-        // above when this row's identity is genuinely new.
-        referenceProductId: finalReferenceProductId,
-        rejectedCandidateProductIds: rejectedIds,
-        reviewRequestedAt: finalReviewRequestedAt,
-        currentlyListed: true,
-        lastUploadId: upload.id,
-        uploadedAt: nowIso,
-      };
-      candidateOffers[offerKey] = nextOffer;
-
-      // The reverse index is only ever keyed by THIS row's actual
-      // offerKey. A fallback-reconnected `previous` came from a
-      // DIFFERENT offerKey (the row's own prior identity, before the
-      // SKU reformatted) — that old key's own index membership is
-      // untouched here (it simply stops being touched by future
-      // uploads, same as any other superseded offerKey), so there is
-      // nothing to SREM for it under the NEW key; only a fresh SADD (if
-      // this row now resolves to a product) applies.
-      const member = `${input.supplierId}::${offerKey}`;
-      const priorSameKeyProductId = reconnectedViaFallback ? null : (previous?.productId ?? null);
-      if (priorSameKeyProductId && priorSameKeyProductId !== finalProductId) {
-        offersByProductOps.push({ op: "SREM", productId: priorSameKeyProductId, member });
-      }
-      if (finalProductId && priorSameKeyProductId !== finalProductId) {
-        offersByProductOps.push({ op: "SADD", productId: finalProductId, member });
-      }
-
-      // Mirrors the offers_by_product reverse-index maintenance above,
-      // for Master/Reference Products — same "only this offerKey's own
-      // prior link, only if it actually changed" logic.
-      const priorSameKeyReferenceProductId = reconnectedViaFallback ? null : (previous?.referenceProductId ?? null);
-      if (priorSameKeyReferenceProductId && priorSameKeyReferenceProductId !== finalReferenceProductId) {
-        offersByReferenceProductOps.push({ op: "SREM", referenceProductId: priorSameKeyReferenceProductId, member });
-      }
-      if (finalReferenceProductId && priorSameKeyReferenceProductId !== finalReferenceProductId) {
-        offersByReferenceProductOps.push({ op: "SADD", referenceProductId: finalReferenceProductId, member });
-      }
-
-      // A newly-confirmed high-confidence match (not already a learned
-      // alias) becomes one — so this exact supplier SKU/description
-      // never asks again. Skip if an identical alias already exists
-      // (repeat uploads of an already-aliased row shouldn't pile up
-      // duplicate alias records).
-      if (
-        finalReviewStatus === "auto_matched" &&
-        finalMatchType !== "alias" &&
-        finalProductId &&
-        !aliasesSoFar.some((a) => a.offerKey === offerKey && a.productId === finalProductId)
-      ) {
-        newAliases.push({
-          id: newId("alias"),
-          supplierId: input.supplierId,
-          offerKey,
-          productId: finalProductId,
-          createdAt: nowIso,
-          source: "auto_high_confidence",
-        });
-      }
-
-      // A fallback-reconnected identity is durable evidence too — write
-      // an alias for the NEW offerKey so the next upload (which will
-      // keep using this same reformatted SKU) takes the normal, fast
-      // direct/alias path without needing the fallback again.
-      if (
-        reconnectedViaFallback &&
-        finalProductId &&
-        !aliasesSoFar.some((a) => a.offerKey === offerKey && a.productId === finalProductId)
-      ) {
-        newAliases.push({
-          id: newId("alias"),
-          supplierId: input.supplierId,
-          offerKey,
-          productId: finalProductId,
-          createdAt: nowIso,
-          source: "auto_high_confidence",
-        });
-      }
-
-      // "new_candidate" is provably unreachable here — every path above
-      // that could produce it reassigns finalReviewStatus to
-      // auto_matched/needs_review before this point (TypeScript's own
-      // control-flow narrowing confirms it); newCandidates therefore
-      // stays 0 for every upload processed under the corrected model,
-      // exactly as its own deprecated doc comment says.
-      if (finalReviewStatus === "auto_matched") {
-        if (finalMatchType === "auto_created") autoCreated++;
-        else autoMatched++;
-      } else if (finalReviewStatus !== "ignored") {
-        needsReview++; // needs_review, alias_conflict, barcode_conflict — "ignored" is deliberately none of these three
-      }
-
+      await processRow(rows[i], i, ctx, state);
       if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
         await updateUploadProgress(upload.id, { processedRows: i + 1 });
       }
     }
 
-    // Deferred parallel persist — resolves every placeholder queued
-    // above via the SAME atomic get-or-create script used before, just
-    // issued concurrently instead of one-at-a-time. Chunked (not one
-    // unbounded Promise.all) to keep a sane bound on concurrent Redis
-    // calls, mirroring writeSnapshotsBatch's own CHUNK size below.
-    //
-    // skipSearchIndexAndVersionBump: true — a newly-created reference
-    // product's search-token indexing and catalogVersion invalidation
-    // don't need to happen INSIDE each row's own atomic create call; they
-    // only need to happen once, for real, before this function returns.
-    // Doing them per-row here would mean every one of potentially
-    // thousands of new-item rows in a single upload pays for two EXTRA
-    // sequential Redis round trips on top of the atomic create script
-    // itself — moving them to one dedicated bulk pass right after this
-    // loop (below) cuts that back to a single wave, without changing
-    // atomic identity creation/dedup at all (untouched, still one script,
-    // still race-safe) and without skipping either side effect: every
-    // "created" product below is still indexed and the version is still
-    // bumped, just once for the whole batch instead of once per row.
-    const PERSIST_CONCURRENCY = 100;
-    const persistResults = new Map<
-      string,
-      { status: "created"; id: string; product: PricingReferenceProduct } | { status: "existing"; id: string } | { status: "conflict"; ids: string[] }
-    >();
-    const newlyCreatedForIndexing: PricingReferenceProduct[] = [];
-    for (let i = 0; i < pendingPersists.length; i += PERSIST_CONCURRENCY) {
-      const chunk = pendingPersists.slice(i, i + PERSIST_CONCURRENCY);
-      const results = await Promise.all(chunk.map((p) => getOrCreateReferenceProductByIdentity(p.identity, p.newRecordInput, { skipSearchIndexAndVersionBump: true })));
-      chunk.forEach((p, idx) => {
-        const r = results[idx];
-        if (r.status === "conflict") {
-          persistResults.set(p.placeholderId, { status: "conflict", ids: r.ids });
-        } else if (r.status === "created") {
-          persistResults.set(p.placeholderId, { status: "created", id: r.id, product: r.product });
-          newlyCreatedForIndexing.push(r.product);
-        } else {
-          persistResults.set(p.placeholderId, { status: "existing", id: r.id });
-        }
+    const generationId = newId("gen");
+    return await finalizeUpload({ upload, uploadType: input.uploadType, existingAliases, generationId, totalRows: rows.length, state });
+  } catch (err) {
+    await markUploadFailed(upload.id, err instanceof Error ? err.message : "Processing failed.");
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------
+// Entry point 2 — resumable (what /api/pricing/process actually calls
+// now). See this file's header comment for the design.
+// ---------------------------------------------------------------------
+
+export interface ProcessBatchResult {
+  sessionId: string | null;
+  cursor: number;
+  totalRows: number;
+  done: boolean;
+  upload: SupplierPriceUpload;
+}
+
+export async function processSupplierUploadBatch(input: {
+  supplierId: string;
+  filename: string;
+  blobUrl: string;
+  uploadType: "full" | "partial";
+  headerRowIndex: number;
+  headerSignature: string[];
+  columnMap: SupplierColumnMapping["columnMap"];
+  retryUploadId?: string;
+  cursor: number;
+  sessionId?: string;
+}): Promise<ProcessBatchResult> {
+  let upload: SupplierPriceUpload;
+  let session: ProcessSessionState | null = null;
+
+  if (input.sessionId) {
+    const existing = await getProcessSession(input.sessionId);
+    if (!existing || existing.cursor !== input.cursor) throw new ProcessSessionExpiredError();
+    session = existing;
+    const existingUpload = await getUpload(session.uploadId);
+    if (!existingUpload) throw new Error("Upload record went missing mid-process.");
+    upload = existingUpload;
+  } else {
+    if (input.cursor !== 0) throw new ProcessSessionExpiredError();
+    if (input.retryUploadId) {
+      const existing = await getUpload(input.retryUploadId);
+      if (!existing || existing.supplierId !== input.supplierId) {
+        throw new Error("Upload to retry was not found for this supplier.");
+      }
+      if (existing.status !== "failed") {
+        throw new Error(`Only a failed upload can be retried (this one is "${existing.status}").`);
+      }
+      upload = { ...existing, status: "processing", processedRows: 0, error: null, completedAt: null };
+      await updateUploadProgress(upload.id, upload);
+    } else {
+      upload = await createUpload({
+        supplierId: input.supplierId,
+        filename: input.filename,
+        blobUrl: input.blobUrl,
+        uploadType: input.uploadType,
+        totalRows: 0,
       });
     }
-    // The one dedicated bulk pass: every product actually created above
-    // becomes searchable, and the catalog-version counter is bumped
-    // exactly once for the whole upload (not once per created item) —
-    // still fires even if this generation's own commit later turns out
-    // stale, matching the existing invariant that a created reference
-    // product is real and permanent (never rolled back) regardless of
-    // whether the supplier generation that prompted it ends up current.
-    if (newlyCreatedForIndexing.length > 0) {
-      const INDEX_CONCURRENCY = 100;
-      for (let i = 0; i < newlyCreatedForIndexing.length; i += INDEX_CONCURRENCY) {
-        await Promise.all(newlyCreatedForIndexing.slice(i, i + INDEX_CONCURRENCY).map((p) => indexReferenceProductForSearch(p)));
-      }
-      await bumpCatalogVersion();
+  }
+
+  try {
+    const { rows } = await parseAndValidateUploadFile(input);
+    const totalRows = rows.length;
+
+    if (!session) {
+      await updateUploadProgress(upload.id, { totalRows });
+      const previousOffers = await getCommittedOffers(input.supplierId);
+      session = {
+        uploadId: upload.id,
+        generationId: newId("gen"),
+        seq: upload.seq,
+        cursor: 0,
+        previousOffers,
+        candidateOffers: { ...previousOffers },
+        snapshots: [],
+        newAliases: [],
+        offersByProductOps: [],
+        offersByReferenceProductOps: [],
+        pendingPersists: [],
+        placeholderUsage: {},
+        touchedKeys: [],
+        autoMatched: 0,
+        autoCreated: 0,
+        needsReview: 0,
+        notAProduct: 0,
+        pendingPersistSeq: 0,
+      };
     }
 
-    // Patch EVERY row that ended up referencing a placeholder — not just
-    // the row that originally queued it — with its now-resolved real
-    // identity, or, for a genuine identity conflict, revert each of
-    // those rows to needs_review, exactly like the old inline conflict
-    // branch did (same fields, same reasoning — just applied here
-    // instead of inline, now that the real outcome is known). A
-    // placeholder can be used by more than one row (see placeholderUsage
-    // above), and every reverse-index op referencing it must be patched
-    // too, not just the first one found.
-    for (const [placeholderId, usedBy] of placeholderUsage) {
-      const result = persistResults.get(placeholderId);
-      if (!result) continue; // unreachable — every placeholder is queued in pendingPersists and gets a result above
+    // Rebuilt fresh EVERY batch — cheap (~2s), avoids ever serializing
+    // the ~15,000-record catalog into session storage. Mirrors
+    // parse-preview/match-batch's own proven pattern exactly.
+    const [products, existingAliases, referenceProducts] = await Promise.all([
+      getProducts(),
+      getAliasesForSupplier(input.supplierId),
+      getAllReferenceProducts(),
+    ]);
 
-      if (result.status === "conflict") {
-        const conflictCandidates = result.ids.map((id) => ({ productId: null, referenceProductId: id }));
-        for (const { rowIndex, offerKey } of usedBy) {
-          const snapshot = snapshots[rowIndex];
-          const offer = candidateOffers[offerKey];
-          if (snapshot && snapshot.referenceProductId === placeholderId) {
-            if (snapshot.matchType === "auto_created") autoCreated--;
-            else autoMatched--;
-            needsReview++;
-            snapshot.referenceProductId = null;
-            snapshot.reviewStatus = "needs_review";
-            snapshot.matchType = "unmatched";
-            snapshot.matchConfidence = null;
-            snapshot.competingCandidates = conflictCandidates;
-          }
-          if (offer && offer.referenceProductId === placeholderId) {
-            offer.referenceProductId = null;
-            offer.reviewStatus = "needs_review";
-            offer.matchType = "unmatched";
-            offer.matchConfidence = null;
-            offer.competingCandidates = conflictCandidates;
-          }
-        }
-        for (let idx = offersByReferenceProductOps.length - 1; idx >= 0; idx--) {
-          if (offersByReferenceProductOps[idx].referenceProductId === placeholderId) offersByReferenceProductOps.splice(idx, 1);
-        }
-      } else {
-        for (const { rowIndex, offerKey } of usedBy) {
-          const snapshot = snapshots[rowIndex];
-          const offer = candidateOffers[offerKey];
-          if (snapshot && snapshot.referenceProductId === placeholderId) snapshot.referenceProductId = result.id;
-          if (offer && offer.referenceProductId === placeholderId) offer.referenceProductId = result.id;
-        }
-        for (const op of offersByReferenceProductOps) {
-          if (op.referenceProductId === placeholderId) op.referenceProductId = result.id;
-        }
-      }
+    // Re-apply this session's own placeholder creations on top of the
+    // fresh real catalog BEFORE building the pool, so a later batch's
+    // row can still structurally match an earlier batch's auto-create —
+    // identical in spirit to stepMatchPreviewBatch's previewPoolAdditions.
+    const nowIso = new Date().toISOString();
+    const mutableReferenceProducts = [...referenceProducts];
+    for (const p of session.pendingPersists) {
+      mutableReferenceProducts.push({ id: p.placeholderId, ...p.newRecordInput, createdAt: nowIso });
     }
+    const candidatePool = buildBrandBucketedPool(buildMasterCandidatePool(products, mutableReferenceProducts));
 
-    // Full upload: anything from the previous generation this file
-    // never mentioned is no longer listed — kept, never deleted, still
-    // discoverable and still carrying its full history.
-    if (input.uploadType === "full") {
-      for (const [offerKey, offer] of Object.entries(candidateOffers)) {
-        if (!touchedKeys.has(offerKey) && offer.currentlyListed) {
-          candidateOffers[offerKey] = { ...offer, currentlyListed: false };
-        }
-      }
-    }
+    // previousOfferIdentityIndex reflects offer history as of the START
+    // of this upload — rebuilt fresh each batch from the FIXED snapshot
+    // taken at session creation, never from a fresh getCommittedOffers
+    // call (which could drift between batches if something else committed
+    // to this same supplier mid-run).
+    const previousOfferIdentityIndex = buildPreviousOfferIdentityIndex(session.previousOffers);
 
-    const generationId = newId("gen");
-    await writeCandidateGeneration(input.supplierId, generationId, candidateOffers);
-    await writeSnapshotsBatch(snapshots);
-
-    const finishedUpload: SupplierPriceUpload = {
-      ...upload,
-      status: "completed",
-      processedRows: rows.length,
-      autoMatched,
-      autoCreated,
-      needsReview,
-      newCandidates,
-      notAProduct,
-      completedAt: new Date().toISOString(),
-    };
-
-    const commitResult = await commitGeneration({
+    const ctx: RowProcessingContext = {
       supplierId: input.supplierId,
       uploadId: upload.id,
-      seq: upload.seq,
-      generationId,
-      finishedUpload,
-      newAliases: existingAliases.concat(newAliases),
-      offersByProductOps,
-      offersByReferenceProductOps,
-    });
+      nowIso,
+      products,
+      existingAliases,
+      referenceProducts: mutableReferenceProducts,
+      candidatePool,
+      previousOfferIdentityIndex,
+    };
+    const state: RowProcessingState = {
+      candidateOffers: session.candidateOffers,
+      touchedKeys: new Set(session.touchedKeys),
+      newAliases: session.newAliases,
+      offersByProductOps: session.offersByProductOps,
+      offersByReferenceProductOps: session.offersByReferenceProductOps,
+      snapshots: session.snapshots,
+      autoMatched: session.autoMatched,
+      autoCreated: session.autoCreated,
+      needsReview: session.needsReview,
+      notAProduct: session.notAProduct,
+      pendingPersistSeq: session.pendingPersistSeq,
+      pendingPersists: session.pendingPersists,
+      placeholderUsage: new Map(Object.entries(session.placeholderUsage)),
+    };
 
-    // STALE_GENERATION: this upload fully and correctly processed every
-    // row, but a newer upload (higher seq) already committed first — per
-    // the ordering guard, the script returns before writing anything
-    // (including the upload record itself), so persist the completed
-    // state here instead. The generation/snapshots it built are real and
-    // retained in history but deliberately never made current; "is this
-    // the live one" is a read-time comparison against the supplier's
-    // current committed seq, not a separate stored flag — same
-    // derive-don't-duplicate principle used elsewhere in this codebase.
-    // On a real commit ("OK"), the script already persisted this exact
-    // record, so there's nothing left to do.
-    if (commitResult === "STALE_GENERATION") {
-      await updateUploadProgress(upload.id, finishedUpload);
+    const batchEnd = Math.min(input.cursor + PROCESS_BATCH_SIZE, totalRows);
+    for (let i = input.cursor; i < batchEnd; i++) {
+      await processRow(rows[i], i, ctx, state);
     }
-    return finishedUpload;
+    const nextCursor = batchEnd;
+    const done = nextCursor >= totalRows;
+
+    if (!done) {
+      await updateUploadProgress(upload.id, { processedRows: nextCursor });
+      const nextSession: ProcessSessionState = {
+        uploadId: session.uploadId,
+        generationId: session.generationId,
+        seq: session.seq,
+        cursor: nextCursor,
+        previousOffers: session.previousOffers,
+        candidateOffers: state.candidateOffers,
+        snapshots: state.snapshots,
+        newAliases: state.newAliases,
+        offersByProductOps: state.offersByProductOps,
+        offersByReferenceProductOps: state.offersByReferenceProductOps,
+        pendingPersists: state.pendingPersists,
+        placeholderUsage: Object.fromEntries(state.placeholderUsage),
+        touchedKeys: [...state.touchedKeys],
+        autoMatched: state.autoMatched,
+        autoCreated: state.autoCreated,
+        needsReview: state.needsReview,
+        notAProduct: state.notAProduct,
+        pendingPersistSeq: state.pendingPersistSeq,
+      };
+      const sessionId = input.sessionId ?? newId("processsession");
+      if (input.sessionId) await saveProcessSession(sessionId, nextSession);
+      else await createProcessSession(sessionId, nextSession);
+      const progressUpload = (await getUpload(upload.id)) ?? upload;
+      return { sessionId, cursor: nextCursor, totalRows, done: false, upload: progressUpload };
+    }
+
+    const finished = await finalizeUpload({
+      upload,
+      uploadType: input.uploadType,
+      existingAliases,
+      generationId: session.generationId,
+      totalRows,
+      state,
+    });
+    if (input.sessionId) await deleteProcessSession(input.sessionId);
+    return { sessionId: null, cursor: nextCursor, totalRows, done: true, upload: finished };
   } catch (err) {
     await markUploadFailed(upload.id, err instanceof Error ? err.message : "Processing failed.");
     throw err;
