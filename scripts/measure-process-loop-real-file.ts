@@ -109,13 +109,13 @@ async function main() {
     convertToUsd(row.price, rate?.rate ?? null);
 
     s = Date.now();
-    let previous = candidateOffers[offerKey];
+    const previous = candidateOffers[offerKey];
     if (!previous) {
       findPreviousBySupplierItemIdentity({ upc: row.upc, ean: row.ean, brand: row.brand, description: row.description }, previousOfferIdentityIndex);
     }
     t.fallbackLookup += Date.now() - s;
 
-    let finalReviewStatus = match.reviewStatus;
+    const finalReviewStatus = match.reviewStatus;
     const finalReferenceProductId = match.referenceProductId ?? (previous?.referenceProductId ?? null);
 
     if (finalReviewStatus === "new_candidate" && !finalReferenceProductId) {
