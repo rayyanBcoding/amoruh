@@ -4,7 +4,6 @@ import {
   commitGeneration,
   createProcessSession,
   createUpload,
-  deleteProcessSession,
   getAliasesForSupplier,
   getAllReferenceProducts,
   getCommittedOffers,
@@ -829,6 +828,26 @@ export async function processSupplierUploadBatch(input: {
 
   if (input.sessionId) {
     const existing = await getProcessSession(input.sessionId);
+    // Idempotent replay of the FINAL batch request: if the session is
+    // still there (never deleted — see the success path below, which
+    // deliberately leaves it for the TTL to clean up rather than
+    // deleting it immediately) and its own upload already completed,
+    // this is a retry of a request whose response was lost in transit
+    // after the server had already committed — return the SAME final
+    // result again rather than re-running finalizeUpload (which would
+    // re-do real work) or falling through to ProcessSessionExpiredError
+    // (which would make the client restart the WHOLE upload from row 0,
+    // creating a second, confusing generation/upload for what the
+    // operator sees as one Process click — commitGeneration's own seq
+    // guard would still stop that second attempt from ever becoming the
+    // LIVE generation, but it's real wasted work and a real second
+    // history record, worth avoiding, not just tolerating).
+    if (existing) {
+      const existingUpload = await getUpload(existing.uploadId);
+      if (existingUpload?.status === "completed") {
+        return { sessionId: null, cursor: existingUpload.totalRows, totalRows: existingUpload.totalRows, done: true, upload: existingUpload };
+      }
+    }
     if (!existing || existing.cursor !== input.cursor) throw new ProcessSessionExpiredError();
     session = existing;
     const existingUpload = await getUpload(session.uploadId);
@@ -983,7 +1002,12 @@ export async function processSupplierUploadBatch(input: {
       totalRows,
       state,
     });
-    if (input.sessionId) await deleteProcessSession(input.sessionId);
+    // Deliberately NOT deleted here — see the idempotent-replay check at
+    // the top of this function, which needs the session to still be
+    // findable (with its upload now "completed") to recognize a retry of
+    // THIS exact request rather than treating it as expired. It still
+    // self-cleans via its own TTL either way, same as an abandoned
+    // mid-upload session already did before this change.
     return { sessionId: null, cursor: nextCursor, totalRows, done: true, upload: finished };
   } catch (err) {
     await markUploadFailed(upload.id, err instanceof Error ? err.message : "Processing failed.");
