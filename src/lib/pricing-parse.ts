@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import type { SupplierColumnMapping } from "./intake-types";
 import type { SupplierRawRow } from "./pricing-types";
+import { isPlausibleBarcode } from "./pricing-matching";
 
 // ---------------------------------------------------------------------
 // Deterministic spreadsheet parsing for supplier price lists — no
@@ -253,6 +254,20 @@ function parseNumericCell(raw: string): number | null {
   return parseFloat(cleaned);
 }
 
+// Trailing punctuation only, never internal — an export/OCR artifact
+// (a stray final "." was the confirmed case, e.g. "850039142246.") can
+// mask an otherwise-plausible barcode. Stripping is applied only when
+// doing so actually reveals a plausible barcode; a value that isn't a
+// barcode either way (a legitimate alphanumeric supplier SKU) is left
+// completely untouched, so this never risks corrupting real SKU text.
+const TRAILING_BARCODE_PUNCTUATION_RE = /[.,;:'"`]+$/;
+
+function normalizeBarcodeLikeValue(value: string): string {
+  if (!value || isPlausibleBarcode(value.toUpperCase())) return value;
+  const stripped = value.replace(TRAILING_BARCODE_PUNCTUATION_RE, "");
+  return stripped !== value && isPlausibleBarcode(stripped.toUpperCase()) ? stripped : value;
+}
+
 /** Applies a confirmed mapping to raw data rows -> normalized
  *  SupplierRawRow[], filtering out non-product rows first. Missing/
  *  unmapped fields default sensibly (empty string, null quantity, "USD"
@@ -269,14 +284,14 @@ export function applyColumnMapping(
     const price = parseNumericCell(cell(row, columnMap.price));
     const quantity = parseNumericCell(cell(row, columnMap.quantity));
     return {
-      supplierSku: cell(row, columnMap.supplierSku),
+      supplierSku: normalizeBarcodeLikeValue(cell(row, columnMap.supplierSku)),
       description: cell(row, columnMap.description),
       brand: cell(row, columnMap.brand),
       quantity: quantity !== null ? Math.round(quantity) : null,
       price: price ?? 0,
       currency: cell(row, columnMap.currency).toUpperCase() || "USD",
-      upc: cell(row, columnMap.upc),
-      ean: cell(row, columnMap.ean),
+      upc: normalizeBarcodeLikeValue(cell(row, columnMap.upc)),
+      ean: normalizeBarcodeLikeValue(cell(row, columnMap.ean)),
       category: cell(row, columnMap.category),
     };
   });
