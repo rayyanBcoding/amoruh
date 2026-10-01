@@ -131,6 +131,14 @@ const KEYS = {
    *  publish, same guarantee the single-shot path already had for a
    *  mid-request crash. */
   processSession: (sessionId: string) => `amoruh:pricing:process_session:${sessionId}`,
+  /** Write-once snapshot of getCommittedOffers(supplierId) taken when a
+   *  process session is created — see ProcessSessionState's own comment
+   *  on previousOffers for why this must never be rewritten or re-fetched
+   *  mid-run. Stored outside the per-batch session blob (not duplicated
+   *  into it) specifically so a large existing offer history is only
+   *  ever serialized once per upload, never once per batch — see the
+   *  Perfume Unlimited/Jizan regression this was split out to fix. */
+  processSessionPreviousOffers: (sessionId: string) => `amoruh:pricing:process_session_previous:${sessionId}`,
 } as const;
 
 const PREVIEW_MATCH_SESSION_TTL_SECONDS = 900;
@@ -202,8 +210,18 @@ export async function updateUploadProgress(uploadId: string, patch: Partial<Supp
   await redis.set(KEYS.upload(uploadId), { ...current, ...patch });
 }
 
+// Defense in depth: a caller is expected to already sanitize/truncate
+// (see pricing-process.ts's sanitizeErrorForStorage, used at every catch
+// site before this is called), but this hard cap exists so a future or
+// unsanitized caller still can't make THIS write itself the thing that
+// exceeds Upstash's per-command size limit — exactly what happened when
+// an earlier version of this function stored a raw UpstashError message
+// that itself echoed back an entire oversized failed command.
+const MAX_STORED_ERROR_LENGTH = 1000;
+
 export async function markUploadFailed(uploadId: string, error: string): Promise<void> {
-  await updateUploadProgress(uploadId, { status: "failed" as UploadStatus, error, completedAt: new Date().toISOString() });
+  const safeError = error.length > MAX_STORED_ERROR_LENGTH ? `${error.slice(0, MAX_STORED_ERROR_LENGTH)}… (truncated)` : error;
+  await updateUploadProgress(uploadId, { status: "failed" as UploadStatus, error: safeError, completedAt: new Date().toISOString() });
 }
 
 // ---------------------------------------------------------------------
@@ -252,16 +270,35 @@ export interface ProcessSessionState {
    *  state, saved/compared together so a stale/replayed batch call is
    *  always caught the same way match-batch's session already is. */
   cursor: number;
-  /** Snapshot of getCommittedOffers(supplierId) taken ONCE when this
-   *  session was created — never re-fetched per batch. Matches the
-   *  single-shot path's own semantics exactly: previousOfferIdentityIndex
-   *  reflects offer history as of the START of this upload, not a
-   *  moving target a same-supplier commit mid-run could otherwise
-   *  perturb between batches. Used only to rebuild that index fresh
-   *  each batch (cheap) — never mutated itself. */
-  previousOffers: Record<string, SupplierOfferCurrent>;
-  candidateOffers: Record<string, SupplierOfferCurrent>;
-  snapshots: SupplierOfferSnapshot[];
+  /** previousOffers and candidateOffers are deliberately NOT fields on
+   *  this object — they used to be, and for an existing supplier with a
+   *  large offer history (Perfume Unlimited, Jizan) that meant the same
+   *  several-MB offer map was serialized into this ONE JSON blob twice
+   *  (once as previousOffers, once duplicated into candidateOffers) on
+   *  every single batch, eventually exceeding Upstash's 10MB per-command
+   *  limit on the second or later batch and failing the whole upload —
+   *  a regression a brand-new supplier (empty previousOffers) could
+   *  never surface. previousOffers now lives in its own write-once key
+   *  (processSessionPreviousOffers — see createPreviousOffersSnapshot/
+   *  getPreviousOffersSnapshot), fixed at session creation and never
+   *  rewritten, preserving the exact same "fixed as of upload start"
+   *  guarantee previousOfferIdentityIndex depends on. candidateOffers
+   *  now lives directly in the eventual generation's own offerCurrentHash
+   *  (getStagedOffers/writeCandidateGeneration) — read in full each batch
+   *  (a plain HGETALL, already proven safe at this scale by
+   *  getCommittedOffers) but WRITTEN only as each batch's own bounded,
+   *  chunked HSET of its own touched keys, never as one ever-growing
+   *  blob. snapshots is absent for the same reason, one level simpler:
+   *  nothing ever reads an existing snapshot back out of this state
+   *  during row processing (only pushes new ones), so each batch's own
+   *  snapshots are written immediately via writeSnapshotsBatch (their
+   *  keys are per-row and deterministic — tiny, bounded, already safe)
+   *  and never carried into the next batch's session at all. The one
+   *  place that DOES need to read a snapshot back — finalizeUpload's
+   *  placeholder-resolution patch, for a placeholder created in an
+   *  earlier batch than the one that finishes the upload — re-fetches
+   *  that specific row's snapshot by its deterministic key instead of
+   *  assuming it's still in memory. */
   newAliases: SupplierAlias[];
   offersByProductOps: OffersByProductOp[];
   offersByReferenceProductOps: OffersByReferenceProductOp[];
@@ -289,6 +326,32 @@ export async function getProcessSession(sessionId: string): Promise<ProcessSessi
 
 export async function saveProcessSession(sessionId: string, state: ProcessSessionState): Promise<void> {
   await redis.set(KEYS.processSession(sessionId), state, { ex: PROCESS_SESSION_TTL_SECONDS });
+}
+
+/** Write-once — called exactly once, when a process session is created,
+ *  with that supplier's committed offers as of that moment. Never
+ *  rewritten afterward: see ProcessSessionState's comment on why this
+ *  must stay a fixed, non-drifting snapshot for the life of the upload. */
+export async function createPreviousOffersSnapshot(sessionId: string, previousOffers: Record<string, SupplierOfferCurrent>): Promise<void> {
+  await redis.set(KEYS.processSessionPreviousOffers(sessionId), previousOffers, { ex: PROCESS_SESSION_TTL_SECONDS });
+}
+
+export async function getPreviousOffersSnapshot(sessionId: string): Promise<Record<string, SupplierOfferCurrent>> {
+  return (await redis.get<Record<string, SupplierOfferCurrent>>(KEYS.processSessionPreviousOffers(sessionId))) ?? {};
+}
+
+/** Reads the FULL in-progress candidate offer map for a staging
+ *  generation — identical to getCommittedOffers, but takes the
+ *  generationId directly since a staging generation (mid-upload) is by
+ *  definition not yet the current one. A plain HGETALL; already proven
+ *  safe at this scale (Jizan: ~7,133 entries, ~5.8MB) since
+ *  getCommittedOffers reads the exact same shape of hash for the live
+ *  generation. Only the WRITE side of this hash needs to stay
+ *  bounded/chunked (writeCandidateGeneration already does) — Upstash's
+ *  10MB limit is a per-command REQUEST size cap, which a read response
+ *  is not subject to the same way. */
+export async function getStagedOffers(supplierId: string, generationId: string): Promise<Record<string, SupplierOfferCurrent>> {
+  return (await redis.hgetall<Record<string, SupplierOfferCurrent>>(KEYS.offerCurrentHash(supplierId, generationId))) ?? {};
 }
 
 export async function deleteProcessSession(sessionId: string): Promise<void> {
@@ -334,6 +397,10 @@ export async function writeSnapshotsBatch(snapshots: SupplierOfferSnapshot[]): P
       ),
     ]);
   }
+}
+
+export async function getSnapshotByRowIndex(uploadId: string, rowIndex: number): Promise<SupplierOfferSnapshot | null> {
+  return (await redis.get<SupplierOfferSnapshot>(KEYS.offerSnapshot(uploadId, rowIndex))) ?? null;
 }
 
 export async function getOfferHistory(supplierId: string, offerKey: string, limit = 50): Promise<SupplierOfferSnapshot[]> {

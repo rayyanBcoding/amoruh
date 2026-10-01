@@ -2,13 +2,17 @@ import { getProducts } from "./db";
 import {
   bumpCatalogVersion,
   commitGeneration,
+  createPreviousOffersSnapshot,
   createProcessSession,
   createUpload,
   getAliasesForSupplier,
   getAllReferenceProducts,
   getCommittedOffers,
   getOrCreateReferenceProductByIdentity,
+  getPreviousOffersSnapshot,
   getProcessSession,
+  getSnapshotByRowIndex,
+  getStagedOffers,
   getUpload,
   indexReferenceProductForSearch,
   markUploadFailed,
@@ -106,6 +110,25 @@ export class ProcessSessionExpiredError extends Error {
 // ---------------------------------------------------------------------
 // Shared building blocks
 // ---------------------------------------------------------------------
+
+const MAX_ERROR_MESSAGE_LENGTH = 500;
+
+/** Turns a caught error into a short, bounded string safe to persist on
+ *  an upload record. An Upstash request-size error echoes the ENTIRE
+ *  oversized command (including whatever multi-MB payload triggered it)
+ *  back inside its own message — storing that raw text in the upload
+ *  record was itself a second, cascading oversized write that made
+ *  markUploadFailed fail too, leaving the upload stuck at "processing"
+ *  forever instead of ever reaching "failed". A command dump always
+ *  contains the literal text "command was:", so cutting the message off
+ *  there (before truncating to a bounded length) drops it specifically,
+ *  not just by length. */
+function sanitizeErrorForStorage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : "Processing failed.";
+  const withoutCommandDump = raw.split("command was:")[0].trim();
+  const message = withoutCommandDump.length > 0 ? withoutCommandDump : "Processing failed.";
+  return message.length > MAX_ERROR_MESSAGE_LENGTH ? `${message.slice(0, MAX_ERROR_MESSAGE_LENGTH)}… (truncated)` : message;
+}
 
 async function parseAndValidateUploadFile(input: {
   blobUrl: string;
@@ -628,7 +651,26 @@ async function finalizeUpload(params: {
   // Patch EVERY row that ended up referencing a placeholder — not just
   // the row that originally queued it — with its now-resolved real
   // identity, or, for a genuine identity conflict, revert to
-  // needs_review.
+  // needs_review. `state.snapshots` only ever holds the LAST batch's own
+  // rows (see ProcessSessionState's comment on why snapshots is no
+  // longer carried across batches) — a placeholder created in an earlier
+  // batch can still be `usedBy` a row from any later batch, so a usage
+  // whose rowIndex isn't in this batch is fetched by its own
+  // deterministic key instead of assuming it's in memory, patched, and
+  // queued for a targeted rewrite below (bounded by auto-create count,
+  // not by file size).
+  const lastBatchSnapshotsByRow = new Map(state.snapshots.map((s) => [s.rowIndex, s]));
+  const fetchedSnapshotPatches = new Map<number, SupplierOfferSnapshot>();
+  async function getSnapshotForPatch(rowIndex: number): Promise<SupplierOfferSnapshot | null> {
+    const inMemory = lastBatchSnapshotsByRow.get(rowIndex);
+    if (inMemory) return inMemory;
+    const alreadyFetched = fetchedSnapshotPatches.get(rowIndex);
+    if (alreadyFetched) return alreadyFetched;
+    const fetched = await getSnapshotByRowIndex(upload.id, rowIndex);
+    if (fetched) fetchedSnapshotPatches.set(rowIndex, fetched);
+    return fetched;
+  }
+
   for (const [placeholderId, usedBy] of state.placeholderUsage) {
     const result = persistResults.get(placeholderId);
     if (!result) continue; // unreachable — every placeholder is queued in pendingPersists and gets a result above
@@ -636,7 +678,7 @@ async function finalizeUpload(params: {
     if (result.status === "conflict") {
       const conflictCandidates = result.ids.map((id) => ({ productId: null, referenceProductId: id }));
       for (const { rowIndex, offerKey } of usedBy) {
-        const snapshot = state.snapshots[rowIndex];
+        const snapshot = await getSnapshotForPatch(rowIndex);
         const offer = state.candidateOffers[offerKey];
         if (snapshot && snapshot.referenceProductId === placeholderId) {
           if (snapshot.matchType === "auto_created") state.autoCreated--;
@@ -661,7 +703,7 @@ async function finalizeUpload(params: {
       }
     } else {
       for (const { rowIndex, offerKey } of usedBy) {
-        const snapshot = state.snapshots[rowIndex];
+        const snapshot = await getSnapshotForPatch(rowIndex);
         const offer = state.candidateOffers[offerKey];
         if (snapshot && snapshot.referenceProductId === placeholderId) snapshot.referenceProductId = result.id;
         if (offer && offer.referenceProductId === placeholderId) offer.referenceProductId = result.id;
@@ -684,7 +726,7 @@ async function finalizeUpload(params: {
   }
 
   await writeCandidateGeneration(upload.supplierId, generationId, state.candidateOffers);
-  await writeSnapshotsBatch(state.snapshots);
+  await writeSnapshotsBatch([...state.snapshots, ...fetchedSnapshotPatches.values()]);
 
   const finishedUpload: SupplierPriceUpload = {
     ...upload,
@@ -793,7 +835,7 @@ export async function processSupplierUpload(input: {
     const generationId = newId("gen");
     return await finalizeUpload({ upload, uploadType: input.uploadType, existingAliases, generationId, totalRows: rows.length, state });
   } catch (err) {
-    await markUploadFailed(upload.id, err instanceof Error ? err.message : "Processing failed.");
+    await markUploadFailed(upload.id, sanitizeErrorForStorage(err));
     throw err;
   }
 }
@@ -876,21 +918,37 @@ export async function processSupplierUploadBatch(input: {
     }
   }
 
+  // Decided up front (not inside the !session branch below) because the
+  // previousOffers snapshot it keys needs to be written at the SAME
+  // moment the session itself is first created.
+  const sessionId = input.sessionId ?? newId("processsession");
+
   try {
     const { rows } = await parseAndValidateUploadFile(input);
     const totalRows = rows.length;
 
+    // previousOffers (fixed as of upload start) and candidateOffers (the
+    // full current in-progress map) are read/seeded here rather than
+    // carried as session fields — see ProcessSessionState's comment for
+    // why: duplicating a large existing offer history into the session
+    // blob on every batch is what caused the Perfume Unlimited/Jizan
+    // regression this replaces.
+    let previousOffers: Record<string, SupplierOfferCurrent>;
+    let candidateOffers: Record<string, SupplierOfferCurrent>;
     if (!session) {
       await updateUploadProgress(upload.id, { totalRows });
-      const previousOffers = await getCommittedOffers(input.supplierId);
+      previousOffers = await getCommittedOffers(input.supplierId);
+      candidateOffers = { ...previousOffers };
+      const generationId = newId("gen");
+      await Promise.all([
+        createPreviousOffersSnapshot(sessionId, previousOffers),
+        writeCandidateGeneration(input.supplierId, generationId, previousOffers),
+      ]);
       session = {
         uploadId: upload.id,
-        generationId: newId("gen"),
+        generationId,
         seq: upload.seq,
         cursor: 0,
-        previousOffers,
-        candidateOffers: { ...previousOffers },
-        snapshots: [],
         newAliases: [],
         offersByProductOps: [],
         offersByReferenceProductOps: [],
@@ -903,6 +961,11 @@ export async function processSupplierUploadBatch(input: {
         notAProduct: 0,
         pendingPersistSeq: 0,
       };
+    } else {
+      [previousOffers, candidateOffers] = await Promise.all([
+        getPreviousOffersSnapshot(sessionId),
+        getStagedOffers(input.supplierId, session.generationId),
+      ]);
     }
 
     // Rebuilt fresh EVERY batch — cheap (~2s), avoids ever serializing
@@ -930,7 +993,7 @@ export async function processSupplierUploadBatch(input: {
     // taken at session creation, never from a fresh getCommittedOffers
     // call (which could drift between batches if something else committed
     // to this same supplier mid-run).
-    const previousOfferIdentityIndex = buildPreviousOfferIdentityIndex(session.previousOffers);
+    const previousOfferIdentityIndex = buildPreviousOfferIdentityIndex(previousOffers);
 
     const ctx: RowProcessingContext = {
       supplierId: input.supplierId,
@@ -943,12 +1006,12 @@ export async function processSupplierUploadBatch(input: {
       previousOfferIdentityIndex,
     };
     const state: RowProcessingState = {
-      candidateOffers: session.candidateOffers,
+      candidateOffers,
       touchedKeys: new Set(session.touchedKeys),
       newAliases: session.newAliases,
       offersByProductOps: session.offersByProductOps,
       offersByReferenceProductOps: session.offersByReferenceProductOps,
-      snapshots: session.snapshots,
+      snapshots: [],
       autoMatched: session.autoMatched,
       autoCreated: session.autoCreated,
       needsReview: session.needsReview,
@@ -959,22 +1022,37 @@ export async function processSupplierUploadBatch(input: {
     };
 
     const batchEnd = Math.min(input.cursor + PROCESS_BATCH_SIZE, totalRows);
+    const batchOfferKeys = new Set<string>();
     for (let i = input.cursor; i < batchEnd; i++) {
       await processRow(rows[i], i, ctx, state);
+      batchOfferKeys.add(deriveOfferKey(rows[i].supplierSku, rows[i].description));
     }
     const nextCursor = batchEnd;
     const done = nextCursor >= totalRows;
 
     if (!done) {
-      await updateUploadProgress(upload.id, { processedRows: nextCursor });
+      // Only THIS batch's own touched offers/snapshots are written —
+      // bounded by PROCESS_BATCH_SIZE regardless of how large the
+      // supplier's total offer history is. writeCandidateGeneration's
+      // chunked HSET and writeSnapshotsBatch's per-row deterministic
+      // keys are both already safe at any size; what used to be unsafe
+      // was serializing the EVER-GROWING full state into one `SET` per
+      // batch, which this replaces.
+      const batchTouchedOffers: Record<string, SupplierOfferCurrent> = {};
+      for (const key of batchOfferKeys) {
+        const offer = state.candidateOffers[key];
+        if (offer) batchTouchedOffers[key] = offer;
+      }
+      await Promise.all([
+        writeCandidateGeneration(input.supplierId, session.generationId, batchTouchedOffers),
+        writeSnapshotsBatch(state.snapshots),
+        updateUploadProgress(upload.id, { processedRows: nextCursor }),
+      ]);
       const nextSession: ProcessSessionState = {
         uploadId: session.uploadId,
         generationId: session.generationId,
         seq: session.seq,
         cursor: nextCursor,
-        previousOffers: session.previousOffers,
-        candidateOffers: state.candidateOffers,
-        snapshots: state.snapshots,
         newAliases: state.newAliases,
         offersByProductOps: state.offersByProductOps,
         offersByReferenceProductOps: state.offersByReferenceProductOps,
@@ -987,7 +1065,6 @@ export async function processSupplierUploadBatch(input: {
         notAProduct: state.notAProduct,
         pendingPersistSeq: state.pendingPersistSeq,
       };
-      const sessionId = input.sessionId ?? newId("processsession");
       if (input.sessionId) await saveProcessSession(sessionId, nextSession);
       else await createProcessSession(sessionId, nextSession);
       const progressUpload = (await getUpload(upload.id)) ?? upload;
@@ -1010,7 +1087,7 @@ export async function processSupplierUploadBatch(input: {
     // mid-upload session already did before this change.
     return { sessionId: null, cursor: nextCursor, totalRows, done: true, upload: finished };
   } catch (err) {
-    await markUploadFailed(upload.id, err instanceof Error ? err.message : "Processing failed.");
+    await markUploadFailed(upload.id, sanitizeErrorForStorage(err));
     throw err;
   }
 }
