@@ -526,6 +526,49 @@ export function ProductEditorForm({
             />
           </Field>
 
+          {(form.sellingKeyNotes?.length || form.sellingNotesStatus) ? (
+            <div className="rounded-xl border border-ld-border bg-ld-bg-elevated p-4">
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-ld-cyan">Selling Reference (Researched)</p>
+              {form.sellingKeyNotes && form.sellingKeyNotes.length > 0 ? (
+                <>
+                  <p className="text-sm text-ld-white">
+                    <span className="font-semibold">Key Notes:</span> {form.sellingKeyNotes.join(" · ")}
+                  </p>
+                  {form.sellingScentProfile && form.sellingScentProfile.length > 0 && (
+                    <p className="mt-1 text-sm text-ld-white">
+                      <span className="font-semibold">Scent Profile:</span> {form.sellingScentProfile.join(" · ")}
+                    </p>
+                  )}
+                  {form.sellingQuickLine && <p className="mt-1 text-sm italic text-ld-muted">&ldquo;{form.sellingQuickLine}&rdquo;</p>}
+                  <p className="mt-2 text-[11px] text-ld-muted">
+                    Source: {form.sellingNotesSourceName || "—"}
+                    {form.sellingNotesSourceUrl && (
+                      <>
+                        {" "}
+                        (<a href={form.sellingNotesSourceUrl} target="_blank" rel="noreferrer" className="underline">link</a>)
+                      </>
+                    )}
+                    {form.sellingNotesResearchedAt && ` · Researched ${new Date(form.sellingNotesResearchedAt).toLocaleDateString()}`}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-ld-muted">
+                  Not yet confidently identified{form.sellingNotesResearchedAt && ` (last attempted ${new Date(form.sellingNotesResearchedAt).toLocaleDateString()})`}.
+                </p>
+              )}
+            </div>
+          ) : null}
+
+          <Field label="Manual Selling Note (your own — never overwritten by research)">
+            <textarea
+              rows={2}
+              className={inputClass()}
+              value={form.manualSellingNote ?? ""}
+              onChange={(e) => set("manualSellingNote", e.target.value)}
+              placeholder="e.g. Sells well on live, similar vibe to Baccarat Rouge"
+            />
+          </Field>
+
           <Field label="Longevity">
             <input
               className={inputClass()}

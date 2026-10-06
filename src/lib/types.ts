@@ -54,6 +54,42 @@ export interface Product {
   status: ProductStatus;
   /** Internal notes — never shown on the TV display. */
   notes?: string;
+
+  // -------------------------------------------------------------------
+  // Researched selling reference — auto-populated by
+  // scripts/enrich-fragrance-selling-notes.ts for IN-STOCK products only
+  // (see needsSellingNotesResearch, src/lib/selling-notes.ts). Completely
+  // separate from the legacy fragranceNotes/topNotes/middleNotes/
+  // baseNotes fields above (those stay directly operator-editable via the
+  // Product Editor's own "Fragrance Notes" field, untouched by this
+  // system) and from manualSellingNote below. Never written by any
+  // Pricing/Ordering or Master Product code path.
+  // -------------------------------------------------------------------
+  /** Max 3–5 notes, official-source-preferred. Absent/empty = not yet
+   *  researched, or researched with insufficient confidence to fill in —
+   *  see sellingNotesStatus to tell those two apart. */
+  sellingKeyNotes?: string[];
+  /** Max 2–3 short descriptors, e.g. ["Fresh", "Fruity", "Smoky"]. */
+  sellingScentProfile?: string[];
+  /** One concise sentence, e.g. "Perfect fall fragrance with jasmine,
+   *  amber, and oud notes." */
+  sellingQuickLine?: string;
+  sellingNotesSourceName?: string;
+  sellingNotesSourceUrl?: string;
+  /** ISO timestamp of the most recent research ATTEMPT — set whether or
+   *  not it succeeded. Never use this alone to decide eligibility for
+   *  re-research; see needsSellingNotesResearch, which checks for
+   *  complete content instead. */
+  sellingNotesResearchedAt?: string;
+  /** Records what the most recent attempt concluded, independent of
+   *  whether it filled in any content — "insufficient_confidence" is a
+   *  real, stored outcome (per the no-guessing rule), not just an absent
+   *  timestamp, and keeps the product correctly eligible for a future
+   *  re-attempt (e.g. once a better source becomes available). */
+  sellingNotesStatus?: "complete" | "insufficient_confidence";
+  /** Operator-editable seller talking points ("sells well on live",
+   *  "similar vibe to X") — never written or overwritten by research. */
+  manualSellingNote?: string;
 }
 
 export interface Sale {

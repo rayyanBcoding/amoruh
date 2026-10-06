@@ -61,7 +61,13 @@ export function CurrentProductPanel({
     setBusy(null);
   };
 
-  const notes = getFragranceNotes(product);
+  // Researched selling reference takes priority when present (see
+  // src/lib/selling-notes.ts); the legacy manually-typed fragranceNotes
+  // system is still the fallback for anything never re-researched under
+  // the new system. manualSellingNote is a THIRD, always-separate line —
+  // operator talking points, never overwritten by research.
+  const hasSellingReference = Boolean(product.sellingKeyNotes && product.sellingKeyNotes.length > 0);
+  const notes = hasSellingReference ? product.sellingKeyNotes! : getFragranceNotes(product);
   const costLabel =
     financials?.costSource === "weighted_landed"
       ? "Cost (Wtd. Landed)"
@@ -125,6 +131,19 @@ export function CurrentProductPanel({
                 <p className="text-sm text-ld-white">
                   <span className="font-semibold text-ld-cyan">Key Notes:</span> {notes.length > 0 ? notes.join(" • ") : "—"}
                 </p>
+                {hasSellingReference && product.sellingScentProfile && product.sellingScentProfile.length > 0 && (
+                  <p className="mt-1 text-sm text-ld-white">
+                    <span className="font-semibold text-ld-cyan">Profile:</span> {product.sellingScentProfile.join(" • ")}
+                  </p>
+                )}
+                {hasSellingReference && product.sellingQuickLine && (
+                  <p className="mt-2 text-sm italic text-ld-muted">&ldquo;{product.sellingQuickLine}&rdquo;</p>
+                )}
+                {product.manualSellingNote && (
+                  <p className="mt-2 border-t border-ld-border pt-2 text-sm text-ld-amber">
+                    <span className="font-semibold">Seller Note:</span> {product.manualSellingNote}
+                  </p>
+                )}
               </div>
 
               <div className="rounded-xl border border-ld-amber/30 bg-ld-amber/5 p-4">
