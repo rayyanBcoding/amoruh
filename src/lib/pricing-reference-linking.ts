@@ -216,8 +216,8 @@ export async function linkOfferToReferenceProduct(
   if (!confirmOverride) {
     const offer = await getCurrentOffer(supplierId, offerKey);
     if (!offer) return { ok: false, error: "This supplier offer no longer exists." };
-    const offerAttrs = extractAttributes(`${offer.brand} ${offer.description}`, offer.brand);
-    const targetAttrs = extractAttributes(`${referenceProduct.brand} ${referenceProduct.description}`, referenceProduct.brand);
+    const offerAttrs = extractAttributes(`${offer.brand} ${offer.description}`, offer.brand, { supplierId: offer.supplierId });
+    const targetAttrs = extractAttributes(`${referenceProduct.brand} ${referenceProduct.description}`, referenceProduct.brand, { supplierId: referenceProduct.createdFromSupplierId });
     const compatibility = checkManualLinkCompatibility(
       { attrs: offerAttrs, upc: offer.upc, ean: offer.ean },
       { attrs: targetAttrs, upc: referenceProduct.upc, ean: referenceProduct.ean }

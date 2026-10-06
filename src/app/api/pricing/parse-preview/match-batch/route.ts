@@ -110,7 +110,7 @@ export async function POST(req: Request) {
     getAliasesForSupplier(body.supplierId),
     getAllReferenceProducts(),
   ]);
-  stepMatchPreviewBatch(batch, products, aliases, referenceProducts, state);
+  stepMatchPreviewBatch(batch, products, aliases, referenceProducts, state, body.supplierId);
 
   const nextCursor = cursor + batch.length;
   const done = nextCursor >= totalRows;

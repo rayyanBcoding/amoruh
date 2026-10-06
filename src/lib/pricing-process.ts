@@ -53,6 +53,7 @@ import {
   verifyHeaderSignature,
 } from "./pricing-parse";
 import { getUsdRate, convertToUsd } from "./pricing-fx";
+import { cleanDisplayName } from "./pricing-normalize";
 import type { SupplierColumnMapping } from "./intake-types";
 import type {
   PricingReferenceProduct,
@@ -307,7 +308,19 @@ export async function processRow(row: SupplierRawRow, i: number, ctx: RowProcess
   const offerKey = deriveOfferKey(row.supplierSku, row.description);
   const aliasesSoFar = ctx.existingAliases.concat(state.newAliases);
   const match = matchSupplierRow(
-    { offerKey, supplierSku: row.supplierSku, description: row.description, brand: row.brand, upc: row.upc, ean: row.ean },
+    {
+      offerKey,
+      supplierSku: row.supplierSku,
+      description: row.description,
+      brand: row.brand,
+      upc: row.upc,
+      ean: row.ean,
+      supplierId: ctx.supplierId,
+      // Stay on the Master Product this exact offer was already linked to
+      // when historical duplicates make the target ambiguous — see
+      // MatchRowInput.preferReferenceProductId.
+      preferReferenceProductId: state.candidateOffers[offerKey]?.referenceProductId ?? null,
+    },
     ctx.products,
     aliasesSoFar,
     ctx.referenceProducts,
@@ -349,6 +362,9 @@ export async function processRow(row: SupplierRawRow, i: number, ctx: RowProcess
   //     previously-resolved item, adopt that prior resolution rather
   //     than treating a reformatted-SKU row as brand new.
   let finalReviewStatus = match.reviewStatus;
+  let finalReviewReason: string | undefined = match.reviewReason;
+  const identityAttrs = extractAttributes(`${row.brand} ${row.description}`, resolveEffectiveBrand(row, ctx.products, ctx.referenceProducts), { supplierId: ctx.supplierId });
+  const normalizedIdentity = computeIdentitySignature(identityAttrs);
   let finalProductId = match.productId;
   let finalCandidateProductId = match.candidateProductId;
   let finalCandidateReferenceProductId = match.candidateReferenceProductId;
@@ -416,9 +432,10 @@ export async function processRow(row: SupplierRawRow, i: number, ctx: RowProcess
       const plausibleUpc = isPlausibleBarcode(row.upc.trim().toUpperCase()) ? row.upc.trim() : "";
       const plausibleEan = isPlausibleBarcode(row.ean.trim().toUpperCase()) ? row.ean.trim() : "";
       const effectiveBrand = resolveEffectiveBrand(row, ctx.products, ctx.referenceProducts);
-      const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, effectiveBrand);
+      const rowAttrs = identityAttrs;
       const eligibility = checkAutoCreateEligibility(rowAttrs, Boolean(plausibleUpc || plausibleEan));
       if (!eligibility.eligible) {
+        finalReviewReason = `not_eligible_for_auto_create: ${eligibility.reason ?? "incomplete identity"}`;
         finalReviewStatus = "needs_review";
         finalMatchType = "unmatched";
         finalMatchConfidence = null;
@@ -430,8 +447,11 @@ export async function processRow(row: SupplierRawRow, i: number, ctx: RowProcess
         const placeholderId = `${PENDING_PLACEHOLDER_PREFIX}${state.pendingPersistSeq++}`;
         const newRecordInput: Omit<PricingReferenceProduct, "id" | "createdAt"> = {
           brand: effectiveBrand,
-          name: row.description.trim(),
-          description: row.description.trim(),
+          // Listing noise (NEW, APPROVED RETAILERS ONLY, supplier-scoped
+          // annotations) is not part of the Master Product's name. The
+          // supplier offer keeps the original description verbatim.
+          name: cleanDisplayName(row.description, ctx.supplierId),
+          description: cleanDisplayName(row.description, ctx.supplierId),
           sizeMl: rowAttrs.sizeMl,
           concentration: rowAttrs.concentration,
           isTester: rowAttrs.isTester,
@@ -450,6 +470,7 @@ export async function processRow(row: SupplierRawRow, i: number, ctx: RowProcess
         state.pendingPersists.push({ placeholderId, identity: { upc: plausibleUpc, ean: plausibleEan, signature }, newRecordInput });
 
         finalReferenceProductId = placeholderId;
+        finalReviewReason = undefined;
         finalReviewStatus = "auto_matched";
         finalMatchType = "auto_created";
         finalMatchConfidence = 1;
@@ -475,6 +496,7 @@ export async function processRow(row: SupplierRawRow, i: number, ctx: RowProcess
 
   // Whether a genuinely-ambiguous item is flagged for the ACTIVE review
   // queue is completely independent of the fresh match above.
+  if (finalReviewStatus === "auto_matched") finalReviewReason = undefined;
   const finalReviewRequestedAt = finalReviewStatus === "needs_review" ? (previous?.reviewRequestedAt ?? null) : null;
 
   if (finalReferenceProductId && finalReferenceProductId.startsWith(PENDING_PLACEHOLDER_PREFIX)) {
@@ -500,6 +522,9 @@ export async function processRow(row: SupplierRawRow, i: number, ctx: RowProcess
     referenceProductId: finalReferenceProductId,
     rejectedCandidateProductIds: rejectedIds,
     reviewRequestedAt: finalReviewRequestedAt,
+    normalizedIdentity,
+    condition: identityAttrs.condition,
+    reviewReason: finalReviewReason,
     currency: row.currency,
     price: row.price,
     fxRateAtUpload: rate?.rate ?? null,
@@ -533,6 +558,9 @@ export async function processRow(row: SupplierRawRow, i: number, ctx: RowProcess
     referenceProductId: finalReferenceProductId,
     rejectedCandidateProductIds: rejectedIds,
     reviewRequestedAt: finalReviewRequestedAt,
+    normalizedIdentity,
+    condition: identityAttrs.condition,
+    reviewReason: finalReviewReason,
     currentlyListed: true,
     lastUploadId: ctx.uploadId,
     uploadedAt: ctx.nowIso,

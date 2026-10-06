@@ -1141,7 +1141,7 @@ async function countUnresolvedOffersMatchingIdentity(target: MasterCandidate, ta
       if (o.reviewStatus !== "needs_review" && o.reviewStatus !== "new_candidate") continue;
       if (!isValidProductRow(o)) continue;
       const effectiveBrand = resolveEffectiveBrand(o, products, referenceProducts);
-      const attrs = extractAttributes(`${o.brand} ${o.description}`, effectiveBrand);
+      const attrs = extractAttributes(`${o.brand} ${o.description}`, effectiveBrand, { supplierId: o.supplierId });
 
       // Exact UPC/EAN is matchSupplierRow's own strongest identity signal,
       // checked as a fast path BEFORE it ever reaches matchAgainstMasterCandidates

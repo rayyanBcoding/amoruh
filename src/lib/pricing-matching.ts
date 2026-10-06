@@ -1,6 +1,7 @@
 import type { Product } from "./types";
 import type { OfferMatchType, PricingReferenceProduct, ReviewStatus, SupplierAlias, SupplierOfferCurrent } from "./pricing-types";
 import { normalize, bigramSimilarity } from "./intake-matching";
+import { cleanDisplayName, normalizeListingText, snapNominalSize, type Gender, type RowCondition } from "./pricing-normalize";
 
 // ---------------------------------------------------------------------
 // Supplier price-sheet matching — Pricing/Ordering's own matcher.
@@ -65,8 +66,13 @@ const CONCENTRATION_PATTERNS: [RegExp, string][] = [
   [/\bparfum\b/, "parfum"],
 ];
 
-const TESTER_PATTERN = /\btester\b|\btstr\b|\bw\/?o\s*box\b|\bwithout\s*box\b/;
-const GIFT_SET_PATTERN = /\bgift\s*set\b|\bset\s*of\b|\bcoffret\b|\b\d\s*pcs?\s*set\b|\bkit\b/;
+const TESTER_PATTERN = /\btester\b|\btstr?\b|\bw\/?o\s*box\b|\bwithout\s*box\b/;
+// "2PC 3.0 EDP SPR, 1.0 EDP SPR", "3 PCS SET", "MINI SET", and "2 X 5ML" /
+// "5*0.67 Oz" component lists are all multi-item bundles. A bare "NNpcs"
+// is NOT enough on its own ("15pcs ByBox" is a carton quantity), so a
+// piece count only counts when a set word or a size list follows it.
+const GIFT_SET_PATTERN =
+  /\bgift\s*set\b|\bset\s*of\b|\bcoffret\b|\b\d\s*pcs?\s*set\b|\bkit\b|\bmini\s*set\b|\b\d+\s*pcs?\b\s*(?:set\b|[(\[]?\s*\d)|\b\d+\s*[x*]\s*\d+(?:\.\d+)?\s*(?:ml|oz)\b/;
 
 /** GIFT_SET_PATTERN alone misses a common real supplier shape: a bare
  *  "SET" with no "gift"/"of" qualifier, describing a genuine multi-
@@ -85,8 +91,19 @@ const GIFT_SET_PATTERN = /\bgift\s*set\b|\bset\s*of\b|\bcoffret\b|\b\d\s*pcs?\s*
 function isGiftSetText(fullText: string): boolean {
   const n = normalize(fullText);
   if (GIFT_SET_PATTERN.test(n)) return true;
-  return /\bset\b/.test(n) && n.includes("+");
+  const distinctSizes = new Set((n.match(/\d+(?:\.\d+)?\s*(?:ml|oz)\b/g) ?? []).map((m) => m.replace(/\s+/g, "")));
+  // "+"-joined components with 2+ distinct sizes ("3.4 EDT + 5.1 DEO
+  // SPRAY + 10ML") or a "+" followed by a known companion item are a
+  // bundle even when the supplier never writes the word "set".
+  if (n.includes("+") && (distinctSizes.size >= 2 || COMPANION_AFTER_PLUS.test(n))) return true;
+  // "2C 3.3 EDP SPR, 10ML MINI" — piece-count shorthand before a size list.
+  if (/\b\d\s*c\b\s*\d/.test(n)) return true;
+  if (!/\bset\b/.test(n)) return false;
+  // A bare "set" is trusted only alongside real bundle evidence: a "+"
+  // joined component list, a multiplication list, or a second stated size.
+  return n.includes("+") || /\d+\s*[x*]\s*\d/.test(n) || distinctSizes.size >= 2;
 }
+const COMPANION_AFTER_PLUS = /\+\s*[\d.]*\s*(?:ml|oz|g)?\s*(?:deo|deodorant|shower|body|b\/|s\/|mini|travel|pouch|hair|lotion|after\s*shave)/;
 // "refill"/"recharge" only — deliberately NOT matching "refillable" (a
 // normal bottle sold as refillable is still a standalone bottle sale,
 // not the standalone-refill-pack SKU this exists to distinguish). Word
@@ -126,7 +143,7 @@ export type ProductForm =
 const PRODUCT_FORM_PATTERNS: [RegExp, ProductForm][] = [
   [/\bbody\s*lotion\b/, "body_lotion"],
   [/\bafter\s*shave\b/, "aftershave"],
-  [/\bbody\s*spray\b/, "body_spray"],
+  [/\bbody\s*(?:spray|mist)\b/, "body_spray"],
   [/\bshower\s*oil\b/, "shower_oil"],
   [/\bshower\s*gel\b/, "shower_gel"],
   [/\bmoisturi[sz]er\b/, "moisturizer"],
@@ -161,6 +178,12 @@ export interface StructuredAttributes {
   isRefill: boolean;
   /** "fragrance" (the default) or an explicit non-fragrance form. */
   productForm: ProductForm;
+  /** Explicit (M)/(W)/(U) marker, if the text states one. null means the
+   *  text didn't say — which is NOT the same as unisex. */
+  gender: Gender | null;
+  /** UNBOX / NO CAP / BOX DAMAGE listings are their own comparison
+   *  bucket, never compared against a normal retail-box offer. */
+  condition: RowCondition;
 }
 
 export function tokenize(text: string): string[] {
@@ -361,20 +384,62 @@ function contentTokens(fullText: string): string[] {
  *  all, so `brand` may legitimately be "". brandsMatch() below handles
  *  that case by checking brand-word containment against `allTokens`
  *  rather than requiring both sides to have an isolated brand string. */
-export function extractAttributes(fullText: string, brand: string): StructuredAttributes {
-  const brandToken = normalize(brand);
-  const sizeMl = parseSizeMl(fullText);
-  const concentration = parseConcentration(fullText);
-  const isTester = TESTER_PATTERN.test(normalize(fullText));
-  const isGiftSet = isGiftSetText(fullText);
-  const isRefill = REFILL_PATTERN.test(normalize(fullText));
-  const productForm = classifyProductForm(fullText);
+export interface ExtractOptions {
+  /** Supplier whose text this is — enables that supplier's verified,
+   *  supplier-scoped annotation stripping (see pricing-normalize.ts). */
+  supplierId?: string | null;
+}
 
-  const allTokens = contentTokens(fullText);
+// Format abbreviations that only ever mean "spray" — the same fragrance
+// is listed with and without them, so they carry no identity.
+const SPRAY_ABBREVIATION_TOKENS = new Set(["spr", "sp", "spry"]);
+const TESTER_WORD_TOKENS = new Set(["tester", "tst", "tstr"]);
+
+export function extractAttributes(fullText: string, brand: string, opts?: ExtractOptions): StructuredAttributes {
+  // Clean supplier/listing noise first (NEW, APPROVED RETAILERS ONLY,
+  // market codes, supplier-scoped annotations), and lift gender/condition
+  // out as their own attributes. The ORIGINAL text is untouched on the
+  // supplier offer; this only affects identity derivation.
+  const listing = normalizeListingText(stripSupplierLogistics(fullText), opts?.supplierId);
+  const text = listing.text;
+
+  const brandToken = normalize(brand);
+  const parsedSize = parseSizeMl(text);
+  const sizeMl = parsedSize === null ? null : snapNominalSize(parsedSize);
+  const concentration = parseConcentration(text);
+  const n = normalize(text);
+  const isTester = listing.testerMarker || TESTER_PATTERN.test(n);
+  const isGiftSet = isGiftSetText(text);
+  const isRefill = REFILL_PATTERN.test(n);
+  const productForm = classifyProductForm(text);
+
+  const impliedSizeNumeral = isGiftSet ? null : normalizeForMatching(text).match(BARE_OZ_BEFORE_CONCENTRATION_PATTERN)?.[1] ?? null;
+  const dropSprayWord = productForm === "fragrance" && !isGiftSet;
+  const allTokens = contentTokens(text).filter((t) => {
+    if (SPRAY_ABBREVIATION_TOKENS.has(t) || TESTER_WORD_TOKENS.has(t)) return false;
+    if (t === "spray" && dropSprayWord) return false;
+    // The bare size number ("3.4" in "3.4 EDP") is already captured as
+    // sizeMl — leaving it in the name tokens made "3.4 EDP" and "100ML
+    // EDP" look like different names.
+    if (impliedSizeNumeral !== null && t === impliedSizeNumeral) return false;
+    return true;
+  });
   const brandWords = new Set(tokenize(brand));
   const coreNameTokens = allTokens.filter((t) => !brandWords.has(t));
 
-  return { brandToken, allTokens, coreNameTokens, sizeMl, concentration, isTester, isGiftSet, isRefill, productForm };
+  return {
+    brandToken,
+    allTokens,
+    coreNameTokens,
+    sizeMl,
+    concentration,
+    isTester,
+    isGiftSet,
+    isRefill,
+    productForm,
+    gender: listing.gender,
+    condition: listing.condition,
+  };
 }
 
 /** Deliberately does NOT fold `p.concentration` into the text used for
@@ -404,15 +469,24 @@ export function extractProductAttributes(p: Pick<Product, "brand" | "name" | "si
  *  allTokens/coreNameTokens (needed for text-similarity comparison) are
  *  derived from combined text. */
 export function extractReferenceProductAttributes(rp: PricingReferenceProduct): StructuredAttributes {
-  const base = extractAttributes(`${rp.brand} ${rp.name} ${rp.description}`, rp.brand);
+  // Freshly parsed from the product's own text, NOT the flags/sizes
+  // stored when it was created: those predate several parser fixes
+  // (gift-set detection, nominal size, refill) and were measurably stale
+  // on hundreds of older Master Products — including some stored with a
+  // wrong `true` or no value at all. Only size/concentration fall back to
+  // the stored value, and only when the text can't supply one (a
+  // manually tracked product whose name carries no size, say).
+  //
+  // name and description are identical for every auto-created Master
+  // Product; concatenating both doubled every size and market code in the
+  // text (which, among other things, made a plain "SET" look like a
+  // two-size bundle), so description is only appended when it adds text.
+  const text = rp.description && rp.description.trim() !== rp.name.trim() ? `${rp.brand} ${rp.name} ${rp.description}` : `${rp.brand} ${rp.name}`;
+  const base = extractAttributes(text, rp.brand, { supplierId: rp.createdFromSupplierId });
   return {
     ...base,
-    sizeMl: rp.sizeMl,
-    concentration: rp.concentration,
-    isTester: rp.isTester,
-    isGiftSet: rp.isGiftSet,
-    isRefill: rp.isRefill,
-    productForm: rp.productForm as ProductForm,
+    sizeMl: base.sizeMl ?? rp.sizeMl,
+    concentration: base.concentration ?? rp.concentration,
   };
 }
 
@@ -587,16 +661,40 @@ export function checkHardGates(a: StructuredAttributes, b: StructuredAttributes)
   if (!brandsMatch(a, b)) {
     return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
   }
-  if (a.isTester !== b.isTester) return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
-  if (a.isGiftSet !== b.isGiftSet) return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
-  if (a.isRefill !== b.isRefill) return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
+  return checkNonBrandGates(a, b);
+}
+
+/** How two sides' stated genders relate. A stated M vs a stated W is a
+ *  hard conflict (different products — Guess Dare M vs W, Reebok, Lattafa
+ *  Habik); "unisex" vs a stated M/W, or one side not stating a gender at
+ *  all, is only SOFT — it must never merge automatically, but it isn't
+ *  proof of a different product either, so it goes to review. */
+export function genderRelation(a: Gender | null, b: Gender | null): "equal" | "soft" | "conflict" {
+  if (a === b) return "equal";
+  if (a === null || b === null) return "soft";
+  if (a === "u" || b === "u") return "soft";
+  return "conflict";
+}
+
+/** Every hard gate except brand — shared by checkHardGates (which adds the
+ *  brand gate) and the barcode-compatibility check (which only enforces
+ *  brand when BOTH sides actually know theirs). */
+function checkNonBrandGates(a: StructuredAttributes, b: StructuredAttributes): HardGateResult {
+  const fail = { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
+  if (a.isTester !== b.isTester) return fail;
+  if (a.isGiftSet !== b.isGiftSet) return fail;
+  if (a.isRefill !== b.isRefill) return fail;
+  // UNBOX / NO CAP / BOX DAMAGE listings are a separate comparison
+  // bucket from a normal retail-box offer, same as tester vs retail.
+  if (a.condition !== b.condition) return fail;
+  if (genderRelation(a.gender, b.gender) === "conflict") return fail;
   // "fragrance" is the default productForm for both sides in the
   // overwhelming majority of real comparisons, so plain equality is
   // exactly the right gate: it's a no-op for fragrance-vs-fragrance,
   // and fails the instant either side is an explicit, differing
   // non-fragrance form (e.g. body lotion vs. EDT) — no separate
   // "recognized vs. default" branching needed.
-  if (a.productForm !== b.productForm) return { passes: false, concentrationBothRecognized: false, sizeBothParsed: false };
+  if (a.productForm !== b.productForm) return fail;
 
   const sizeBothParsed = a.sizeMl !== null && b.sizeMl !== null;
   if (sizeBothParsed && !sizesMatch(a.sizeMl as number, b.sizeMl as number)) {
@@ -609,6 +707,30 @@ export function checkHardGates(a: StructuredAttributes, b: StructuredAttributes)
   }
 
   return { passes: true, concentrationBothRecognized, sizeBothParsed };
+}
+
+/** Compatibility check applied AFTER an exact barcode hit: a barcode is
+ *  the strongest signal but not infallible (suppliers reuse barcodes —
+ *  roughly 94 of 219 same-barcode splits in the catalog audit were
+ *  different products). Brand is enforced only when both sides know one,
+ *  since a row with no recognizable brand is common and not a conflict. */
+export function barcodeCompatibility(row: StructuredAttributes, candidate: StructuredAttributes): { ok: boolean; reason?: string } {
+  // Brand is deliberately NOT checked here: a supplier's own brand column
+  // routinely holds a distributor name or a spelling variant ("eight &
+  // bob" vs "eight bob"), and an exact barcode is the thing being trusted.
+  // Wildly different text is still caught by the caller's text-similarity
+  // floor.
+  if (row.isTester !== candidate.isTester) return { ok: false, reason: "barcode_tester_vs_retail" };
+  if (row.isGiftSet !== candidate.isGiftSet) return { ok: false, reason: "barcode_gift_set_vs_single" };
+  if (row.isRefill !== candidate.isRefill) return { ok: false, reason: "barcode_refill_vs_regular" };
+  if (row.condition !== candidate.condition) return { ok: false, reason: "barcode_condition_differs" };
+  if (genderRelation(row.gender, candidate.gender) === "conflict") return { ok: false, reason: "barcode_gender_conflict" };
+  // Two bundles: component sizes/forms legitimately vary in how suppliers
+  // list them (a set's "deodorant" or "shower gel" component must not
+  // reclassify the whole product), so only the flags above are enforced.
+  if (row.isGiftSet && candidate.isGiftSet) return { ok: true };
+  if (!checkNonBrandGates(row, candidate).passes) return { ok: false, reason: "barcode_size_form_or_concentration_differs" };
+  return { ok: true };
 }
 
 export interface StructuredMatchScore {
@@ -656,7 +778,7 @@ export function scoreStructuredMatch(a: StructuredAttributes, b: StructuredAttri
 }
 
 export interface ManualLinkWarning {
-  field: "brand" | "size" | "concentration" | "productForm" | "tester" | "giftSet" | "refill" | "barcode" | "name";
+  field: "brand" | "size" | "concentration" | "productForm" | "tester" | "giftSet" | "refill" | "gender" | "condition" | "barcode" | "name";
   message: string;
 }
 
@@ -758,6 +880,8 @@ export function checkManualLinkCompatibility(
   if (a.isTester !== b.isTester) warnings.push({ field: "tester", message: `Tester status doesn't match (${a.isTester ? "tester" : "retail"} vs ${b.isTester ? "tester" : "retail"})` });
   if (a.isGiftSet !== b.isGiftSet) warnings.push({ field: "giftSet", message: "Gift-set status doesn't match" });
   if (a.isRefill !== b.isRefill) warnings.push({ field: "refill", message: "Refill status doesn't match" });
+  if (genderRelation(a.gender, b.gender) === "conflict") warnings.push({ field: "gender", message: `Gender doesn't match: (${a.gender}) vs (${b.gender})` });
+  if (a.condition !== b.condition) warnings.push({ field: "condition", message: `Condition doesn't match: ${a.condition} vs ${b.condition}` });
 
   const offerCode = (offer.upc || offer.ean).trim().toUpperCase();
   const targetCode = (target.upc || target.ean).trim().toUpperCase();
@@ -1047,7 +1171,11 @@ const SIGNATURE_ABBREVIATION_TOKENS = new Set(["edp", "edt", "edc"]);
  *  by the calibrated fuzzy matcher elsewhere — this is signature-only. */
 export function computeIdentitySignature(attrs: StructuredAttributes): string {
   const signatureCoreName = attrs.coreNameTokens.filter((t) => !SIGNATURE_ABBREVIATION_TOKENS.has(t)).join(" ");
+  // "v2": supplier-noise-normalized, gender and condition aware. The
+  // prefix keeps new signatures from ever colliding with pointers written
+  // under the old (noise-polluted) format.
   return [
+    "v2",
     attrs.brandToken,
     signatureCoreName,
     attrs.sizeMl ?? "",
@@ -1056,6 +1184,8 @@ export function computeIdentitySignature(attrs: StructuredAttributes): string {
     attrs.isTester ? "tester" : "retail",
     attrs.isGiftSet ? "giftset" : "standalone",
     attrs.isRefill ? "refill" : "bottle",
+    attrs.gender ?? "",
+    attrs.condition,
   ].join("|");
 }
 
@@ -1129,6 +1259,14 @@ export interface MatchRowInput {
   brand: string;
   upc: string;
   ean: string;
+  /** Supplier this row came from — enables that supplier's verified,
+   *  supplier-scoped annotation normalization. */
+  supplierId?: string | null;
+  /** The Master Product this exact offer was already linked to on the
+   *  previous upload, if any. When several identical Master Products
+   *  exist (historical duplicates), staying on the existing link keeps a
+   *  re-upload stable instead of flipping a healthy offer to review. */
+  preferReferenceProductId?: string | null;
 }
 
 export interface MatchRowResult {
@@ -1151,10 +1289,67 @@ export interface MatchRowResult {
    *  matchAgainstMasterCandidates) — every competing identity, for
    *  display. */
   competingCandidates?: { productId: string | null; referenceProductId: string | null }[];
+  /** Why a row did not match confidently (diagnostics/review UI). */
+  reviewReason?: string;
 }
 
 function rawTextOf(row: Pick<MatchRowInput, "brand" | "description">): string {
   return `${row.brand} ${row.description}`;
+}
+
+function plausibleCodes(codes: string[]): string[] {
+  return codes
+    .map((c) => c.trim().toUpperCase())
+    .filter((c) => c && isPlausibleBarcode(c))
+    .map((c) => c.replace(/^0+/, ""));
+}
+
+/** Resolves a row against candidates whose NORMALIZED name tokens are
+ *  identical to the row's (textScore === 1, now computed on noise-cleaned
+ *  tokens) and which already passed every hard gate (brand, size,
+ *  concentration, tester/gift/refill, condition, M-vs-W).
+ *
+ *  Rules, in order:
+ *   - stability: if the offer was already linked to one of the exact
+ *     candidates, stay on it (never flip a healthy offer to review just
+ *     because a historical duplicate Master Product exists);
+ *   - gender must be stated-equal for an automatic match — a row that
+ *     doesn't state one, or "unisex" vs a stated M/W, goes to review;
+ *   - exactly ONE target is required — several identical targets are
+ *     ambiguous and go to review rather than guessing;
+ *   - if the row carries a valid barcode, the target carries a different
+ *     valid barcode, and the row's barcode matched nothing in the catalog,
+ *     this is the "regional barcode, same apparent fragrance" case: it is
+ *     held for review (no auto-link, no alias created). */
+function resolveExactIdentity(
+  rowAttrs: StructuredAttributes,
+  candidates: MasterCandidate[],
+  rowCodesRaw: string[],
+  preferredReferenceProductId: string | null
+): { result: MasterMatchResult; reviewReason?: string } {
+  const none: MasterMatchResult = { outcome: "no_match", winner: null, competingCandidates: [], confidence: null };
+  const exact = candidates.filter((c) => textScore(rowAttrs, c.attrs) === 1);
+  if (exact.length === 0) return { result: none };
+
+  const auto = (c: MasterCandidate): MasterMatchResult => ({ outcome: "auto_match", winner: c, competingCandidates: [], confidence: 1 });
+  const review = (cs: MasterCandidate[]): MasterMatchResult => ({ outcome: "needs_review", winner: null, competingCandidates: cs, confidence: 1 });
+
+  if (preferredReferenceProductId) {
+    const kept = exact.find((c) => c.referenceProductId === preferredReferenceProductId);
+    if (kept) return { result: auto(kept) };
+  }
+
+  const strict = exact.filter((c) => genderRelation(rowAttrs.gender, c.attrs.gender) === "equal");
+  if (strict.length === 0) return { result: review(exact), reviewReason: "gender_unstated_or_unisex" };
+  if (strict.length > 1) return { result: review(strict), reviewReason: "multiple_exact_targets" };
+
+  const target = strict[0];
+  const rowCodes = plausibleCodes(rowCodesRaw);
+  const targetCodes = plausibleCodes([target.upc, target.ean]);
+  if (rowCodes.length > 0 && targetCodes.length > 0 && !rowCodes.some((c) => targetCodes.includes(c))) {
+    return { result: review([target]), reviewReason: "regional_barcode_variant" };
+  }
+  return { result: auto(target) };
 }
 
 /** referenceProducts defaults to [] so every existing caller keeps
@@ -1188,7 +1383,7 @@ export function matchSupplierRow(
 ): MatchRowResult {
   const productById = new Map(products.map((p) => [p.id, p]));
   const effectiveBrand = resolveEffectiveBrand(row, products, referenceProducts);
-  const rowAttrs = extractAttributes(rawTextOf(row), effectiveBrand);
+  const rowAttrs = extractAttributes(rawTextOf(row), effectiveBrand, { supplierId: row.supplierId });
   const rowText = rawTextOf(row);
 
   // 1. Learned alias — memory, not proof. Aliases only ever point at a
@@ -1244,7 +1439,12 @@ export function matchSupplierRow(
     const exactProduct = products.find((p) => p.barcode.toUpperCase() === code);
     if (exactProduct) {
       const text = bigramSimilarity(rowText, `${exactProduct.brand} ${exactProduct.name}`);
-      if (text < BARCODE_CONFLICT_TEXT_FLOOR) {
+      const productAttrs = extractProductAttributes(exactProduct);
+      const compat = barcodeCompatibility(rowAttrs, productAttrs);
+      // Supplier noise (NEW, APPROVED RETAILERS ONLY...) must not by itself
+      // drag a genuine barcode match under the floor, so the cleaned-token
+      // similarity counts too.
+      if ((text < BARCODE_CONFLICT_TEXT_FLOOR && textScore(rowAttrs, productAttrs) < BARCODE_CONFLICT_TEXT_FLOOR) || !compat.ok) {
         return {
           productId: null,
           referenceProductId: null,
@@ -1253,6 +1453,7 @@ export function matchSupplierRow(
           reviewStatus: "barcode_conflict",
           candidateProductId: exactProduct.id,
           candidateReferenceProductId: null,
+          reviewReason: compat.ok ? "barcode_text_mismatch" : compat.reason,
         };
       }
       return {
@@ -1278,7 +1479,9 @@ export function matchSupplierRow(
       const labelBrand = linkedProduct?.brand ?? exactRef.brand;
       const labelName = linkedProduct?.name ?? exactRef.name;
       const text = bigramSimilarity(rowText, `${labelBrand} ${labelName}`);
-      if (text < BARCODE_CONFLICT_TEXT_FLOOR) {
+      const refAttrs = extractReferenceProductAttributes(exactRef);
+      const compat = barcodeCompatibility(rowAttrs, refAttrs);
+      if ((text < BARCODE_CONFLICT_TEXT_FLOOR && textScore(rowAttrs, refAttrs) < BARCODE_CONFLICT_TEXT_FLOOR) || !compat.ok) {
         return {
           productId: null,
           referenceProductId: null,
@@ -1287,6 +1490,7 @@ export function matchSupplierRow(
           reviewStatus: "barcode_conflict",
           candidateProductId: resolvedProductId,
           candidateReferenceProductId: resolvedProductId ? null : exactRef.id,
+          reviewReason: compat.ok ? "barcode_text_mismatch" : compat.reason,
         };
       }
       return {
@@ -1361,12 +1565,14 @@ export function matchSupplierRow(
   // it fresh from BOTH sides' tokens) — reusing it here keeps this
   // check consistent with the rest of the file instead of inventing a
   // second, brand-asymmetry-naive comparison.
+  let reviewReason: string | undefined;
+  let fromExactResolution = false;
   if (rowAttrs.concentration !== null && result.outcome !== "no_match") {
     const candidatesConsidered = result.winner ? [result.winner] : result.competingCandidates;
-    const exactMatch = candidatesConsidered.find((c) => textScore(rowAttrs, c.attrs) === 1);
-    result = exactMatch
-      ? { outcome: "auto_match", winner: exactMatch, competingCandidates: [], confidence: 1 }
-      : { outcome: "no_match", winner: null, competingCandidates: [], confidence: null };
+    const resolved = resolveExactIdentity(rowAttrs, candidatesConsidered, [row.upc, row.ean], row.preferReferenceProductId ?? null);
+    result = resolved.result;
+    reviewReason = resolved.reviewReason;
+    fromExactResolution = true;
   }
 
   if (result.outcome === "auto_match" && result.winner) {
@@ -1395,6 +1601,7 @@ export function matchSupplierRow(
         result.competingCandidates.length > 1
           ? result.competingCandidates.map((c) => ({ productId: c.productId, referenceProductId: c.referenceProductId }))
           : undefined,
+      reviewReason: reviewReason ?? (fromExactResolution ? "exact_identity_ambiguous" : rowAttrs.concentration === null ? "concentration_not_stated" : "fuzzy_ambiguity"),
     };
   }
 
@@ -1540,7 +1747,8 @@ export function stepMatchPreviewBatch(
   products: Product[],
   aliases: SupplierAlias[],
   referenceProducts: PricingReferenceProduct[],
-  state: MatchPreviewBatchState
+  state: MatchPreviewBatchState,
+  supplierId?: string | null
 ): void {
   const previewPool = referenceProducts.concat(state.previewPoolAdditions);
   const candidatePool = buildBrandBucketedPool(buildMasterCandidatePool(products, previewPool));
@@ -1552,7 +1760,7 @@ export function stepMatchPreviewBatch(
     }
 
     const offerKey = deriveOfferKey(row.supplierSku, row.description);
-    const match = matchSupplierRow({ offerKey, ...row }, products, aliases, previewPool, candidatePool);
+    const match = matchSupplierRow({ offerKey, ...row, supplierId }, products, aliases, previewPool, candidatePool);
 
     if (match.reviewStatus === "auto_matched") {
       if (match.productId) state.matchedProduct++;
@@ -1561,7 +1769,7 @@ export function stepMatchPreviewBatch(
     }
     if (match.reviewStatus === "new_candidate") {
       const effectiveBrand = resolveEffectiveBrand(row, products, previewPool);
-      const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, effectiveBrand);
+      const rowAttrs = extractAttributes(`${row.brand} ${row.description}`, effectiveBrand, { supplierId });
       const hasVerifiedBarcode =
         isPlausibleBarcode(row.upc.trim().toUpperCase()) || isPlausibleBarcode(row.ean.trim().toUpperCase());
       const eligibility = checkAutoCreateEligibility(rowAttrs, hasVerifiedBarcode);
@@ -1575,8 +1783,8 @@ export function stepMatchPreviewBatch(
       const newReferenceProduct: PricingReferenceProduct = {
         id: `preview_${state.previewIdSeq++}`,
         brand: effectiveBrand,
-        name: row.description,
-        description: row.description,
+        name: cleanDisplayName(row.description, supplierId),
+        description: cleanDisplayName(row.description, supplierId),
         sizeMl: rowAttrs.sizeMl,
         concentration: rowAttrs.concentration,
         isTester: rowAttrs.isTester,
@@ -1613,10 +1821,11 @@ export function computeMatchPreview(
   rows: { supplierSku: string; description: string; brand: string; upc: string; ean: string }[],
   products: Product[],
   aliases: SupplierAlias[],
-  referenceProducts: PricingReferenceProduct[]
+  referenceProducts: PricingReferenceProduct[],
+  supplierId?: string | null
 ): MatchPreviewSummary {
   const state = createEmptyMatchPreviewBatchState();
-  stepMatchPreviewBatch(rows, products, aliases, referenceProducts, state);
+  stepMatchPreviewBatch(rows, products, aliases, referenceProducts, state, supplierId);
   return {
     totalRows: rows.length,
     matchedProduct: state.matchedProduct,
@@ -1675,7 +1884,7 @@ export interface PreviousOfferIdentityIndex {
 export function buildPreviousOfferIdentityIndex(previousOffers: Record<string, SupplierOfferCurrent>): PreviousOfferIdentityIndex {
   const entries: PreviousOfferIdentityEntry[] = Object.values(previousOffers).map((offer) => ({
     offer,
-    attrs: extractAttributes(rawTextOf(offer), offer.brand),
+    attrs: extractAttributes(rawTextOf(offer), offer.brand, { supplierId: offer.supplierId }),
     code: (offer.upc || offer.ean || "").trim().toUpperCase(),
   }));
   const byCode = new Map<string, PreviousOfferIdentityEntry[]>();
@@ -1689,10 +1898,10 @@ export function buildPreviousOfferIdentityIndex(previousOffers: Record<string, S
 }
 
 export function findPreviousBySupplierItemIdentity(
-  row: { upc: string; ean: string; brand: string; description: string },
+  row: { upc: string; ean: string; brand: string; description: string; supplierId?: string | null },
   index: PreviousOfferIdentityIndex
 ): SupplierOfferCurrent | null {
-  const rowAttrs = extractAttributes(rawTextOf(row), row.brand);
+  const rowAttrs = extractAttributes(rawTextOf(row), row.brand, { supplierId: row.supplierId });
 
   const rowCode = (row.upc || row.ean || "").trim().toUpperCase();
   if (rowCode && isPlausibleBarcode(rowCode)) {
