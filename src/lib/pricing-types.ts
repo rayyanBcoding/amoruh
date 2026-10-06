@@ -301,6 +301,9 @@ export interface MatchReviewItem {
    *  item appearing in the "review_required" bucket (alias_conflict/
    *  barcode_conflict items just don't need it to have gotten there). */
   reviewRequestedAt: string | null;
+  /** Why the matcher did not link this offer confidently (see
+   *  REVIEW_REASON_LABELS in pricing-normalize.ts). */
+  reviewReason?: string;
 }
 
 /** The two operational buckets a CURRENTLY LISTED offer can fall into —

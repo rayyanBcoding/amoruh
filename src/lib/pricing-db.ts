@@ -1534,6 +1534,7 @@ export async function getMatchReviewItems(params: {
         competingCandidates: o.competingCandidates,
         referenceProductId: o.referenceProductId,
         reviewRequestedAt: o.reviewRequestedAt ?? null,
+        reviewReason: o.reviewReason,
       });
     }
   }
@@ -1570,6 +1571,7 @@ export async function getMatchReviewItemForOffer(supplierId: string, offerKey: s
     competingCandidates: offer.competingCandidates,
     referenceProductId: offer.referenceProductId,
     reviewRequestedAt: offer.reviewRequestedAt ?? null,
+    reviewReason: offer.reviewReason,
   };
 }
 

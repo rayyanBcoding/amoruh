@@ -163,6 +163,19 @@ ok("an unboxed row never matches the retail-only catalog", match([plain], "CREED
 ok("a damaged-box row never matches the unboxed-only catalog", match([unboxed], "CREED AVENTUS 100ML EDP (BOX DAMAGE ONLY)").referenceProductId !== unboxed.id);
 ok("signatures differ across conditions", new Set([sig("CREED AVENTUS 100ML EDP"), sig("CREED AVENTUS 100ML EDP (UNBOX)"), sig("CREED AVENTUS 100ML EDP (NO CAP,BOX)"), sig("CREED AVENTUS 100ML EDP (BOX DAMAGE ONLY)")]).size === 4);
 
+{
+  const testerCapBox = master("creed", "CREED AVENTUS (T) EDP 3.4oz (CAP,BOX)");
+  const noCapRow = match([testerCapBox], "CREED AVENTUS 100ML EDP TESTER (NO CAP,BOX)");
+  check("no-barcode tester NO CAP row vs tester-with-cap master => review, NOT a new Master Product", [noCapRow.reviewStatus, noCapRow.reviewReason], ["needs_review", "condition_variant_of_existing"]);
+  check("...surfaced with the same-family master as the candidate", noCapRow.candidateReferenceProductId, testerCapBox.id);
+  const unboxFamily = match([plain], "CREED AVENTUS 100ML EDP (UNBOX)");
+  check("a no-barcode UNBOX row whose standard twin exists => review, not auto-create", [unboxFamily.reviewStatus, unboxFamily.reviewReason], ["needs_review", "condition_variant_of_existing"]);
+  const firstOfKind = match([master("creed", "CREED SILVER MOUNTAIN WATER 100ML EDP")], "CREED AVENTUS 100ML EDP (UNBOX)");
+  check("an UNBOX row with NO same-family master at all is simply a new candidate", firstOfKind.reviewStatus, "new_candidate");
+  const stdAgainstUnboxOnly = match([unboxed], "CREED AVENTUS 100ML EDP");
+  check("a standard row is not held back just because only an UNBOX twin exists", stdAgainstUnboxOnly.reviewStatus, "new_candidate");
+}
+
 // ======================================================================
 console.log("5. Barcode rules: strongest signal, but compatibility-checked");
 // ======================================================================
@@ -249,6 +262,28 @@ check("a bare carton '15pcs ByBox' is NOT a gift set", extractAttributes("CK IN 
 check("'+' joined multi-size list is a set even without the word SET", extractAttributes("JEAN PAUL G SCANDAL 3.4 EDT M + 5.1 DEO SPRAY + 10ML BLACK BOX", "jean paul gaultier").isGiftSet, true);
 check("'2C' piece shorthand before a size list is a set", extractAttributes("D&G Q 2C 3.3 EDP SPR, 10ML MINI (W)", "dolce & gabbana").isGiftSet, true);
 check("a single bottle with one '+' free text but one size is not a set", extractAttributes("CREED AVENTUS 100ML EDP + FREE GIFT", "creed").isGiftSet, false);
+// Same bundle, different supplier formats -> all detected as sets.
+for (const [label, text] of [
+  ["Miami 'M+ 20ML EDP+ 6.7 BS'", "LATTAFA PRIDE AFFECTION 3.4 EDP M+ 20ML EDP+ 6.7 BS  (133617) - United Arab Emir. - 20pcs ByBox"],
+  ["Miami '3.4 EDP L + 10ML'", "DG DEVOTION INTENSE 3.4 EDP L + 10ML  (134496) - Italy - 6pcs ByBox"],
+  ["Classic comma list '4.2 EDT SPR, 2.5 S/G'", "JEAN PAUL GAULTIER 4.2 EDT SPR, 2.5 S/G (M)"],
+  ["Classic '3PC, 3.4 EDP SPR, 3.4 BL, 10ML MINI'", "212 VIP BLACK 3PC, 3.4 EDP SPR, 3.4 BL, 10ML MINI (M)"],
+  ["Classic '4PC X 1.17 OZ'", "CUBA 4PC X 1.17 OZ SPRAY (BLUE, GOLD, ORANGE, RED) (MEN)"],
+  ["Classic '3.3 EDP SPR, .33 MINI'", "DOLCE & GABBANA K INTENSE 3.3 EDP SPR, .33 MINI (M)"],
+  ["NMD '5*0.33 Oz ... TRAVEL SET'", "CHLOE' [W] ATELIER DES FLEURS 5*0.33 Oz EDP SPR [Jasminum Sambac,Herba Mimosa] TRAVEL SET"],
+  ["PCA '2PC SET(3.4oz edp sp,1.0oz edp sp)'", "TUMI KINETIC(M)(H/B)(LI FREE)2PC SET(6.8oz edp sp,1.0oz edp sp)"],
+  ["spaced '3 * 0.33' without a unit", "CREED QUEEN OF SILK 3 * 0.33 EAU DE PARFUM SPRAY FOR WOMEN REFILLABLE"],
+  ["glued 'SET4 PC X 4 ML'", "MINI MARC JACOBS DAISY SET4 PC X 4 ML EDT EAU SO FRESH EDT, DAISY EDT,"],
+  ["repeated same-size components", "360 by PERRY ELLIS 1.0 EDT SPR, 360 CORAL 1.0 EDP SPR, 360 PURPLE 1.0 EDP SPR (W)"],
+] as [string, string][]) check(`bundle detected: ${label}`, extractAttributes(text, "x").isGiftSet, true);
+check("one size written two ways is NOT a set (3.4 oz = 100 ml)", extractAttributes("CREED AVENTUS EDP, 3.4 OZ 100ML", "creed").isGiftSet, false);
+check("a name containing a decimal plus one size is NOT a set (Thank U Next 2.0)", extractAttributes("ARIANA GRANDE THANK U NEXT 2.0 3.4 EDP SPR", "ariana grande").isGiftSet, false);
+check("asterisk multiplication sign survives noise cleanup", cleanDisplayName("MINI SET 5*0.33 Oz EDP *NEW*"), "MINI SET 5*0.33 Oz EDP");
+check("LE PARFUM + trailing EDP is the Le Parfum bucket on both sides", [extractAttributes("I WANT CHOO LE PARFUM 1.4 EDP SPR", "jimmy choo").concentration, extractAttributes("I WANT CHOO LE PARFUM 1.3 Oz PARFUM SPR", "jimmy choo").concentration], ["le_parfum", "le_parfum"]);
+check("ELIXIR + trailing EDP is the Elixir bucket on both sides", [extractAttributes("SAUVAGE ELIXIR 2.0 Oz EAU DE PARFUM SPR", "dior").concentration, extractAttributes("SAUVAGE ELIXIR CONCENTRATED PERFUME 60 ml", "dior").concentration], ["elixir", "elixir"]);
+check("Le Parfum and plain EDP stay different products", extractAttributes("CHLOE LE PARFUM 100ML", "chloe").concentration === extractAttributes("CHLOE EDP 100ML", "chloe").concentration, false);
+check("Aventus Cologne stays separate from Aventus EDP", extractAttributes("CREED AVENTUS COLOGNE 100ML", "creed").concentration === extractAttributes("CREED AVENTUS 100ML EDP", "creed").concentration, false);
+check("EDP vs EXTRAIT is still a real concentration difference", extractAttributes("MANCERA RED TOBACCO INTENSE EXTRAIT DE PARFUM 120ML", "mancera").concentration === extractAttributes("MANCERA RED TOBACCO INTENSE EDP 120ML", "mancera").concentration, false);
 check("a plain single bottle is not a gift set", extractAttributes("CREED AVENTUS 100ML EDP", "creed").isGiftSet, false);
 check("trailing market code stripped after a size", sig("LE PARFUM LUMIERE (W) EDP 90 ml IT", "elie saab"), sig("LE PARFUM LUMIERE (W) EDP 90ML", "elie saab"));
 check("a 2-letter word elsewhere is NOT treated as a market code", extractAttributes("HELLO IT GIRL EDP 100ML", "x").coreNameTokens.includes("it"), true);

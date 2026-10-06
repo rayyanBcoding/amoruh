@@ -168,8 +168,9 @@ export function stripListingNoise(text: string, supplierId?: string | null): { t
       return " ";
     });
   }
-  // Orphaned asterisks left behind by decoration ("***", "* *").
-  t = t.replace(/\*+/g, " ");
+  // Orphaned asterisks left behind by decoration ("***", "* *") — but never
+  // the multiplication sign in a component list ("5*0.33 Oz").
+  t = t.replace(/(\d)\s*\*\s*(?=\d|\.\d)/g, "$1\u0001").replace(/\*+/g, " ").replace(/\u0001/g, "*");
   return { text: collapse(t), removed };
 }
 
@@ -239,4 +240,32 @@ export function snapNominalSize(ml: number): number {
     if (Math.abs(ml - s) / s <= 0.03) return s;
   }
   return ml;
+}
+
+// ---- review reasons -----------------------------------------------------
+
+/** Plain-English explanation of why a row didn't match confidently, shown
+ *  in the review workflow so an operator can see WHY at a glance. */
+export const REVIEW_REASON_LABELS: Record<string, string> = {
+  barcode_tester_vs_retail: "Same barcode, but one listing is a tester and the other is retail.",
+  barcode_gift_set_vs_single: "Same barcode, but one listing is a gift set and the other a single bottle.",
+  barcode_refill_vs_regular: "Same barcode, but one listing is a refill and the other a regular bottle.",
+  barcode_condition_differs: "Same barcode, but the box/cap condition differs (e.g. tester with cap vs tester with no cap). Kept apart so they never compete for Best Price.",
+  barcode_gender_conflict: "Same barcode, but the listings state different genders (M vs W).",
+  barcode_size_form_or_concentration_differs: "Same barcode, but the size, product form, or concentration (e.g. EDP vs Extrait) differs.",
+  barcode_text_mismatch: "Same barcode, but the product names look unrelated.",
+  regional_barcode_variant: "Same apparent fragrance as an existing Master Product, but with a different barcode (regional/market variant). Not linked automatically.",
+  multiple_exact_targets: "More than one existing Master Product matches this name exactly, so it can't be linked without guessing.",
+  gender_unstated_or_unisex: "Matches an existing Master Product, but this listing doesn't state a gender (or says unisex) while the product does.",
+  condition_variant_of_existing: "Matches an existing Master Product except for box/cap condition. Not auto-created as a new product; review whether it's the same fragrance in a different condition.",
+  concentration_not_stated: "The listing doesn't state a concentration (EDT/EDP/etc.), so the exact product can't be determined.",
+  fuzzy_ambiguity: "Similar to existing products but not an exact identity match.",
+  exact_identity_ambiguous: "Matches existing products but the exact one can't be determined.",
+};
+
+export function describeReviewReason(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  if (REVIEW_REASON_LABELS[reason]) return REVIEW_REASON_LABELS[reason];
+  if (reason.startsWith("not_eligible_for_auto_create:")) return `Can't be turned into a new product automatically (${reason.slice("not_eligible_for_auto_create:".length).trim()}).`;
+  return reason;
 }

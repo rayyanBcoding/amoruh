@@ -56,13 +56,18 @@ export function isPlausibleBarcode(code: string): boolean {
 // "Elixir" or "Le Parfum" needs to hard-gate exactly like EDP vs EDT
 // does (spec's own JPG Elixir vs. JPG Le Parfum example).
 const CONCENTRATION_PATTERNS: [RegExp, string][] = [
+  // A flanker designation stated in the NAME ("Le Parfum", "Elixir",
+  // "Cologne") is more specific than a trailing format abbreviation.
+  // Suppliers write it both ways — "I WANT CHOO LE PARFUM 1.4 EDP SPR"
+  // and "I WANT CHOO LE PARFUM 1.3 Oz PARFUM SPR" — and both are the
+  // same product, so the designation wins over the abbreviation.
+  [/\ble\s*parfum\b/, "le_parfum"],
+  [/\belixir\b/, "elixir"],
+  [/\bcologne\b/, "cologne"],
   [/\beau\s*de\s*parfum\b|\bedp\b/, "edp"],
   [/\beau\s*de\s*toilette\b|\bedt\b/, "edt"],
   [/\beau\s*de\s*cologne\b|\bedc\b/, "cologne"],
   [/\bextrait\s*de\s*parfum\b|\bpure\s*parfum\b|\bextrait\b/, "extrait"],
-  [/\belixir\b/, "elixir"],
-  [/\ble\s*parfum\b/, "le_parfum"],
-  [/\bcologne\b/, "cologne"],
   [/\bparfum\b/, "parfum"],
 ];
 
@@ -72,7 +77,7 @@ const TESTER_PATTERN = /\btester\b|\btstr?\b|\bw\/?o\s*box\b|\bwithout\s*box\b/;
 // is NOT enough on its own ("15pcs ByBox" is a carton quantity), so a
 // piece count only counts when a set word or a size list follows it.
 const GIFT_SET_PATTERN =
-  /\bgift\s*set\b|\bset\s*of\b|\bcoffret\b|\b\d\s*pcs?\s*set\b|\bkit\b|\bmini\s*set\b|\b\d+\s*pcs?\b\s*(?:set\b|[(\[]?\s*\d)|\b\d+\s*[x*]\s*\d+(?:\.\d+)?\s*(?:ml|oz)\b/;
+  /\bgift\s*set\b|\bset\s*of\b|\bcoffret\b|\b\d\s*pcs?\s*set\b|\bkit\b|\bmini\s*set\b|(?<![\d.])\d+\s*pcs?\b\s*(?:set\b|[,(\[x*]?\s*\d)|\b\d+\s*[x*]\s*\d+(?:\.\d+)?\s*(?:ml|oz)\b|\b\d+\s*[x*]\s*\d*\.\d+/;
 
 /** GIFT_SET_PATTERN alone misses a common real supplier shape: a bare
  *  "SET" with no "gift"/"of" qualifier, describing a genuine multi-
@@ -88,20 +93,39 @@ const GIFT_SET_PATTERN =
  *  real case surveyed lists 2+ components joined by "+"), so a
  *  fragrance whose own name coincidentally contains "set" with no
  *  actual bundle content is never misclassified. */
+function sizeValues(n: string): Set<number> {
+  const out = new Set<number>();
+  for (const m of n.matchAll(/(\d+(?:\.\d+)?|\.\d+)\s*(ml|oz)\b/g)) {
+    const v = parseFloat(m[1]);
+    out.add(snapNominalSize(m[2] === "ml" ? v : ozToMl(v)));
+  }
+  // Bare decimals are ounces in this trade ("3.4 EDP", "2.5 S/G", ".33 MINI").
+  for (const m of n.matchAll(/(?<![\d.])(\d+\.\d+|\.\d+)(?![\d.])(?!\s*(?:ml|oz)\b)/g)) {
+    const v = parseFloat(m[1]);
+    if (v > 0 && v <= 10) out.add(snapNominalSize(ozToMl(v)));
+  }
+  return out;
+}
+
 function isGiftSetText(fullText: string): boolean {
   const n = normalize(fullText);
   if (GIFT_SET_PATTERN.test(n)) return true;
-  const distinctSizes = new Set((n.match(/\d+(?:\.\d+)?\s*(?:ml|oz)\b/g) ?? []).map((m) => m.replace(/\s+/g, "")));
-  // "+"-joined components with 2+ distinct sizes ("3.4 EDT + 5.1 DEO
-  // SPRAY + 10ML") or a "+" followed by a known companion item are a
-  // bundle even when the supplier never writes the word "set".
-  if (n.includes("+") && (distinctSizes.size >= 2 || COMPANION_AFTER_PLUS.test(n))) return true;
+  const sizes = sizeValues(n);
+  // A component list — joined by "+", ",", "x"/"*" — with 2+ DIFFERENT
+  // sizes is a bundle even when the supplier never writes the word "set"
+  // ("3.4 EDP L + 10ML", "4.2 EDT SPR, 2.5 S/G", "3.3 EDP SPR, .33 MINI").
+  // Sizes are compared after unit conversion, so "3.4 oz ... 100 ml" is one
+  // size, not two.
+  if (sizes.size >= 2 && (n.includes("+") || n.includes(",") || /\d\s*[x*]\s*\d/.test(n))) return true;
+  if (n.includes("+") && COMPANION_AFTER_PLUS.test(n)) return true;
+  // Several "<size> <concentration>" components in one comma/plus list, even
+  // at the SAME size ("1.0 EDT SPR, 360 CORAL 1.0 EDP SPR, ... 1.0 EDP").
+  if ((n.includes(",") || n.includes("+")) && (n.match(/\d+(?:\.\d+)?\s*(?:oz|ml)?\s*(?:edp|edt|edc)\b/g) ?? []).length >= 2) return true;
   // "2C 3.3 EDP SPR, 10ML MINI" — piece-count shorthand before a size list.
   if (/\b\d\s*c\b\s*\d/.test(n)) return true;
   if (!/\bset\b/.test(n)) return false;
-  // A bare "set" is trusted only alongside real bundle evidence: a "+"
-  // joined component list, a multiplication list, or a second stated size.
-  return n.includes("+") || /\d+\s*[x*]\s*\d/.test(n) || distinctSizes.size >= 2;
+  // A bare "set" is trusted only alongside real bundle evidence.
+  return n.includes("+") || /\d+\s*[x*]\s*\d/.test(n) || sizes.size >= 2;
 }
 const COMPANION_AFTER_PLUS = /\+\s*[\d.]*\s*(?:ml|oz|g)?\s*(?:deo|deodorant|shower|body|b\/|s\/|mini|travel|pouch|hair|lotion|after\s*shave)/;
 // "refill"/"recharge" only — deliberately NOT matching "refillable" (a
@@ -1573,6 +1597,25 @@ export function matchSupplierRow(
     result = resolved.result;
     reviewReason = resolved.reviewReason;
     fromExactResolution = true;
+  }
+
+  // A non-standard box/cap condition (UNBOX, NO CAP, BOX DAMAGE) must never,
+  // by itself, mint a new Master Product. If the only reason this row found
+  // no match is that an otherwise IDENTICAL Master Product exists in a
+  // different condition, hold it for review instead of auto-creating —
+  // the two stay in separate comparison buckets either way.
+  if (result.outcome === "no_match" && rowAttrs.condition !== "standard" && rowAttrs.concentration !== null) {
+    const familyOfDifferentCondition = pool.filter(
+      (c) =>
+        c.attrs.condition !== rowAttrs.condition &&
+        textScore(rowAttrs, c.attrs) === 1 &&
+        checkHardGates({ ...rowAttrs, condition: c.attrs.condition }, c.attrs).passes
+    );
+    if (familyOfDifferentCondition.length > 0) {
+      result = { outcome: "needs_review", winner: null, competingCandidates: familyOfDifferentCondition, confidence: null };
+      reviewReason = "condition_variant_of_existing";
+      fromExactResolution = true;
+    }
   }
 
   if (result.outcome === "auto_match" && result.winner) {
