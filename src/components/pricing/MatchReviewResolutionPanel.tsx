@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/Button";
 import { ReviewStatusBadge } from "@/components/pricing/PricingBadges";
+import { describeReviewReason } from "@/lib/pricing-normalize";
 import { formatCurrency, formatProductTitle } from "@/lib/format";
 import type { MatchReviewItem, PricingReferenceProduct } from "@/lib/pricing-types";
 import type { Product } from "@/lib/types";
@@ -156,6 +157,13 @@ export function MatchReviewResolutionPanel({
           <ReviewStatusBadge status={item.reviewStatus} confidence={item.matchConfidence} />
         </div>
       </div>
+
+      {describeReviewReason(item.reviewReason) && (
+        <p className="mb-3 rounded-lg bg-ld-border/20 px-3 py-2 text-xs text-ld-muted">
+          <span className="font-semibold text-ld-white">Why this needs review: </span>
+          {describeReviewReason(item.reviewReason)}
+        </p>
+      )}
 
       {!showActions && comparisonHref && (
         <Link

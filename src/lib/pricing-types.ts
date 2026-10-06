@@ -115,6 +115,15 @@ export interface SupplierOfferSnapshot {
    *  became operationally relevant enough to need a human decision. */
   reviewRequestedAt?: string | null;
   /** Original currency + price, never overwritten (rule #4). */
+  /** Normalized identity this row resolved to (see computeIdentitySignature
+   *  / pricing-normalize.ts) — preserved on the offer for traceability,
+   *  alongside the untouched original `description`. */
+  normalizedIdentity?: string;
+  /** UNBOX / NO CAP / BOX DAMAGE listings are their own comparison bucket
+   *  and never compete against a normal retail-box offer. */
+  condition?: "standard" | "unboxed" | "no_cap" | "damaged_box";
+  /** Why this row did not match confidently, when it didn't. */
+  reviewReason?: string;
   currency: string;
   price: number;
   /** Captured once, permanently, at upload time — the historical rate,
@@ -187,6 +196,15 @@ export interface SupplierOfferCurrent {
   reviewRequestedAt: string | null;
   /** false once a FULL upload completes without this offerKey present.
    *  Never deleted — kept for "No Longer Listed" display + history. */
+  /** Normalized identity this row resolved to (see computeIdentitySignature
+   *  / pricing-normalize.ts) — preserved on the offer for traceability,
+   *  alongside the untouched original `description`. */
+  normalizedIdentity?: string;
+  /** UNBOX / NO CAP / BOX DAMAGE listings are their own comparison bucket
+   *  and never compete against a normal retail-box offer. */
+  condition?: "standard" | "unboxed" | "no_cap" | "damaged_box";
+  /** Why this row did not match confidently, when it didn't. */
+  reviewReason?: string;
   currentlyListed: boolean;
   /** uploadId that most recently wrote this field (for audit/debugging —
    *  NOT the ordering mechanism itself, which lives on the generation). */
@@ -283,6 +301,9 @@ export interface MatchReviewItem {
    *  item appearing in the "review_required" bucket (alias_conflict/
    *  barcode_conflict items just don't need it to have gotten there). */
   reviewRequestedAt: string | null;
+  /** Why the matcher did not link this offer confidently (see
+   *  REVIEW_REASON_LABELS in pricing-normalize.ts). */
+  reviewReason?: string;
 }
 
 /** The two operational buckets a CURRENTLY LISTED offer can fall into —
