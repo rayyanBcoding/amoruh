@@ -8,6 +8,16 @@ import { Button } from "@/components/Button";
 import { MatchBadge } from "@/components/intake/IntakeBadges";
 import { CreateProductModal } from "@/components/intake/CreateProductModal";
 import { formatCurrency } from "@/lib/format";
+import {
+  addManualLine,
+  applyManualLineEdit,
+  canContinueWithoutAI,
+  createEmptyManualDraft,
+  removeManualLine,
+  validateManualDraft,
+  type ManualDraft,
+  type ManualLineEdit,
+} from "@/lib/intake-manual-po";
 import type { ExtractedPO, MatchedLineItem } from "@/lib/intake-types";
 import type { Product } from "@/lib/types";
 
@@ -27,6 +37,11 @@ export default function UploadInvoicePage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [modalLineIndex, setModalLineIndex] = useState<number | null>(null);
   const [bulkCreating, setBulkCreating] = useState(false);
+  // Set when AI extraction fails after the PDF was uploaded; drives the
+  // "Continue without AI" option. manualMode = the Review screen is an
+  // operator-entered draft rather than an AI-extracted one.
+  const [failure, setFailure] = useState<{ message: string; code: string } | null>(null);
+  const [manualMode, setManualMode] = useState(false);
 
   const loadProducts = () => {
     fetch("/api/products")
@@ -41,6 +56,8 @@ export default function UploadInvoicePage() {
 
   const handleFile = async (file: File) => {
     setError(null);
+    setFailure(null);
+    setManualMode(false);
     if (file.type !== "application/pdf") {
       setError("Please choose a PDF invoice or purchase order.");
       return;
@@ -62,7 +79,16 @@ export default function UploadInvoicePage() {
         body: JSON.stringify({ blobUrl: blob.url, filename: file.name }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Could not parse this invoice.");
+      if (!res.ok) {
+        // A classified extraction failure (e.g. the AI account needs
+        // credits): keep the uploaded PDF and offer manual entry.
+        if (data?.code) {
+          setFailure({ message: data.error ?? "Invoice extraction is unavailable.", code: data.code });
+          setStage("choose");
+          return;
+        }
+        throw new Error(data?.error ?? "Could not parse this invoice.");
+      }
 
       setExtracted(data.extracted);
       setLines(data.matched);
@@ -97,8 +123,41 @@ export default function UploadInvoicePage() {
     setExtracted((prev) => (prev ? { ...prev, ...patch } : prev));
   };
 
+  // ---- Continue without AI (manual PO entry) -------------------------
+  // All state-only: nothing is sent anywhere until submit() below.
+  const draft = (): ManualDraft => ({ extracted: extracted as ExtractedPO, lines, resolved });
+  const applyDraft = (d: ManualDraft) => {
+    setExtracted(d.extracted);
+    setLines(d.lines);
+    setResolved(d.resolved);
+  };
+  const startManualEntry = () => {
+    setError(null);
+    applyDraft(createEmptyManualDraft());
+    setManualMode(true);
+    setStage("review");
+  };
+  const cancelManualEntry = () => {
+    setError(null);
+    setManualMode(false);
+    setExtracted(null);
+    setLines([]);
+    setResolved([]);
+    setStage("choose");
+  };
+  const editManualLine = (i: number, edit: ManualLineEdit) => applyDraft(applyManualLineEdit(draft(), i, edit, products));
+  const addLine = () => applyDraft(addManualLine(draft()));
+  const removeLine = (i: number) => applyDraft(removeManualLine(draft(), i));
+
   const submit = async () => {
     if (!extracted || !blobUrl) return;
+    if (manualMode) {
+      const problems = validateManualDraft(draft());
+      if (problems.length > 0) {
+        setError(problems.join(" "));
+        return;
+      }
+    }
     setStage("saving");
     setError(null);
     try {
@@ -222,6 +281,50 @@ export default function UploadInvoicePage() {
           </div>
         )}
 
+        {stage === "choose" && failure && blobUrl && (
+          <div className="glass-panel mt-6 rounded-2xl border border-ld-amber/30 p-6">
+            <p className="text-sm font-semibold text-ld-amber">{failure.message}</p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              {canContinueWithoutAI(failure.code) && (
+                <Button variant="primary" size="md" onClick={startManualEntry}>
+                  Continue without AI
+                </Button>
+              )}
+              <a
+                href={blobUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm font-semibold text-ld-cyan hover:underline"
+              >
+                Open invoice PDF
+              </a>
+            </div>
+            <p className="mt-3 text-xs text-ld-muted">
+              Your PDF is already uploaded. Entering the purchase order manually uses the same review screen, and nothing
+              is saved until you click Create Purchase Order. You can also choose a different PDF to try again.
+            </p>
+          </div>
+        )}
+
+        {(stage === "review" || stage === "saving") && extracted && manualMode && (
+          <div className="glass-panel mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ld-amber/30 p-4">
+            <p className="text-sm text-ld-muted">
+              <span className="font-semibold text-ld-amber">Manual entry.</span> AI extraction wasn&apos;t available. Nothing is
+              saved until you click Create Purchase Order.
+            </p>
+            <div className="flex items-center gap-4">
+              {blobUrl && (
+                <a href={blobUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-ld-cyan hover:underline">
+                  Open invoice PDF
+                </a>
+              )}
+              <Button variant="ghost" size="md" disabled={stage === "saving"} onClick={cancelManualEntry}>
+                Cancel manual entry
+              </Button>
+            </div>
+          </div>
+        )}
+
         {(stage === "review" || stage === "saving") && extracted && (
           <div className="space-y-6">
             <div className="glass-panel grid grid-cols-1 gap-4 rounded-2xl p-5 sm:grid-cols-4">
@@ -236,6 +339,11 @@ export default function UploadInvoicePage() {
                 <h2 className="font-display text-lg font-bold text-ld-white">
                   {lines.length} Line Item{lines.length === 1 ? "" : "s"}
                 </h2>
+                {manualMode && (
+                  <Button variant="cyan" size="md" onClick={addLine}>
+                    + Add line
+                  </Button>
+                )}
                 <div className="flex flex-wrap items-center gap-4 text-sm">
                   <span className="text-ld-muted">
                     <span className="font-semibold text-ld-green">{matchedCount} matched existing</span>
@@ -248,7 +356,7 @@ export default function UploadInvoicePage() {
                       {readyCount} ready to create
                     </span>
                   </span>
-                  {readyCount > 0 && (
+                  {readyCount > 0 && !manualMode && (
                     <Button variant="cyan" size="md" disabled={bulkCreating} onClick={createAllReady}>
                       {bulkCreating ? "Creating…" : `Create ${readyCount} New Product${readyCount === 1 ? "" : "s"}`}
                     </Button>
@@ -261,7 +369,7 @@ export default function UploadInvoicePage() {
                   <thead>
                     <tr className="text-left text-[11px] font-bold uppercase tracking-widest text-ld-muted">
                       <th className="px-3 pb-1">Invoice Description</th>
-                      <th className="px-3 pb-1">UPC</th>
+                      <th className="px-3 pb-1">{manualMode ? "UPC / SKU" : "UPC"}</th>
                       <th className="px-3 pb-1">Qty</th>
                       <th className="px-3 pb-1">Unit Cost</th>
                       <th className="px-3 pb-1">Line Total</th>
@@ -273,17 +381,48 @@ export default function UploadInvoicePage() {
                     {lines.map((line, i) => (
                       <tr key={i} className="rounded-xl bg-ld-bg-elevated align-top">
                         <td className="rounded-l-xl px-3 py-3">
-                          <p className="font-medium text-ld-white">{line.rawDescription || "—"}</p>
-                          <p className="text-xs text-ld-muted">
-                            {[line.brand, line.name, line.size, line.concentration].filter(Boolean).join(" · ")}
-                          </p>
+                          {manualMode ? (
+                            <div className="flex items-start gap-2">
+                              <input
+                                value={line.rawDescription}
+                                placeholder="Description"
+                                onChange={(e) => editManualLine(i, { rawDescription: e.target.value })}
+                                className="w-72 rounded-lg border border-ld-border bg-ld-bg px-2 py-1 text-ld-white outline-none focus:border-ld-purple"
+                              />
+                              <button
+                                onClick={() => removeLine(i)}
+                                className="text-xs text-ld-muted hover:text-ld-red"
+                                aria-label={`Remove line ${i + 1}`}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="font-medium text-ld-white">{line.rawDescription || "—"}</p>
+                              <p className="text-xs text-ld-muted">
+                                {[line.brand, line.name, line.size, line.concentration].filter(Boolean).join(" · ")}
+                              </p>
+                            </>
+                          )}
                         </td>
-                        <td className="px-3 py-3 font-mono text-xs text-ld-muted">{line.upc || "—"}</td>
+                        <td className="px-3 py-3 font-mono text-xs text-ld-muted">
+                          {manualMode ? (
+                            <input
+                              value={line.upc}
+                              placeholder="UPC or SKU"
+                              onChange={(e) => editManualLine(i, { upc: e.target.value })}
+                              className="w-40 rounded-lg border border-ld-border bg-ld-bg px-2 py-1 text-ld-white outline-none focus:border-ld-purple"
+                            />
+                          ) : (
+                            line.upc || "—"
+                          )}
+                        </td>
                         <td className="px-3 py-3">
                           <input
                             type="number"
                             value={line.quantity}
-                            onChange={(e) => setLineQty(i, Number(e.target.value))}
+                            onChange={(e) => (manualMode ? editManualLine(i, { quantity: Number(e.target.value) }) : setLineQty(i, Number(e.target.value)))}
                             className="w-16 rounded-lg border border-ld-border bg-ld-bg px-2 py-1 text-ld-white outline-none focus:border-ld-purple"
                           />
                         </td>
@@ -292,7 +431,7 @@ export default function UploadInvoicePage() {
                             type="number"
                             step="0.01"
                             value={line.unitCost}
-                            onChange={(e) => setLineCost(i, Number(e.target.value))}
+                            onChange={(e) => (manualMode ? editManualLine(i, { unitCost: Number(e.target.value) }) : setLineCost(i, Number(e.target.value)))}
                             className="w-24 rounded-lg border border-ld-border bg-ld-bg px-2 py-1 text-ld-amber outline-none focus:border-ld-purple"
                           />
                         </td>

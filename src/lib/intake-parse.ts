@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import type { ExtractedPO } from "./intake-types";
+import { InvoiceUnreadableError } from "./intake-ai-errors";
 
 // ---------------------------------------------------------------------
 // PDF -> structured PO extraction, via a single Claude API call.
@@ -65,7 +66,7 @@ export async function extractPOFromInvoice(pdfUrl: string, filename: string): Pr
   });
 
   if (!response.parsed_output) {
-    throw new Error("Claude couldn't extract structured data from this PDF. Try a clearer scan, or enter the PO manually.");
+    throw new InvoiceUnreadableError();
   }
 
   return response.parsed_output;
