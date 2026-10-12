@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getProducts } from "@/lib/db";
 import { extractPOFromInvoice } from "@/lib/intake-parse";
 import { matchLineItems } from "@/lib/intake-matching";
+import { AI_NOT_CONFIGURED_FAILURE, classifyInvoiceExtractionError, type InvoiceExtractionFailure } from "@/lib/intake-ai-errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,10 +25,7 @@ export async function POST(req: Request) {
   }
 
   if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY isn't set on this deployment yet — add it in Vercel project settings to enable invoice parsing." },
-      { status: 500 }
-    );
+    return failureResponse(AI_NOT_CONFIGURED_FAILURE);
   }
 
   try {
@@ -37,9 +35,18 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ extracted, matched });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Could not parse this invoice." },
-      { status: 500 }
-    );
+    // Raw provider detail goes to the server log only; the browser gets a
+    // short, safe message. Nothing was written before this point, so every
+    // failure here leaves inventory and POs untouched.
+    const failure = classifyInvoiceExtractionError(err);
+    console.error("[intake/parse] invoice extraction failed", { code: failure.code, ...failure.logDetail });
+    return failureResponse(failure);
   }
+}
+
+function failureResponse(failure: InvoiceExtractionFailure) {
+  return NextResponse.json(
+    { error: failure.userMessage, code: failure.code, retryable: failure.retryable, noInventoryChanged: true },
+    { status: failure.httpStatus }
+  );
 }
