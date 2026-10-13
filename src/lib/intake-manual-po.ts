@@ -20,6 +20,7 @@ import type { InvoiceExtractionErrorCode } from "./intake-ai-errors";
 const MANUAL_FALLBACK_CODES: ReadonlySet<string> = new Set<InvoiceExtractionErrorCode>([
   "ai_credits_exhausted",
   "ai_auth_failed",
+  "ai_misconfigured",
   "ai_rate_limited",
   "ai_overloaded",
   "ai_unreachable",

@@ -127,7 +127,7 @@ async function main() {
     check("no raw provider JSON reaches the browser", /invalid_request_error|request_id|\{"type"/.test(JSON.stringify(body)), false);
     check("it says no inventory changed", body.noInventoryChanged, true);
     check("a failed extraction wrote nothing", fake.writes.length, 0);
-    for (const code of ["ai_auth_failed", "ai_rate_limited", "ai_overloaded", "ai_unreachable", "ai_not_configured", "invoice_unreadable", "ai_unexpected_error"]) {
+    for (const code of ["ai_auth_failed", "ai_misconfigured", "ai_rate_limited", "ai_overloaded", "ai_unreachable", "ai_not_configured", "invoice_unreadable", "ai_unexpected_error"]) {
       check(`Continue without AI is offered for ${code}`, canContinueWithoutAI(code), true);
     }
     check("not offered when there is no failure code (ordinary errors)", [canContinueWithoutAI(undefined), canContinueWithoutAI(null), canContinueWithoutAI("something_else")], [false, false, false]);
