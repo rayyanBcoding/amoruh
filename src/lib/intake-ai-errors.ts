@@ -18,6 +18,7 @@
 export type InvoiceExtractionErrorCode =
   | "ai_credits_exhausted"
   | "ai_auth_failed"
+  | "ai_misconfigured"
   | "ai_rate_limited"
   | "ai_overloaded"
   | "ai_unreachable"
@@ -39,6 +40,13 @@ export interface InvoiceExtractionFailure {
 
 const NO_CHANGE = "No inventory was changed.";
 const MANUAL = "You can still enter the purchase order manually.";
+const NOT_CONFIGURED = `Automatic invoice extraction is temporarily unavailable because the AI service is not configured correctly. ${NO_CHANGE} ${MANUAL}`;
+
+// A 400 whose body is about the API key / workspace / organization / billing
+// setup (not about the document we sent).
+const CONFIG_400 = /workspace|api[ -]?key|x-api-key|authenticat|permission|organization|billing|account|not scoped|disabled/i;
+// A 400 that is genuinely about the PDF / document content.
+const DOCUMENT_400 = /pdf|document|page|file|image|base64|media[ _]type|too large|too many/i;
 
 /** Thrown by extractPOFromInvoice when the model returns nothing usable. */
 export class InvoiceUnreadableError extends Error {
@@ -89,12 +97,12 @@ export function classifyInvoiceExtractionError(err: unknown): InvoiceExtractionF
     );
   }
   if (status === 401 || status === 403) {
-    return base(
-      "ai_auth_failed",
-      `Invoice extraction is unavailable because the AI service key isn't accepted. ${NO_CHANGE} ${MANUAL}`,
-      503,
-      false
-    );
+    return base("ai_auth_failed", NOT_CONFIGURED, 503, false);
+  }
+  // Workspace-scope / key / billing / account setup problems also come back
+  // as 400 invalid_request_error. That is a configuration issue, not a bad PDF.
+  if (status === 400 && CONFIG_400.test(detail || rawMessage)) {
+    return base("ai_misconfigured", NOT_CONFIGURED, 503, false);
   }
   if (status === 429) {
     return base("ai_rate_limited", `The AI service is busy right now. Please try again in a minute. ${NO_CHANGE}`, 503, true);
@@ -107,9 +115,9 @@ export function classifyInvoiceExtractionError(err: unknown): InvoiceExtractionF
   if (status === undefined && /connection error|timed? ?out|econn|enotfound|fetch failed|socket hang up/i.test(rawMessage)) {
     return base("ai_unreachable", `Couldn't reach the AI service. Please try again. ${NO_CHANGE}`, 503, true);
   }
-  if (status === 400 || status === 413 || status === 422) {
-    // A request the API refused for a reason other than billing (e.g. a PDF
-    // too large or malformed). Not the operator's fault to decode.
+  // Only blame the PDF when the API refused the document itself (413 is
+  // payload-too-large; a 400/422 must actually talk about the document).
+  if (status === 413 || ((status === 400 || status === 422) && DOCUMENT_400.test(detail || rawMessage))) {
     return base("invoice_unreadable", `This PDF couldn't be processed. Try a smaller or clearer file, or enter the purchase order manually. ${NO_CHANGE}`, 422, false);
   }
   return base("ai_unexpected_error", `Invoice extraction failed unexpectedly. ${NO_CHANGE} ${MANUAL}`, 500, true);
