@@ -94,6 +94,8 @@ const existing = {
   status: "active",
 };
 
+type Row = { id: string; name: string; inventory: number; productId: string | null; matchType: string; receivedQty: number };
+
 async function main() {
   const { KEYS } = await import("../src/lib/intake-db");
   const { KEYS: CoreKeys } = await import("../src/lib/kv");
@@ -128,7 +130,7 @@ async function main() {
     const res = await POST(new Request("http://x", { method: "POST", body: JSON.stringify(body) }), {
       params: Promise.resolve({ id: PO, lineId }),
     });
-    return { status: res.status, json: (await res.json()) as Record<string, any> };
+    return { status: res.status, json: (await res.json()) as { sku?: string; id?: string; fields?: Record<string, string> } };
   };
   const formPayload = (over: object = {}) => ({
     id: "",
@@ -149,8 +151,8 @@ async function main() {
     fragranceNotes: [],
     ...over,
   });
-  const productsNow = async () => ((await fake.get(CoreKeys.products)) as any[]) ?? [];
-  const linesNow = async () => ((await fake.get(KEYS.poLines(PO))) as any[]) ?? [];
+  const productsNow = async () => ((await fake.get(CoreKeys.products)) as Row[]) ?? [];
+  const linesNow = async () => ((await fake.get(KEYS.poLines(PO))) as Row[]) ?? [];
 
   // 1. The payload shape ProductEditorForm really sends (top-level fields)
   await reset();
