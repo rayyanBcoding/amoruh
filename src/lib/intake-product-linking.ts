@@ -1,6 +1,7 @@
 import { createProduct, getProducts } from "./db";
 import { getPO, getPOLines, savePOLines, recomputePOFromLines } from "./intake-db";
 import { isLineConfirmed } from "./intake-review";
+import { ValidationError } from "./validation";
 import {
   getCommittedOffers,
   getReferenceProductByEan,
@@ -124,6 +125,8 @@ export interface CreateAndLinkResult {
   productId?: string;
   product?: Product;
   error?: string;
+  /** Field-level validation messages when creation was rejected by validateProductInput. */
+  fields?: Record<string, string>;
 }
 
 export async function createAndLinkProductForLine(
@@ -196,6 +199,7 @@ export async function createAndLinkProductForLine(
         lineId,
         status: "failed",
         error: err instanceof Error ? err.message : "Could not create this product.",
+        fields: err instanceof ValidationError ? err.fields : undefined,
       };
     }
     matchType = "new_product";

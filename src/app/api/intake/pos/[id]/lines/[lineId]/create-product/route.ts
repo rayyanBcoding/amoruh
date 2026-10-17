@@ -4,9 +4,9 @@ import type { Product } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-interface Body {
-  product?: Partial<Product>;
-}
+// ProductEditorForm posts the product fields at the top level of the body;
+// an explicit { product } wrapper is also accepted.
+type Body = Partial<Product> & { product?: Partial<Product> };
 
 // POST /api/intake/pos/[id]/lines/[lineId]/create-product
 //
@@ -29,10 +29,13 @@ export async function POST(
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const result = await createAndLinkProductForLine(id, lineId, body.product);
+  const { product: wrapped, ...topLevel } = body;
+  const overrides = wrapped ?? (Object.keys(topLevel).length > 0 ? topLevel : undefined);
+  const result = await createAndLinkProductForLine(id, lineId, overrides);
 
   if (result.status === "failed") {
-    return NextResponse.json({ error: result.error ?? "Could not create this product." }, { status: 400 });
+    // `fields` lets the form highlight the offending inputs (same shape as POST /api/products).
+    return NextResponse.json({ error: result.error ?? "Could not create this product.", fields: result.fields }, { status: 400 });
   }
 
   return NextResponse.json(result.product);
