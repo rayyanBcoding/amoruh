@@ -1,5 +1,5 @@
 import { redis } from "./kv";
-import { getProduct, patchState } from "./db";
+import { getProduct, getProducts, patchState } from "./db";
 import { getLotsWithRemaining, newId } from "./intake-db";
 import { claimActiveSession, REAL_ACTIVE_KEY } from "./live-mode-guard";
 import { computeWeightedAverageLandedCost } from "./intake-costing";
@@ -8,14 +8,22 @@ import {
   cancelSale as cancelSaleRecord,
   computeAverageAuction,
   correctSalePrice as correctSalePriceRecord,
+  deriveSaleFinancials,
+  editSale as editSaleRecord,
   getLastSoldPrice,
+  getSaleAudit,
   getSaleRecordById,
   presentationKey,
   presentationsBySessionZsetKey,
   recordNoSale as recordNoSaleRecord,
   recordSale as recordSaleRecord,
+  restoreSale as restoreSaleRecord,
+  normalizeSaleRecord,
+  saleKeyOf,
+  type SaleAuditEvent,
   type SaleRecord,
 } from "./sales-analytics";
+import type { Product } from "./types";
 import type {
   BreakEvenResult,
   LivePresentation,
@@ -280,6 +288,159 @@ export async function goLiveRecordNoSale(input: GoLiveNoSaleInput) {
 
 export const goLiveCancelSale = cancelSaleRecord;
 export const goLiveCorrectSalePrice = correctSalePriceRecord;
+export const goLiveEditSale = editSaleRecord;
+export const goLiveRestoreSale = restoreSaleRecord;
+
+// ---------------------------------------------------------------------
+// Live Order Ledger — the complete, searchable list of a session's orders.
+//
+// There is no second order store: an order IS a SaleRecord, found through the
+// session's existing presentations index (never the capped recent list). Two
+// batched reads (presentations, then their sales) + one catalog read, and the
+// page is cut from that in memory — bounded by the size of ONE Live, with no
+// catalog scan and no rewrite of any session blob.
+// ---------------------------------------------------------------------
+
+export interface OrderLedgerProduct {
+  id: string;
+  brand: string;
+  name: string;
+  size: string;
+  sku: string;
+  barcode: string;
+  image: string;
+}
+
+export interface OrderLedgerRow {
+  sale: SaleRecord;
+  product: OrderLedgerProduct | null;
+  financials: ReturnType<typeof deriveSaleFinancials>;
+  /** "active" is a SaleRecord with status "completed". */
+  status: "active" | "canceled";
+}
+
+export type OrderLedgerStatusFilter = "all" | "active" | "canceled";
+
+export interface OrderLedgerQuery {
+  q?: string;
+  status?: OrderLedgerStatusFilter;
+  offset?: number;
+  limit?: number;
+}
+
+export interface OrderLedgerPage {
+  sessionId: string;
+  rows: OrderLedgerRow[];
+  /** rows matching the search + status filter (before paging) */
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  /** whole-session counts, independent of the filter */
+  counts: { entered: number; active: number; canceled: number };
+}
+
+const LEDGER_MAX_ORDERS = 5000;
+
+function toLedgerProduct(p: Product | undefined): OrderLedgerProduct | null {
+  return p ? { id: p.id, brand: p.brand, name: p.name, size: p.size, sku: p.sku, barcode: p.barcode, image: p.image } : null;
+}
+
+function compareOrdersNewestFirst(a: SaleRecord, b: SaleRecord): number {
+  if (a.liveOrderNumber != null && b.liveOrderNumber != null) return b.liveOrderNumber - a.liveOrderNumber;
+  const byTime = b.soldAt.localeCompare(a.soldAt);
+  return byTime !== 0 ? byTime : b.id.localeCompare(a.id);
+}
+
+/** True when the search text hits this row; `exactOrder` marks a #N exact hit. */
+function matchOrder(row: OrderLedgerRow, rawQuery: string): { hit: boolean; exactOrder: boolean } {
+  const trimmed = rawQuery.trim();
+  const orderOnly = trimmed.startsWith("#"); // "#73" means the LIVE Order number, nothing else
+  const q = trimmed.replace(/^#/, "").trim().toLowerCase();
+  if (!q) return { hit: true, exactOrder: false };
+  const number = row.sale.liveOrderNumber;
+  const numeric = /^\d+$/.test(q);
+  const exactOrder = numeric && number != null && String(number) === q;
+  const partialOrder = numeric && number != null && String(number).includes(q);
+  if (orderOnly) return { hit: exactOrder || partialOrder, exactOrder };
+  const p = row.product;
+  const text = p ? `${p.brand} ${p.name} ${p.size}`.toLowerCase() : "";
+  const textHit =
+    text.includes(q) ||
+    (row.sale.sku ?? "").toLowerCase().includes(q) ||
+    (p?.sku ?? "").toLowerCase().includes(q) ||
+    (p?.barcode ?? "").toLowerCase().includes(q);
+  return { hit: exactOrder || partialOrder || textHit, exactOrder };
+}
+
+export async function getSessionOrderLedger(sessionId: string, query: OrderLedgerQuery = {}): Promise<OrderLedgerPage> {
+  const limit = Math.min(Math.max(Math.floor(query.limit ?? 50), 1), 200);
+  const offset = Math.max(Math.floor(query.offset ?? 0), 0);
+  const status = query.status ?? "all";
+
+  const [views, products] = await Promise.all([getPresentationsForSession(sessionId, LEDGER_MAX_ORDERS), getProducts()]);
+  const productById = new Map(products.map((p) => [p.id, p]));
+
+  const rows: OrderLedgerRow[] = views
+    .filter((v) => v.presentation.outcome === "sold" && v.sale !== null)
+    .map((v) => {
+      const sale = v.sale as SaleRecord;
+      return {
+        sale,
+        product: toLedgerProduct(productById.get(sale.productId)),
+        financials: deriveSaleFinancials(sale),
+        status: sale.status === "canceled" ? ("canceled" as const) : ("active" as const),
+      };
+    })
+    .sort((a, b) => compareOrdersNewestFirst(a.sale, b.sale));
+
+  const counts = {
+    entered: rows.length,
+    active: rows.filter((r) => r.status === "active").length,
+    canceled: rows.filter((r) => r.status === "canceled").length,
+  };
+
+  const matched: { row: OrderLedgerRow; exact: boolean }[] = [];
+  for (const row of rows) {
+    if (status !== "all" && row.status !== status) continue;
+    const m = matchOrder(row, query.q ?? "");
+    if (m.hit) matched.push({ row, exact: m.exactOrder });
+  }
+  // an exact LIVE Order # (e.g. "73") always floats to the top; everything else keeps newest-first
+  const ordered = [...matched.filter((m) => m.exact), ...matched.filter((m) => !m.exact)].map((m) => m.row);
+
+  const page = ordered.slice(offset, offset + limit);
+  return { sessionId, rows: page, total: ordered.length, offset, limit, hasMore: offset + limit < ordered.length, counts };
+}
+
+export interface OrderDetail {
+  row: OrderLedgerRow;
+  session: LiveSession | null;
+  /** false once the Live has ended — the order is then read-only */
+  editable: boolean;
+  audit: SaleAuditEvent[];
+}
+
+export async function getOrderDetail(saleId: string): Promise<OrderDetail | null> {
+  const sale = await getSaleRecordById(saleId);
+  if (!sale) return null;
+  const [product, session, audit] = await Promise.all([
+    getProduct(sale.productId),
+    sale.liveSessionId ? getSession(sale.liveSessionId) : Promise.resolve(null),
+    getSaleAudit(saleId),
+  ]);
+  return {
+    row: {
+      sale,
+      product: toLedgerProduct(product ?? undefined),
+      financials: deriveSaleFinancials(sale),
+      status: sale.status === "canceled" ? "canceled" : "active",
+    },
+    session,
+    editable: session ? session.status === "active" : false,
+    audit,
+  };
+}
 
 // ---------------------------------------------------------------------
 // Recent sales / presentations for a session — always derived from the
@@ -292,18 +453,29 @@ export interface SessionPresentationView {
   sale: SaleRecord | null;
 }
 
+const MGET_CHUNK = 500;
+
+async function mgetAll<T>(keys: string[]): Promise<(T | null)[]> {
+  const out: (T | null)[] = [];
+  for (let i = 0; i < keys.length; i += MGET_CHUNK) {
+    out.push(...(await redis.mget<(T | null)[]>(...keys.slice(i, i + MGET_CHUNK))));
+  }
+  return out;
+}
+
 export async function getPresentationsForSession(sessionId: string, limit = 200): Promise<SessionPresentationView[]> {
   const ids = (await redis.zrange(presentationsBySessionZsetKey(sessionId), 0, limit - 1, { rev: true })) as string[];
   if (ids.length === 0) return [];
-  const presentations = await Promise.all(ids.map((id) => redis.get<LivePresentation>(presentationKey(id))));
-  const views = await Promise.all(
-    presentations.map(async (p) => {
-      if (!p) return null;
-      const sale = p.saleId ? await getSaleRecordById(p.saleId) : null;
-      return { presentation: p, sale } satisfies SessionPresentationView;
-    })
-  );
-  return views.filter((v): v is SessionPresentationView => v !== null);
+  // two batched reads (presentations, then their sales) instead of one GET per record
+  const presentations = await mgetAll<LivePresentation>(ids.map((id) => presentationKey(id)));
+  const present = presentations.filter((p): p is LivePresentation => p !== null);
+  const saleIds = present.map((p) => p.saleId).filter((id): id is string => Boolean(id));
+  const sales = await mgetAll<SaleRecord>(saleIds.map((id) => saleKeyOf(id)));
+  const saleById = new Map<string, SaleRecord>();
+  sales.forEach((sale, i) => {
+    if (sale) saleById.set(saleIds[i], normalizeSaleRecord(sale));
+  });
+  return present.map((p) => ({ presentation: p, sale: p.saleId ? saleById.get(p.saleId) ?? null : null }));
 }
 
 /** A presentation counts as "effectively sold" only while its linked sale
@@ -325,7 +497,7 @@ export async function getSessionStats(sessionId: string): Promise<LiveSessionSta
 
   const unitsSold = sold.reduce((sum, v) => sum + (v.sale?.quantity ?? 0), 0);
   const revenue = sold.reduce((sum, v) => sum + (v.sale?.price ?? 0), 0);
-  const { costOfGoods, estimatedGrossProfit, ordersMissingCost } = computeSessionProfit(
+  const { costOfGoods, estimatedGrossProfit, ordersMissingCost, costedRevenue } = computeSessionProfit(
     sold.map((v) => ({ price: v.sale?.price ?? 0, quantity: v.sale?.quantity, landedCostAtSale: v.sale?.landedCostAtSale }))
   );
 
@@ -345,6 +517,10 @@ export async function getSessionStats(sessionId: string): Promise<LiveSessionSta
 
   const completedPresentations = sold.length + noSaleCount;
 
+  // Live Order Ledger counts: a canceled order stays "entered" but contributes
+  // nothing to units/revenue/cost/profit (those only read `sold`).
+  const canceledOrders = views.filter((v) => v.presentation.outcome === "sold" && v.sale?.status === "canceled").length;
+
   return {
     sessionId,
     liveTimeMs,
@@ -353,6 +529,11 @@ export async function getSessionStats(sessionId: string): Promise<LiveSessionSta
     revenue,
     costOfGoods,
     estimatedGrossProfit,
+    enteredOrders: sold.length + canceledOrders,
+    activeOrders: sold.length,
+    canceledOrders,
+    // margin on the orders that have a cost, so uncosted revenue doesn't distort it
+    grossMargin: estimatedGrossProfit !== null && costedRevenue > 0 ? estimatedGrossProfit / costedRevenue : null,
     ordersMissingCost,
     presentationSellThrough: completedPresentations > 0 ? sold.length / completedPresentations : null,
     noSaleCount,

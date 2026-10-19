@@ -59,6 +59,8 @@ interface ActionResult {
   ok: boolean;
   error?: string;
   notFound?: boolean;
+  /** Set by recordSale in real mode: the per-session LIVE Order # just assigned. */
+  liveOrderNumber?: number | null;
 }
 
 export interface EndSessionResult extends ActionResult {
@@ -89,6 +91,10 @@ interface LiveSessionContextValue {
   noSale: (productId: string, operator?: string) => Promise<ActionResult>;
   cancelSale: (saleId: string, operator?: string) => Promise<ActionResult>;
   correctSale: (saleId: string, newPrice: number, operator?: string) => Promise<ActionResult>;
+  /** Bumped after every sale-affecting action so the order ledger refetches. */
+  ledgerVersion: number;
+  /** The order number a RECORD SALE just created — shown briefly, never blocks. */
+  lastRecordedOrder: { number: number; at: number } | null;
   /** Real mode only — no-op-shaped for test mode callers, but nothing
    *  in test mode ever renders the control that calls this. */
   updateSellingConfig: (patch: Partial<SellingConfig>, operator?: string) => Promise<ActionResult>;
@@ -130,6 +136,8 @@ async function postJson(url: string, body?: unknown): Promise<{ ok: boolean; dat
 export function LiveSessionProvider({ mode = "real", children }: { mode?: LiveMode; children: React.ReactNode }) {
   const [data, setData] = useState<ActiveSnapshot | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [ledgerVersion, setLedgerVersion] = useState(0);
+  const [lastRecordedOrder, setLastRecordedOrder] = useState<{ number: number; at: number } | null>(null);
   const refreshingRef = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -166,6 +174,7 @@ export function LiveSessionProvider({ mode = "real", children }: { mode?: LiveMo
     async <T extends ActionResult>(fn: () => Promise<T>): Promise<T> => {
       const result = await fn();
       setLastError(result.ok ? null : result.error ?? "Something went wrong.");
+      setLedgerVersion((v) => v + 1);
       await refresh();
       return result;
     },
@@ -241,8 +250,10 @@ export function LiveSessionProvider({ mode = "real", children }: { mode?: LiveMo
   const recordSale = useCallback(
     (input: { productId: string; quantity: number; winningBid: number; operator?: string }) =>
       runAction(async () => {
-        const { ok, error } = await postJson(apiPath(mode, "/record-sale"), { ...input, idempotencyKey: newIdempotencyKey() });
-        return { ok, error };
+        const { ok, error, data: body } = await postJson(apiPath(mode, "/record-sale"), { ...input, idempotencyKey: newIdempotencyKey() });
+        const liveOrderNumber = (body as { liveOrderNumber?: number | null } | null)?.liveOrderNumber ?? null;
+        if (ok && typeof liveOrderNumber === "number") setLastRecordedOrder({ number: liveOrderNumber, at: Date.now() });
+        return { ok, error, liveOrderNumber };
       }),
     [runAction, mode]
   );
@@ -312,6 +323,8 @@ export function LiveSessionProvider({ mode = "real", children }: { mode?: LiveMo
       noSale,
       cancelSale,
       correctSale,
+      ledgerVersion,
+      lastRecordedOrder,
       updateSellingConfig,
     }),
     [
@@ -330,6 +343,8 @@ export function LiveSessionProvider({ mode = "real", children }: { mode?: LiveMo
       noSale,
       cancelSale,
       correctSale,
+      ledgerVersion,
+      lastRecordedOrder,
       updateSellingConfig,
     ]
   );

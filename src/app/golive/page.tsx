@@ -14,11 +14,13 @@ import { SessionStatsBar } from "@/components/golive/SessionStatsBar";
 import { SellingConfigPanel } from "@/components/golive/SellingConfigPanel";
 import { GoLiveEntryChoice } from "@/components/golive/GoLiveEntryChoice";
 import { EndTestLiveModal } from "@/components/golive/EndTestLiveModal";
+import { OrderLedgerPanel } from "@/components/golive/OrderLedgerPanel";
 
 function GoLiveScreen({ onExit }: { onExit: () => void }) {
   const router = useRouter();
-  const { mode, data, loading, lastError, endSession } = useLiveSession();
+  const { mode, data, loading, lastError, endSession, refresh, ledgerVersion, lastRecordedOrder } = useLiveSession();
   const [ending, setEnding] = useState(false);
+  const [toastOrder, setToastOrder] = useState<number | null>(null);
   const [showEndTestModal, setShowEndTestModal] = useState(false);
 
   // The session this provider was mounted for has ended (real End Live,
@@ -28,6 +30,18 @@ function GoLiveScreen({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     if (!loading && data && !data.session) onExit();
   }, [loading, data, onExit]);
+
+  // "Recorded as LIVE Order #N" — a brief, non-blocking confirmation. It never
+  // takes focus, so the host goes straight back to scanning / the next sale.
+  useEffect(() => {
+    if (!lastRecordedOrder) return;
+    const show = setTimeout(() => setToastOrder(lastRecordedOrder.number), 0);
+    const hide = setTimeout(() => setToastOrder(null), 3500);
+    return () => {
+      clearTimeout(show);
+      clearTimeout(hide);
+    };
+  }, [lastRecordedOrder]);
 
   if (loading || !data || !data.session) {
     return (
@@ -99,6 +113,20 @@ function GoLiveScreen({ onExit }: { onExit: () => void }) {
           {mode === "real" && data.sellingConfig && <SellingConfigPanel config={data.sellingConfig} />}
         </div>
       </div>
+
+      {mode === "real" && (
+        <OrderLedgerPanel sessionId={session.id} refreshToken={ledgerVersion} onChanged={() => void refresh()} />
+      )}
+
+      {toastOrder !== null && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed bottom-6 right-6 z-40 rounded-xl border border-ld-green/40 bg-ld-bg-elevated px-5 py-3 text-sm font-bold text-ld-green shadow-lg"
+        >
+          Recorded as LIVE Order #{toastOrder}
+        </div>
+      )}
 
       {showEndTestModal && (
         <EndTestLiveModal

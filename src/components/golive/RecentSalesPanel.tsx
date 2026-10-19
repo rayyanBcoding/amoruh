@@ -42,7 +42,10 @@ function RecentRow({ view }: { view: RecentSaleView }) {
           <div className="h-10 w-10 shrink-0 rounded-lg bg-ld-border/30" />
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-ld-white">{label}</p>
+          <p className="truncate text-sm font-semibold text-ld-white">
+            {sale?.liveOrderNumber != null && <span className="mr-1.5 font-extrabold text-ld-cyan">#{sale.liveOrderNumber}</span>}
+            {label}
+          </p>
           <p className="truncate text-xs text-ld-muted">
             {presentation.quantity > 1 ? `Qty ${presentation.quantity} · ` : ""}
             {timeAgo(presentation.timestamp)}

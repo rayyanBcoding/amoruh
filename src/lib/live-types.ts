@@ -110,6 +110,16 @@ export interface LiveSessionStats {
   averageSellingPricePerUnit: number | null;
   highestAuction: number | null;
   topProductId: string | null;
+  // Live Order Ledger counts/margin — derived exactly like everything above
+  // (never separately stored). Optional so the storage-isolated Test Live
+  // stats, which predate them, stay valid.
+  /** Every order ever entered this Live, canceled ones included. */
+  enteredOrders?: number;
+  /** Orders currently counting toward revenue/units/cost/profit. */
+  activeOrders?: number;
+  canceledOrders?: number;
+  /** estimatedGrossProfit / the revenue of the costed orders — null when profit is unknown. */
+  grossMargin?: number | null;
   /** Sold orders with no cost basis; they're left out of costOfGoods and
    *  estimatedGrossProfit, which then cover only the costed orders. */
   ordersMissingCost?: number;

@@ -20,6 +20,8 @@ export interface SessionProfit {
   estimatedGrossProfit: number | null;
   /** Sold orders with no cost basis — left out of cost and profit. */
   ordersMissingCost: number;
+  /** Revenue of the costed orders — the base a margin should be taken on. */
+  costedRevenue: number;
 }
 
 export function computeSessionProfit(sold: ProfitSale[]): SessionProfit {
@@ -30,5 +32,6 @@ export function computeSessionProfit(sold: ProfitSale[]): SessionProfit {
     costOfGoods,
     estimatedGrossProfit: costed.length > 0 ? costedRevenue - costOfGoods : null,
     ordersMissingCost: sold.length - costed.length,
+    costedRevenue,
   };
 }
