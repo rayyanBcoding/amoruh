@@ -10,11 +10,12 @@ function formatDuration(ms: number): string {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-function Cell({ label, value }: { label: string; value: string }) {
+function Cell({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <div className="text-center">
       <p className="text-[10px] font-bold uppercase tracking-widest text-ld-muted">{label}</p>
       <p className="font-display text-lg font-extrabold text-ld-white">{value}</p>
+      {note && <p className="text-[10px] font-medium text-ld-amber">{note}</p>}
     </div>
   );
 }
@@ -29,7 +30,11 @@ export function SessionStatsBar({ stats }: { stats: LiveSessionStats }) {
       <Cell label="Presented" value={String(stats.productsPresented)} />
       <Cell label="Units Sold" value={String(stats.unitsSold)} />
       <Cell label="Revenue" value={formatCurrency(stats.revenue)} />
-      <Cell label="Est. Profit" value={stats.estimatedGrossProfit != null ? formatCurrency(stats.estimatedGrossProfit) : "—"} />
+      <Cell
+        label="Est. Profit"
+        value={stats.estimatedGrossProfit != null ? formatCurrency(stats.estimatedGrossProfit) : "—"}
+        note={stats.ordersMissingCost ? `excl. ${stats.ordersMissingCost} order${stats.ordersMissingCost === 1 ? "" : "s"} w/o cost` : undefined}
+      />
       <Cell label="Sell-Through" value={stats.presentationSellThrough != null ? `${Math.round(stats.presentationSellThrough * 100)}%` : "—"} />
     </div>
   );
