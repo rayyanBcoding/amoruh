@@ -110,6 +110,9 @@ export interface LiveSessionStats {
   averageSellingPricePerUnit: number | null;
   highestAuction: number | null;
   topProductId: string | null;
+  /** Sold orders with no cost basis; they're left out of costOfGoods and
+   *  estimatedGrossProfit, which then cover only the costed orders. */
+  ordersMissingCost?: number;
 }
 
 /** Explicit customer-safe allowlist — the ONLY shape ever sent to the TV

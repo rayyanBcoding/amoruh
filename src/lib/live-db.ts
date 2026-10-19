@@ -3,6 +3,7 @@ import { getProduct, patchState } from "./db";
 import { getLotsWithRemaining, newId } from "./intake-db";
 import { claimActiveSession, REAL_ACTIVE_KEY } from "./live-mode-guard";
 import { computeWeightedAverageLandedCost } from "./intake-costing";
+import { computeSessionProfit } from "./session-profit";
 import {
   cancelSale as cancelSaleRecord,
   computeAverageAuction,
@@ -324,10 +325,9 @@ export async function getSessionStats(sessionId: string): Promise<LiveSessionSta
 
   const unitsSold = sold.reduce((sum, v) => sum + (v.sale?.quantity ?? 0), 0);
   const revenue = sold.reduce((sum, v) => sum + (v.sale?.price ?? 0), 0);
-  const hasCompleteCostData = sold.length > 0 && sold.every((v) => v.sale?.landedCostAtSale !== null);
-  const costOfGoods = hasCompleteCostData
-    ? sold.reduce((sum, v) => sum + (v.sale!.landedCostAtSale as number) * (v.sale!.quantity ?? 0), 0)
-    : 0;
+  const { costOfGoods, estimatedGrossProfit, ordersMissingCost } = computeSessionProfit(
+    sold.map((v) => ({ price: v.sale?.price ?? 0, quantity: v.sale?.quantity, landedCostAtSale: v.sale?.landedCostAtSale }))
+  );
 
   const revenueByProduct = new Map<string, number>();
   for (const v of sold) {
@@ -352,7 +352,8 @@ export async function getSessionStats(sessionId: string): Promise<LiveSessionSta
     unitsSold,
     revenue,
     costOfGoods,
-    estimatedGrossProfit: hasCompleteCostData ? revenue - costOfGoods : null,
+    estimatedGrossProfit,
+    ordersMissingCost,
     presentationSellThrough: completedPresentations > 0 ? sold.length / completedPresentations : null,
     noSaleCount,
     averageAuction: sold.length > 0 ? revenue / sold.length : null,
