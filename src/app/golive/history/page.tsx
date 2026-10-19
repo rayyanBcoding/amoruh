@@ -41,15 +41,16 @@ export default function LiveHistoryPage() {
         ) : (
           <div className="glass-panel overflow-hidden rounded-2xl">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[800px] text-sm">
+              <table className="w-full min-w-[960px] text-sm">
                 <thead>
                   <tr className="border-b border-ld-border text-left text-[10px] font-bold uppercase tracking-widest text-ld-muted">
                     <th className="px-5 py-3">Session</th>
                     <th className="px-5 py-3">Date</th>
                     <th className="px-5 py-3">Duration</th>
-                    <th className="px-5 py-3">Revenue</th>
+                    <th className="px-5 py-3">Orders</th>
+                    <th className="px-5 py-3">GMV</th>
                     <th className="px-5 py-3">Units Sold</th>
-                    <th className="px-5 py-3">Profit</th>
+                    <th className="px-5 py-3">Gross Profit</th>
                     <th className="px-5 py-3">Sell-Through</th>
                   </tr>
                 </thead>
@@ -60,11 +61,25 @@ export default function LiveHistoryPage() {
                         <Link href={`/golive/sessions/${session.id}`} className="font-semibold text-ld-white hover:text-ld-cyan">
                           {session.name}
                         </Link>
+                        {/* one-line ledger summary — opens the session's complete order ledger */}
+                        {stats.enteredOrders !== undefined && (
+                          <Link
+                            href={`/golive/sessions/${session.id}#orders`}
+                            className="mt-0.5 block text-[11px] text-ld-muted hover:text-ld-cyan"
+                          >
+                            {formatDate(session.startedAt)} — {stats.enteredOrders} entered — {stats.activeOrders} active —{" "}
+                            {formatCurrency(stats.revenue)} GMV —{" "}
+                            {stats.estimatedGrossProfit != null ? `${formatCurrency(stats.estimatedGrossProfit)} profit` : "profit —"}
+                          </Link>
+                        )}
                       </td>
                       <td className="px-5 py-3 text-ld-muted">
                         {formatDate(session.startedAt)} · {formatTime(session.startedAt)}
                       </td>
                       <td className="px-5 py-3 text-ld-muted">{formatDuration(stats.liveTimeMs)}</td>
+                      <td className="px-5 py-3 text-ld-white">
+                        {stats.enteredOrders !== undefined ? `${stats.activeOrders}/${stats.enteredOrders}` : "—"}
+                      </td>
                       <td className="px-5 py-3 font-semibold text-ld-green">{formatCurrency(stats.revenue)}</td>
                       <td className="px-5 py-3 text-ld-white">{stats.unitsSold}</td>
                       <td className="px-5 py-3 text-ld-white">

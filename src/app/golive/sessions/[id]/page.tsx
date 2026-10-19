@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { BottleImage } from "@/components/BottleImage";
 import { formatCurrency, formatDate, formatTime, timeAgo } from "@/lib/format";
+import { OrderLedgerPanel } from "@/components/golive/OrderLedgerPanel";
 import type { LivePresentation, LiveSession, LiveSessionStats } from "@/lib/live-types";
 import type { SaleRecord } from "@/lib/sales-analytics";
 import type { Product } from "@/lib/types";
@@ -70,9 +71,9 @@ export default function LiveSessionSummaryPage() {
               <StatCard label="Presented" value={String(detail.stats.productsPresented)} />
               <StatCard label="Units Sold" value={String(detail.stats.unitsSold)} />
               <StatCard label="No Sales" value={String(detail.stats.noSaleCount)} />
-              <StatCard label="Revenue" value={formatCurrency(detail.stats.revenue)} accent="text-ld-green" />
+              <StatCard label={detail.stats.enteredOrders !== undefined ? "GMV" : "Revenue"} value={formatCurrency(detail.stats.revenue)} accent="text-ld-green" />
               <StatCard
-                label="Est. Profit"
+                label={detail.stats.enteredOrders !== undefined ? "Gross Profit" : "Est. Profit"}
                 value={detail.stats.estimatedGrossProfit != null ? formatCurrency(detail.stats.estimatedGrossProfit) : "—"}
               />
               <StatCard
@@ -88,6 +89,19 @@ export default function LiveSessionSummaryPage() {
                 value={detail.stats.averageSellingPricePerUnit != null ? formatCurrency(detail.stats.averageSellingPricePerUnit) : "—"}
               />
               <StatCard label="Highest Auction" value={detail.stats.highestAuction != null ? formatCurrency(detail.stats.highestAuction) : "—"} />
+            </div>
+
+            {detail.stats.enteredOrders !== undefined && (
+              <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <StatCard label="Total Entered" value={String(detail.stats.enteredOrders)} />
+                <StatCard label="Active Orders" value={String(detail.stats.activeOrders ?? 0)} />
+                <StatCard label="Canceled" value={String(detail.stats.canceledOrders ?? 0)} />
+                <StatCard label="Gross Margin" value={detail.stats.grossMargin != null ? `${(detail.stats.grossMargin * 100).toFixed(1)}%` : "—"} />
+              </div>
+            )}
+
+            <div id="orders" className="mb-2 scroll-mt-6">
+              <OrderLedgerPanel sessionId={detail.session.id} readOnly={detail.session.status !== "active"} />
             </div>
 
             <h2 className="mb-3 mt-8 font-display text-lg font-bold text-ld-white">Products Presented</h2>
