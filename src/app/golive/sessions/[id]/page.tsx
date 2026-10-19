@@ -74,7 +74,11 @@ export default function LiveSessionSummaryPage() {
               <StatCard label={detail.stats.enteredOrders !== undefined ? "GMV" : "Revenue"} value={formatCurrency(detail.stats.revenue)} accent="text-ld-green" />
               <StatCard
                 label={detail.stats.enteredOrders !== undefined ? "Gross Profit" : "Est. Profit"}
-                value={detail.stats.estimatedGrossProfit != null ? formatCurrency(detail.stats.estimatedGrossProfit) : "—"}
+                value={
+                  detail.stats.estimatedGrossProfit != null
+                    ? `${formatCurrency(detail.stats.estimatedGrossProfit)}${detail.stats.ordersMissingCost ? "*" : ""}`
+                    : "—"
+                }
               />
               <StatCard
                 label="Sell-Through"
@@ -82,6 +86,11 @@ export default function LiveSessionSummaryPage() {
               />
             </div>
 
+            {detail.stats.ordersMissingCost ? (
+              <p className="mb-3 text-xs text-ld-amber">
+                * Profit excludes {detail.stats.ordersMissingCost} order{detail.stats.ordersMissingCost === 1 ? "" : "s"} with no cost basis (products with no received-stock cost).
+              </p>
+            ) : null}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <StatCard label="Avg Auction" value={detail.stats.averageAuction != null ? formatCurrency(detail.stats.averageAuction) : "—"} />
               <StatCard

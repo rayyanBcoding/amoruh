@@ -10,11 +10,12 @@ function formatDuration(ms: number): string {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-function Cell({ label, value }: { label: string; value: string }) {
+function Cell({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <div className="text-center">
       <p className="text-[10px] font-bold uppercase tracking-widest text-ld-muted">{label}</p>
       <p className="font-display text-lg font-extrabold text-ld-white">{value}</p>
+      {note && <p className="text-[10px] font-medium text-ld-amber">{note}</p>}
     </div>
   );
 }
@@ -35,6 +36,7 @@ export function SessionStatsBar({ stats }: { stats: LiveSessionStats }) {
         <Cell
           label={ledger ? "Gross Profit" : "Est. Profit"}
           value={stats.estimatedGrossProfit != null ? formatCurrency(stats.estimatedGrossProfit) : "—"}
+          note={stats.ordersMissingCost ? `excl. ${stats.ordersMissingCost} order${stats.ordersMissingCost === 1 ? "" : "s"} w/o cost` : undefined}
         />
         <Cell label="Sell-Through" value={stats.presentationSellThrough != null ? `${Math.round(stats.presentationSellThrough * 100)}%` : "—"} />
       </div>
@@ -43,7 +45,7 @@ export function SessionStatsBar({ stats }: { stats: LiveSessionStats }) {
           <Cell label="Total Entered" value={String(stats.enteredOrders)} />
           <Cell label="Active Orders" value={String(stats.activeOrders ?? 0)} />
           <Cell label="Canceled" value={String(stats.canceledOrders ?? 0)} />
-          <Cell label="Merchandise Cost" value={stats.estimatedGrossProfit != null ? formatCurrency(stats.costOfGoods) : "—"} />
+          <Cell label="Merchandise Cost" value={formatCurrency(stats.costOfGoods)} />
           <Cell label="Gross Margin" value={stats.grossMargin != null ? `${(stats.grossMargin * 100).toFixed(1)}%` : "—"} />
           <Cell label="Missing Cost" value={String(stats.ordersMissingCost ?? 0)} />
         </div>

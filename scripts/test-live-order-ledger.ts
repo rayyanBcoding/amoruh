@@ -124,7 +124,9 @@ async function main() {
   check("lot stock restored exactly once", await lotRemaining("pA", "lotA"), 10);
   stats = await live.getSessionStats(sid);
   check("canceled order adds nothing to active GMV", stats.revenue, 150);
-  check("canceled order adds nothing to cost/profit", [stats.costOfGoods, stats.estimatedGrossProfit], [stats.costOfGoods, null]);
+  // active orders: #2 (pB, cost 40, $70) and #3 (pC, NO cost basis, $80) → profit covers only #2
+  check("canceled order adds nothing to cost; profit covers the costed order only", [stats.costOfGoods, stats.estimatedGrossProfit, stats.ordersMissingCost], [40, 30, 1]);
+  check("margin is taken on the costed revenue (30/70)", stats.grossMargin, 30 / 70);
   check("units exclude the canceled order", stats.unitsSold, 2);
   check("entered 3 / active 2 / canceled 1", [stats.enteredOrders, stats.activeOrders, stats.canceledOrders], [3, 2, 1]);
   check("canceled filter lists only #1", (await ledger(sid, { status: "canceled" })).rows.map((r) => r.sale.liveOrderNumber), [1]);

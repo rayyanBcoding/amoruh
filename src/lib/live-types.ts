@@ -118,9 +118,10 @@ export interface LiveSessionStats {
   /** Orders currently counting toward revenue/units/cost/profit. */
   activeOrders?: number;
   canceledOrders?: number;
-  /** estimatedGrossProfit / revenue — null when profit is unknown or revenue is 0. */
+  /** estimatedGrossProfit / the revenue of the costed orders — null when profit is unknown. */
   grossMargin?: number | null;
-  /** Active orders with no cost basis; while > 0, estimatedGrossProfit is null. */
+  /** Sold orders with no cost basis; they're left out of costOfGoods and
+   *  estimatedGrossProfit, which then cover only the costed orders. */
   ordersMissingCost?: number;
 }
 

@@ -3,6 +3,7 @@ import { getProduct, getProducts, patchState } from "./db";
 import { getLotsWithRemaining, newId } from "./intake-db";
 import { claimActiveSession, REAL_ACTIVE_KEY } from "./live-mode-guard";
 import { computeWeightedAverageLandedCost } from "./intake-costing";
+import { computeSessionProfit } from "./session-profit";
 import {
   cancelSale as cancelSaleRecord,
   computeAverageAuction,
@@ -496,10 +497,9 @@ export async function getSessionStats(sessionId: string): Promise<LiveSessionSta
 
   const unitsSold = sold.reduce((sum, v) => sum + (v.sale?.quantity ?? 0), 0);
   const revenue = sold.reduce((sum, v) => sum + (v.sale?.price ?? 0), 0);
-  const hasCompleteCostData = sold.length > 0 && sold.every((v) => v.sale?.landedCostAtSale !== null);
-  const costOfGoods = hasCompleteCostData
-    ? sold.reduce((sum, v) => sum + (v.sale!.landedCostAtSale as number) * (v.sale!.quantity ?? 0), 0)
-    : 0;
+  const { costOfGoods, estimatedGrossProfit, ordersMissingCost, costedRevenue } = computeSessionProfit(
+    sold.map((v) => ({ price: v.sale?.price ?? 0, quantity: v.sale?.quantity, landedCostAtSale: v.sale?.landedCostAtSale }))
+  );
 
   const revenueByProduct = new Map<string, number>();
   for (const v of sold) {
@@ -520,7 +520,6 @@ export async function getSessionStats(sessionId: string): Promise<LiveSessionSta
   // Live Order Ledger counts: a canceled order stays "entered" but contributes
   // nothing to units/revenue/cost/profit (those only read `sold`).
   const canceledOrders = views.filter((v) => v.presentation.outcome === "sold" && v.sale?.status === "canceled").length;
-  const estimatedGrossProfit = hasCompleteCostData ? revenue - costOfGoods : null;
 
   return {
     sessionId,
@@ -533,8 +532,9 @@ export async function getSessionStats(sessionId: string): Promise<LiveSessionSta
     enteredOrders: sold.length + canceledOrders,
     activeOrders: sold.length,
     canceledOrders,
-    grossMargin: estimatedGrossProfit !== null && revenue > 0 ? estimatedGrossProfit / revenue : null,
-    ordersMissingCost: sold.filter((v) => v.sale?.landedCostAtSale === null).length,
+    // margin on the orders that have a cost, so uncosted revenue doesn't distort it
+    grossMargin: estimatedGrossProfit !== null && costedRevenue > 0 ? estimatedGrossProfit / costedRevenue : null,
+    ordersMissingCost,
     presentationSellThrough: completedPresentations > 0 ? sold.length / completedPresentations : null,
     noSaleCount,
     averageAuction: sold.length > 0 ? revenue / sold.length : null,
