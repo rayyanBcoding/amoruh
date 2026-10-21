@@ -6,7 +6,7 @@ import type { Product } from "@/lib/types";
 
 interface RecordSaleModalProps {
   product: Product;
-  onConfirm: (input: { quantity: number; winningBid: number }) => Promise<void>;
+  onConfirm: (input: { quantity: number; winningBid: number; allowOversell?: boolean }) => Promise<{ ok: boolean; error?: string; code?: string }>;
   onClose: () => void;
 }
 
@@ -19,13 +19,15 @@ export function RecordSaleModal({ product, onConfirm, onClose }: RecordSaleModal
   const [showQuantity, setShowQuantity] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // set when the system refused for lack of stock — offers an explicit "Sell anyway"
+  const [stockWarning, setStockWarning] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const submit = async () => {
+  const submit = async (allowOversell = false) => {
     const amount = Number(bid);
     if (!Number.isFinite(amount) || amount < 0) {
       setError("Enter a valid winning bid.");
@@ -37,8 +39,13 @@ export function RecordSaleModal({ product, onConfirm, onClose }: RecordSaleModal
     }
     setBusy(true);
     setError(null);
-    await onConfirm({ quantity, winningBid: amount });
+    setStockWarning(null);
+    const result = await onConfirm({ quantity, winningBid: amount, allowOversell });
     setBusy(false);
+    if (result && !result.ok) {
+      if (result.code === "insufficient_stock") setStockWarning(result.error ?? "The system shows no stock for this item.");
+      else setError(result.error ?? "Could not record this sale.");
+    }
   };
 
   return (
@@ -99,6 +106,18 @@ export function RecordSaleModal({ product, onConfirm, onClose }: RecordSaleModal
           )}
 
           {error && <p className="text-sm font-medium text-ld-red">{error}</p>}
+
+          {stockWarning && (
+            <div className="rounded-xl border border-ld-amber/60 bg-ld-amber/10 p-3">
+              <p className="text-sm font-semibold text-ld-white">{stockWarning}</p>
+              <p className="mt-1 text-xs text-ld-muted">
+                If you really have it in hand, sell anyway: the sale is recorded and flagged as having no stock record. Fix the stock count in Inventory afterwards.
+              </p>
+              <Button type="button" variant="cyan" size="md" className="mt-2" disabled={busy} onClick={() => void submit(true)}>
+                {busy ? "Recording…" : "Sell anyway"}
+              </Button>
+            </div>
+          )}
 
           <div className="flex gap-2 pt-1">
             <Button type="button" variant="ghost" size="lg" className="flex-1" onClick={onClose} disabled={busy}>

@@ -34,10 +34,13 @@ import type { LivePresentation } from "./live-types";
 
 export class SalesError extends Error {
   status: number;
-  constructor(message: string, status = 400) {
+  /** Machine-readable reason the UI can act on (e.g. offer "Sell anyway"). */
+  code?: string;
+  constructor(message: string, status = 400, code?: string) {
     super(message);
     this.name = "SalesError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -91,6 +94,9 @@ export interface SaleRecord {
    *  recent cancellation (the full history is the sale's audit list). */
   restoredAt?: string | null;
   restoredBy?: string | null;
+  /** Units of this sale the system had no stock record for when it was recorded
+   *  (the host explicitly chose "Sell anyway"). Null/absent for normal sales. */
+  oversoldQuantity?: number | null;
 }
 
 export type SaleAuditAction =
@@ -249,6 +255,7 @@ export function normalizeSaleRecord(raw: SaleRecord): SaleRecord {
     liveOrderNumber: raw.liveOrderNumber ?? null,
     restoredAt: raw.restoredAt ?? null,
     restoredBy: raw.restoredBy ?? null,
+    oversoldQuantity: raw.oversoldQuantity ?? null,
   };
 }
 
@@ -300,6 +307,33 @@ async function findLotsToConsume(
   const weightedLandedCost =
     totalQty > 0 ? plan.reduce((s, p) => s + p.qty * p.unitLandedCost, 0) / totalQty : null;
   return { plan, weightedLandedCost };
+}
+
+/** "Sell anyway": consume whatever the lots still hold (oldest first), up to
+ *  `quantity`, without refusing when stock is short. The units the system has
+ *  no record for are reported as oversold. Cost basis: the weighted cost of the
+ *  lots actually consumed; when no lot has stock left, the cost of the product's
+ *  most recent lot; null when it has no lot data at all (same as any such sale). */
+async function planConsumeUpTo(
+  productId: string,
+  quantity: number
+): Promise<{ plan: LotConsumptionPlan; weightedLandedCost: number | null; coveredFromLots: number }> {
+  const lots = await getLotsWithRemaining(productId); // oldest-first
+  let need = quantity;
+  const plan: LotConsumptionPlan = [];
+  for (const lot of lots) {
+    if (need <= 0) break;
+    if (lot.remaining <= 0) continue;
+    const take = Math.min(lot.remaining, need);
+    plan.push({ lotId: lot.id, poId: lot.poId, poLineId: lot.poLineId, qty: take, unitLandedCost: lot.cost.landed });
+    need -= take;
+  }
+  const covered = plan.reduce((sum, p) => sum + p.qty, 0);
+  if (covered > 0) {
+    return { plan, weightedLandedCost: plan.reduce((sum, p) => sum + p.qty * p.unitLandedCost, 0) / covered, coveredFromLots: covered };
+  }
+  const latest = lots.length > 0 ? lots[lots.length - 1] : null;
+  return { plan, weightedLandedCost: latest ? latest.cost.landed : null, coveredFromLots: 0 };
 }
 
 /** Legacy single-unit lookup, kept only for `markProductSold` below —
@@ -582,6 +616,9 @@ export interface RecordSaleInput {
   winningBid: number;
   operator: string;
   idempotencyKey: string;
+  /** Record the sale even though the system shows too little stock ("Sell
+   *  anyway"). Never set implicitly — the host must confirm it. */
+  allowOversell?: boolean;
 }
 
 export interface RecordSaleResult {
@@ -627,12 +664,25 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
 
     const expectedVersion = String((await redis.get<number>(CoreKeys.productVersion(product.id))) ?? 0);
 
-    const lotPlan = await findLotsToConsume(product.id, input.quantity);
-    if (lotPlan === "insufficient") {
-      throw new SalesError(`Not enough stock to sell ${input.quantity} — check Inventory for the current count.`);
-    }
-    if (lotPlan.plan.length === 0 && product.inventory < input.quantity) {
-      throw new SalesError(`Only ${product.inventory} unit(s) in stock — cannot sell ${input.quantity}.`);
+    const found = await findLotsToConsume(product.id, input.quantity);
+    let lotPlan: { plan: LotConsumptionPlan; weightedLandedCost: number | null };
+    let oversoldQuantity = 0;
+    if (found === "insufficient" || (found.plan.length === 0 && product.inventory < input.quantity)) {
+      if (!input.allowOversell) {
+        throw new SalesError(
+          `The system shows ${product.inventory} in stock for ${product.brand} ${product.name}, so it can't record ${input.quantity}.`,
+          409,
+          "insufficient_stock"
+        );
+      }
+      // Host confirmed "Sell anyway": take what the lots still hold, the rest has no stock record.
+      const partial = await planConsumeUpTo(product.id, input.quantity);
+      const hasLots = partial.plan.length > 0 || partial.weightedLandedCost !== null;
+      const covered = hasLots ? partial.coveredFromLots : Math.min(Math.max(product.inventory, 0), input.quantity);
+      oversoldQuantity = input.quantity - covered;
+      lotPlan = { plan: partial.plan, weightedLandedCost: partial.weightedLandedCost };
+    } else {
+      lotPlan = found;
     }
 
     const nextInventory = Math.max(0, product.inventory - input.quantity);
@@ -684,6 +734,7 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
       liveOrderNumber: null, // replaced atomically inside RECORD_LIVE_SALE_SCRIPT
       restoredAt: null,
       restoredBy: null,
+      oversoldQuantity: oversoldQuantity > 0 ? oversoldQuantity : null,
     };
 
     const presentation: LivePresentation = {
@@ -736,6 +787,7 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
         quantity: input.quantity,
         price: input.winningBid,
         landedCostAtSale: lotPlan.weightedLandedCost,
+        ...(oversoldQuantity > 0 ? { oversoldQuantity } : {}),
       },
     };
     const args = [
@@ -1031,6 +1083,11 @@ export async function editSale(input: EditSaleInput): Promise<SaleRecord> {
     const quantityChanged = quantity !== sale.quantity;
     const productChanged = productId !== sale.productId;
     if (!priceChanged && !quantityChanged && !productChanged) return sale; // nothing to change
+    if ((quantityChanged || productChanged) && (sale.oversoldQuantity ?? 0) > 0) {
+      throw new SalesError(
+        "This order was sold beyond the recorded stock, so only its price can be edited. Cancel it and enter a new sale to change the quantity or product."
+      );
+    }
 
     const products = await getProducts();
     const oldIdx = products.findIndex((p) => p.id === sale.productId);
@@ -1275,10 +1332,11 @@ export async function restoreSale(input: RestoreSaleInput): Promise<SaleRecord> 
     const product = products[productIdx];
     const expectedVersion = String((await redis.get<number>(CoreKeys.productVersion(product.id))) ?? 0);
 
-    const plan = await findLotsToConsume(product.id, sale.quantity);
-    if (plan === "insufficient" || (plan.plan.length === 0 && product.inventory < sale.quantity)) {
+    const trackedUnits = Math.max(0, sale.quantity - (sale.oversoldQuantity ?? 0));
+    const plan = trackedUnits > 0 ? await findLotsToConsume(product.id, trackedUnits) : { plan: [] as LotConsumptionPlan, weightedLandedCost: null };
+    if (plan === "insufficient" || (trackedUnits > 0 && plan.plan.length === 0 && product.inventory < trackedUnits)) {
       throw new SalesError(
-        `Not enough stock to restore this order — it needs ${sale.quantity} unit(s) of ${product.brand} ${product.name}.`,
+        `Not enough stock to restore this order — it needs ${trackedUnits} unit(s) of ${product.brand} ${product.name}.`,
         409
       );
     }
@@ -1300,7 +1358,7 @@ export async function restoreSale(input: RestoreSaleInput): Promise<SaleRecord> 
       timestamp,
     }));
     const updatedProducts = [...products];
-    updatedProducts[productIdx] = { ...product, inventory: Math.max(0, product.inventory - sale.quantity) };
+    updatedProducts[productIdx] = { ...product, inventory: Math.max(0, product.inventory - trackedUnits) };
 
     const updatedSale: SaleRecord = {
       ...sale,
@@ -1466,8 +1524,10 @@ export async function cancelSale(input: CancelSaleInput): Promise<SaleRecord> {
         timestamp,
       }));
 
+    // units the system never had on record (a "Sell anyway" sale) have nothing to give back
+    const trackedUnits = Math.max(0, sale.quantity - (sale.oversoldQuantity ?? 0));
     const updatedProducts = [...products];
-    updatedProducts[productIdx] = { ...product, inventory: product.inventory + sale.quantity };
+    updatedProducts[productIdx] = { ...product, inventory: product.inventory + trackedUnits };
 
     const updatedSale: SaleRecord = {
       ...sale,

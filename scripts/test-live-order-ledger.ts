@@ -207,9 +207,9 @@ async function main() {
   const s4 = await freshLive("Failure Live");
   const f1 = await record(s4, "pD", 10);
   check("first sale #1", f1.liveOrderNumber, 1);
-  let failedMsg = "";
-  try { await record(s4, "pD", 10, 5); } catch (e) { failedMsg = (e as Error).message; }
-  ok("selling more than the stock is refused", /Not enough stock/.test(failedMsg));
+  let failedCode = "";
+  try { await record(s4, "pD", 10, 5); } catch (e) { failedCode = (e as { code?: string }).code ?? ""; }
+  check("selling more than the stock is refused (insufficient_stock)", failedCode, "insufficient_stock");
   const f2 = await record(s4, "pD", 10);
   check("a failed sale did not consume a number: next is #2", f2.liveOrderNumber, 2);
 
@@ -313,6 +313,56 @@ async function main() {
   check("reading never writes a number", (await fake.get<any>("amoruh:sales:sale_legacy")).liveOrderNumber, undefined);
   const newer = await record(s7, "pB", 20);
   check("a new sale after the ledger shipped always gets a number", newer.liveOrderNumber, 1);
+
+  // =====================================================================
+  section("F. Out-of-stock: refusal, then an explicit 'Sell anyway'");
+  const s8 = await freshLive("Oversell Live");
+  const rec = (p: string, bid: number, qty = 1, allowOversell?: boolean) =>
+    sales.recordSale({ liveSessionId: s8, productId: p, quantity: qty, winningBid: bid, operator: op, idempotencyKey: uid("ov"), allowOversell });
+  const first = await rec("pA", 30);
+  check("a normal in-stock sale is #1 and not flagged oversold", [first.liveOrderNumber, (await sales.getSaleRecordById(first.saleId))?.oversoldQuantity], [1, null]);
+
+  // pD has 2 units in its only lot
+  let refusal: any = null;
+  try { await rec("pD", 100, 3); } catch (e) { refusal = e; }
+  check("selling more than the system has is refused with a machine-readable code", [refusal?.code, refusal?.status], ["insufficient_stock", 409]);
+  ok("the refusal names the product and the system's count", /shows 2 in stock/.test(refusal?.message ?? ""));
+  check("a refused sale changes nothing and burns no number", [await inventoryOf("pD"), await lotRemaining("pD", "lotD"), await fake.get(`amoruh:live:session_order_seq:${s8}`)], [2, 2, 1]);
+
+  const over = await rec("pD", 100, 3, true);
+  const overSale = await sales.getSaleRecordById(over.saleId);
+  check("'Sell anyway' records it with the next order number", over.liveOrderNumber, 2);
+  check("...flags 1 unit as having no stock record", overSale?.oversoldQuantity, 1);
+  check("...consumes the 2 units the lot had and clamps inventory at 0", [await inventoryOf("pD"), await lotRemaining("pD", "lotD")], [0, 0]);
+  check("...cost basis is the lot's weighted cost", overSale?.landedCostAtSale, 50);
+  check("...audit 'created' event records the oversold quantity", (await sales.getSaleAudit(over.saleId))[0].after, { productId: "pD", quantity: 3, price: 100, landedCostAtSale: 50, oversoldQuantity: 1 });
+
+  // sell the last unit of pA normally, then oversell it
+  await sales.cancelSale({ saleId: first.saleId, operator: op, idempotencyKey: uid("c") });
+  await fake.set(Core.products, ((await fake.get<any[]>(Core.products)) as any[]).map((p) => (p.id === "pA" ? { ...p, inventory: 0 } : p)));
+  await fake.set(Intake.inventoryTransactions, [...((await fake.get<any[]>(Intake.inventoryTransactions)) as any[]), { id: "txn_drain", productId: "pA", poId: "po_pA", poLineId: "pol_pA", lotId: "lotA", quantityDelta: -10, reason: "sale", receivingEventId: null, saleId: "sale_drain", operator: "x", timestamp: "2026-10-02T00:00:00.000Z" }]);
+  const empty = await rec("pA", 45, 1, true);
+  const emptySale = await sales.getSaleRecordById(empty.saleId);
+  check("selling a product whose lots are all used up: recorded, fully oversold", [emptySale?.oversoldQuantity, await inventoryOf("pA")], [1, 0]);
+  check("...cost falls back to the latest lot's cost (30), lot stock never goes negative", [emptySale?.landedCostAtSale, await lotRemaining("pA", "lotA")], [30, -10 + 10 - 0]);
+
+  // a product with no lot data at all (legacy): no cost basis, same as any such sale
+  await fake.set(Core.products, ((await fake.get<any[]>(Core.products)) as any[]).map((p) => (p.id === "pC" ? { ...p, inventory: 0 } : p)));
+  const legacyOver = await rec("pC", 20, 1, true);
+  const legacySale = await sales.getSaleRecordById(legacyOver.saleId);
+  check("a no-lot product at 0: recorded with no cost basis and flagged", [legacySale?.landedCostAtSale, legacySale?.oversoldQuantity], [null, 1]);
+
+  // cancel / restore only move the units the system actually tracked
+  const invBefore = await inventoryOf("pD");
+  await sales.cancelSale({ saleId: over.saleId, operator: op, idempotencyKey: uid("c") });
+  check("canceling an oversold sale returns only the tracked units (2 of 3)", [await inventoryOf("pD"), await lotRemaining("pD", "lotD")], [invBefore + 2, 2]);
+  await sales.restoreSale({ saleId: over.saleId, operator: op, idempotencyKey: uid("r") });
+  check("restoring it takes only the tracked units again", [await inventoryOf("pD"), await lotRemaining("pD", "lotD")], [invBefore, 0]);
+  let editMsg = "";
+  try { await sales.editSale({ saleId: over.saleId, newQuantity: 1, operator: op, idempotencyKey: uid("e") }); } catch (e) { editMsg = (e as Error).message; }
+  ok("quantity/product edits on an oversold sale are refused (price edits allowed)", /only its price can be edited/.test(editMsg));
+  const priceEdit = await sales.editSale({ saleId: over.saleId, newPrice: 120, operator: op, idempotencyKey: uid("e") });
+  check("...a price edit still works", priceEdit.price, 120);
 
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);

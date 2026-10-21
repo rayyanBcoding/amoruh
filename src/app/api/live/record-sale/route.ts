@@ -17,6 +17,7 @@ export async function POST(req: Request) {
     winningBid?: number;
     operator?: string;
     idempotencyKey?: string;
+    allowOversell?: boolean;
   };
   try {
     body = await req.json();
@@ -47,6 +48,7 @@ export async function POST(req: Request) {
       winningBid: body.winningBid,
       operator: body.operator || "Live Show",
       idempotencyKey: body.idempotencyKey,
+      allowOversell: body.allowOversell === true,
     });
 
     broadcastStateChanged("live-record-sale");
@@ -54,7 +56,7 @@ export async function POST(req: Request) {
   } catch (err) {
     const status = err instanceof SalesError ? err.status : 500;
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Could not record sale." },
+      { error: err instanceof Error ? err.message : "Could not record sale.", code: err instanceof SalesError ? err.code : undefined },
       { status }
     );
   }
