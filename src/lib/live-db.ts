@@ -254,6 +254,7 @@ export interface GoLiveRecordSaleInput {
   winningBid: number;
   operator: string;
   idempotencyKey: string;
+  allowOversell?: boolean;
 }
 
 export async function goLiveRecordSale(input: GoLiveRecordSaleInput) {
@@ -264,6 +265,7 @@ export async function goLiveRecordSale(input: GoLiveRecordSaleInput) {
     winningBid: input.winningBid,
     operator: input.operator,
     idempotencyKey: input.idempotencyKey,
+    allowOversell: input.allowOversell,
   });
 }
 

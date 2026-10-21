@@ -61,6 +61,8 @@ interface ActionResult {
   notFound?: boolean;
   /** Set by recordSale in real mode: the per-session LIVE Order # just assigned. */
   liveOrderNumber?: number | null;
+  /** Machine-readable failure reason, e.g. "insufficient_stock". */
+  code?: string;
 }
 
 export interface EndSessionResult extends ActionResult {
@@ -87,7 +89,7 @@ interface LiveSessionContextValue {
   removeFromQueue: (productId: string) => Promise<ActionResult>;
   reorderQueue: (queueIds: string[]) => Promise<ActionResult>;
   nextItem: () => Promise<ActionResult>;
-  recordSale: (input: { productId: string; quantity: number; winningBid: number; operator?: string }) => Promise<ActionResult>;
+  recordSale: (input: { productId: string; quantity: number; winningBid: number; operator?: string; allowOversell?: boolean }) => Promise<ActionResult>;
   noSale: (productId: string, operator?: string) => Promise<ActionResult>;
   cancelSale: (saleId: string, operator?: string) => Promise<ActionResult>;
   correctSale: (saleId: string, newPrice: number, operator?: string) => Promise<ActionResult>;
@@ -116,7 +118,10 @@ function apiPath(mode: LiveMode, suffix: string): string {
   return mode === "test" ? `/api/live/test${suffix}` : `/api/live${suffix}`;
 }
 
-async function postJson(url: string, body?: unknown): Promise<{ ok: boolean; data: unknown; error?: string; notFound?: boolean }> {
+async function postJson(
+  url: string,
+  body?: unknown
+): Promise<{ ok: boolean; data: unknown; error?: string; notFound?: boolean; code?: string }> {
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -125,7 +130,13 @@ async function postJson(url: string, body?: unknown): Promise<{ ok: boolean; dat
     });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return { ok: false, data: null, error: payload?.error ?? `Request failed (${res.status})`, notFound: Boolean(payload?.notFound) };
+      return {
+        ok: false,
+        data: null,
+        error: payload?.error ?? `Request failed (${res.status})`,
+        notFound: Boolean(payload?.notFound),
+        code: typeof payload?.code === "string" ? payload.code : undefined,
+      };
     }
     return { ok: true, data: payload };
   } catch {
@@ -248,12 +259,12 @@ export function LiveSessionProvider({ mode = "real", children }: { mode?: LiveMo
   );
 
   const recordSale = useCallback(
-    (input: { productId: string; quantity: number; winningBid: number; operator?: string }) =>
+    (input: { productId: string; quantity: number; winningBid: number; operator?: string; allowOversell?: boolean }) =>
       runAction(async () => {
-        const { ok, error, data: body } = await postJson(apiPath(mode, "/record-sale"), { ...input, idempotencyKey: newIdempotencyKey() });
+        const { ok, error, code, data: body } = await postJson(apiPath(mode, "/record-sale"), { ...input, idempotencyKey: newIdempotencyKey() });
         const liveOrderNumber = (body as { liveOrderNumber?: number | null } | null)?.liveOrderNumber ?? null;
         if (ok && typeof liveOrderNumber === "number") setLastRecordedOrder({ number: liveOrderNumber, at: Date.now() });
-        return { ok, error, liveOrderNumber };
+        return { ok, error, code, liveOrderNumber };
       }),
     [runAction, mode]
   );

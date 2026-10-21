@@ -218,9 +218,13 @@ export function CurrentProductPanel({
         <RecordSaleModal
           product={product}
           onClose={() => setShowRecordSale(false)}
-          onConfirm={async ({ quantity, winningBid }) => {
-            await run("sale", () => recordSale({ productId: product.id, quantity, winningBid }));
-            setShowRecordSale(false);
+          onConfirm={async ({ quantity, winningBid, allowOversell }) => {
+            setBusy("sale");
+            const result = await recordSale({ productId: product.id, quantity, winningBid, allowOversell });
+            setBusy(null);
+            // keep the modal open on a refusal so the host sees WHY and can choose "Sell anyway"
+            if (result.ok) setShowRecordSale(false);
+            return result;
           }}
         />
       )}
