@@ -326,7 +326,7 @@ async function main() {
   let refusal: any = null;
   try { await rec("pD", 100, 3); } catch (e) { refusal = e; }
   check("selling more than the system has is refused with a machine-readable code", [refusal?.code, refusal?.status], ["insufficient_stock", 409]);
-  ok("the refusal names the product and the system's count", /shows 2 in stock/.test(refusal?.message ?? ""));
+  ok("the refusal names the product and the system's count", /Inventory shows 2 of/.test(refusal?.message ?? ""));
   check("a refused sale changes nothing and burns no number", [await inventoryOf("pD"), await lotRemaining("pD", "lotD"), await fake.get(`amoruh:live:session_order_seq:${s8}`)], [2, 2, 1]);
 
   const over = await rec("pD", 100, 3, true);
