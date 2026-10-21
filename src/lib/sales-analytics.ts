@@ -667,10 +667,19 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
     const found = await findLotsToConsume(product.id, input.quantity);
     let lotPlan: { plan: LotConsumptionPlan; weightedLandedCost: number | null };
     let oversoldQuantity = 0;
-    if (found === "insufficient" || (found.plan.length === 0 && product.inventory < input.quantity)) {
+    const lotsShort = found === "insufficient" || (found.plan.length === 0 && product.inventory < input.quantity);
+    if (found !== "insufficient" && !lotsShort) {
+      lotPlan = found;
+    } else if (product.inventory >= input.quantity) {
+      // The received-lot ledger has run out but the product's own inventory count (the number shown on
+      // screen) still has the units — the two had drifted apart. The count the host can see wins: record
+      // the sale, consume whatever the lots still hold for the cost basis, and let inventory move as usual.
+      const partial = await planConsumeUpTo(product.id, input.quantity);
+      lotPlan = { plan: partial.plan, weightedLandedCost: partial.weightedLandedCost };
+    } else {
       if (!input.allowOversell) {
         throw new SalesError(
-          `The system shows ${product.inventory} in stock for ${product.brand} ${product.name}, so it can't record ${input.quantity}.`,
+          `Inventory shows ${product.inventory} of ${product.brand} ${product.name}, so it can't record ${input.quantity}.`,
           409,
           "insufficient_stock"
         );
@@ -681,8 +690,6 @@ export async function recordSale(input: RecordSaleInput): Promise<RecordSaleResu
       const covered = hasLots ? partial.coveredFromLots : Math.min(Math.max(product.inventory, 0), input.quantity);
       oversoldQuantity = input.quantity - covered;
       lotPlan = { plan: partial.plan, weightedLandedCost: partial.weightedLandedCost };
-    } else {
-      lotPlan = found;
     }
 
     const nextInventory = Math.max(0, product.inventory - input.quantity);
