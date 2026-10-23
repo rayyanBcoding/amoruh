@@ -9,12 +9,14 @@ const prod = (id: string, brand: string, name: string, size: string, inventory: 
   marketPrice: 90, lootPrice: 80, minPrice: 40, topNotes: [], middleNotes: [], baseNotes: [], projection: "", longevity: "", description: "",
   condition: "New", shelf: "A1", inventory, authentic: true, tiktokListing: "", status: "active",
 });
-const catalog = [
-  prod("p_ysl", "YSL", "Y EDP", "100ml", 12, "3614272050036"),
-  prod("p_dior", "Dior", "Sauvage", "100ml", 8, "3348901250153"),
-  prod("p_creed", "Creed", "Aventus", "100ml", 5, "3760265190164"),
-  prod("p_legacy", "Legacy", "No-Cost Test", "50ml", 6, "9990000000001"),
+const NAMES: [string, string, string, number, number][] = [
+  // brand, name, size, unit cost, stock
+  ["Dolce & Gabbana", "Light Blue", "3.3oz", 29, 0], ["Armaf", "Club De Nuit Intense", "3.6oz", 21, 1], ["Lattafa", "Qaed Al Fursan", "90ml", 13, 3],
+  ["Lattafa", "Yara Moi", "100ml", 18, 7], ["Rasasi", "Hawas Ice", "3.38oz", 27, 0], ["Afnan", "9 PM", "3.4oz", 23, 0],
+  ["Paco Rabanne", "1 Million (tester)", "3.4oz", 44, 0], ["Burberry", "Touch", "3.3oz", 22, 2], ["Creed", "Wind Flowers", "30ml", 70, 4],
+  ["Parfums de Marly", "Layton Exclusif", "125ml", 185, 2], ["Calvin Klein", "CK IN2U", "50ml", 17, 16], ["Mont Blanc", "Legend Red (Tester)", "3.4oz", 0, 0],
 ];
+const catalog = NAMES.map(([brand, name, size, , stock], i) => prod(`p_${i}`, brand, name, size, stock, `99900000${String(i).padStart(2, "0")}`));
 const lot = (id: string, productId: string, unitCost: number, qty: number) => ({
   id, poId: `po_${productId}`, poNumber: "1", poLineId: `pol_${productId}`, productId, supplierId: "s", supplierName: "S",
   unitCost, receivedQuantity: qty, receivedDate: "2026-10-01T00:00:00.000Z", invoiceDate: "2026-10-01",
@@ -25,10 +27,17 @@ const recv = (lotId: string, productId: string, qty: number) => ({
 });
 (async () => {
   await fake.set("amoruh:products", catalog);
-  await fake.set("amoruh:intake:lots:p_ysl", [lot("lot_ysl", "p_ysl", 44, 12)]);
-  await fake.set("amoruh:intake:lots:p_dior", [lot("lot_dior", "p_dior", 60, 8)]);
-  await fake.set("amoruh:intake:lots:p_creed", [lot("lot_creed", "p_creed", 150, 5)]);
-  await fake.set("amoruh:intake:inventory_transactions", [recv("lot_ysl", "p_ysl", 12), recv("lot_dior", "p_dior", 8), recv("lot_creed", "p_creed", 5)]);
-  await fake.set("amoruh:intake:pos", ["p_ysl", "p_dior", "p_creed"].map((p) => ({ id: `po_${p}`, shippingCost: 0, totalExpectedQty: 10 })));
+  const lotWrites: Promise<unknown>[] = [];
+  const txns: unknown[] = [];
+  const pos: unknown[] = [];
+  NAMES.forEach(([, , , cost], i) => {
+    if (cost === 0) return; // legacy product with no lot data (cost unknown)
+    txns.push(recv(`lot_${i}`, `p_${i}`, 400));
+    pos.push({ id: `po_p_${i}`, shippingCost: 0, totalExpectedQty: 400 });
+    lotWrites.push(fake.set(`amoruh:intake:lots:p_${i}`, [lot(`lot_${i}`, `p_${i}`, cost, 400)]));
+  });
+  await Promise.all(lotWrites);
+  await fake.set("amoruh:intake:inventory_transactions", txns);
+  await fake.set("amoruh:intake:pos", pos);
   console.log("[dev-preload] FakeRedis installed — hermetic, no production Redis in use");
 })();

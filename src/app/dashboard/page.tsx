@@ -7,14 +7,9 @@ import type { DashboardApiResponse } from "@/app/api/dashboard/route";
 import { InventorySummaryCards, LivePerformanceSummaryCards, PurchasingSummaryCards } from "@/components/dashboard/SummaryCards";
 import { LastLivePanel } from "@/components/dashboard/LastLivePanel";
 import { LivePerformanceOverTime } from "@/components/dashboard/LivePerformanceOverTime";
-import {
-  HighestSellThroughTable,
-  MostProfitableTable,
-  ProductsToWatchTable,
-  TopSellersTable,
-} from "@/components/dashboard/TopProductsSection";
+import { MostProfitableTable, TopSellersTable } from "@/components/dashboard/TopProductsSection";
 import { InventoryAttention } from "@/components/dashboard/InventoryAttention";
-import { ReorderIntelligence } from "@/components/dashboard/ReorderIntelligence";
+import { ReorderIntelligencePanel } from "@/components/dashboard/ReorderIntelligencePanel";
 import { RecentActivityFeed } from "@/components/dashboard/RecentActivityFeed";
 
 // The analytics command center — everything here is read-only, derived
@@ -82,16 +77,16 @@ export default function DashboardPage() {
 
             <LivePerformanceOverTime timeframe={timeframe} onTimeframeChange={setTimeframe} sessions={data.sessionsInRange} />
 
+            {/* What to reorder next — replaces the old Sell-Through based ranking. */}
+            <ReorderIntelligencePanel />
+
             <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
               <TopSellersTable rows={data.topSellers} />
-              <HighestSellThroughTable rows={data.highestSellThrough} />
               <MostProfitableTable rows={data.mostProfitable} />
-              <ProductsToWatchTable rows={data.productsToWatch} />
             </div>
 
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
               <InventoryAttention rows={data.lowStockItems} />
-              <ReorderIntelligence rows={data.reorderCandidates} />
               <RecentActivityFeed items={data.recentActivity} />
             </div>
           </>

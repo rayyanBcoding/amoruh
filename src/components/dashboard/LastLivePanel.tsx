@@ -79,7 +79,6 @@ export function LastLivePanel({
               <Stat label="Revenue" value={formatCurrency(stats.revenue)} />
               <Stat label="Cost" value={formatCurrency(stats.costOfGoods)} />
               <Stat label="Est. Gross Profit" value={stats.estimatedGrossProfit != null ? formatCurrency(stats.estimatedGrossProfit) : "—"} />
-              <Stat label="Sell-Through" value={stats.presentationSellThrough != null ? `${Math.round(stats.presentationSellThrough * 100)}%` : "—"} />
               <Stat label="Top Product" value={topProduct ? `${topProduct.brand} ${topProduct.name}` : "—"} />
             </div>
           </>

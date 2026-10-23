@@ -71,11 +71,10 @@ export function LivePerformanceSummaryCards({ stats }: { stats: LiveSessionStats
   return (
     <div>
       <GroupLabel>Live Performance (Last Live)</GroupLabel>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card label="Revenue" value={stats ? formatCurrency(stats.revenue) : "—"} accent="text-ld-green" />
         <Card label="Units Sold" value={stats ? stats.unitsSold : "—"} />
         <Card label="Gross Profit" value={stats?.estimatedGrossProfit != null ? formatCurrency(stats.estimatedGrossProfit) : "—"} />
-        <Card label="Sell-Through" value={stats?.presentationSellThrough != null ? `${Math.round(stats.presentationSellThrough * 100)}%` : "—"} />
         <Card label="No Sales" value={stats ? stats.noSaleCount : "—"} />
       </div>
     </div>
