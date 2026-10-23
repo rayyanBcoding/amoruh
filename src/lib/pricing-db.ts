@@ -1176,7 +1176,7 @@ async function countUnresolvedOffersMatchingIdentity(target: MasterCandidate, ta
  *  shown only for context — see pricing-matching.ts's plan §4. */
 /** The comparison rows for one real Product — every linked supplier offer, with USD conversion and
  *  freshness — shared by the full comparison view and the light best-price lookup below. */
-async function buildProductOfferRows(productId: string): Promise<{ rows: OfferComparisonRow[]; product: Product | null }> {
+export async function buildProductOfferRows(productId: string): Promise<{ rows: OfferComparisonRow[]; product: Product | null }> {
   const refs = await getOffersByProduct(productId);
   const [suppliers, offers, product] = await Promise.all([
     getSuppliers(),
