@@ -57,6 +57,10 @@ export const REORDER = {
   capAtUnitsSoldInWindow: true,
 } as const;
 
+/** Forward-looking purchasing guidance (never touches historical numbers or the score).
+ *  max buy cost = historical average selling price × (1 − targetGrossMargin). */
+export const TARGET_GROSS_MARGIN = 0.15;
+
 /** Summary-card list sizes. */
 export const TOP_CANDIDATES_COUNT = 5;
 

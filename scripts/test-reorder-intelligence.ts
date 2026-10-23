@@ -247,6 +247,70 @@ async function main() {
   check("drill-down units sum to the product's units", dd.reduce((s, x) => s + x.units, 0), (await perf()).a!.units);
   check("drill-down is newest LIVE first", dd.map((x) => x.sessionName)[0], "LIVE Three");
 
+  // ---------------------------------------------------------------------
+  section("C. Forward-looking guidance for High Demand / Losing Money (never rewrites history)");
+  const { maxBuyCostFor, forwardLookingFor, applySupplierCosts } = intel;
+  check("target gross margin is configurable and starts at 15%", cfg.TARGET_GROSS_MARGIN, 0.15);
+  check("max buy cost = historical avg sale × (1 − target margin)", maxBuyCostFor(26.2), 22.27);
+  check("…and follows a different target margin", maxBuyCostFor(100, 0.3), 70);
+
+  // a Hawas-Ice-like product: sells a lot at ~$26, historically loses money at a ~$27 cost
+  const hawas = [1, 2, 3, 4, 5, 6, 7, 8].flatMap((n) => [sale(n, "HW", 26, 27), sale(n, "HW", 26, 27)]); // 16 units, −$1 each
+  const peersC = ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6"].map((id) => sale(1, id, 20, 10));
+  const idsC = ["HW", "Q1", "Q2", "Q3", "Q4", "Q5", "Q6"];
+  const baseC = run([...hawas, ...peersC], idsC);
+  const HW = rowOf(baseC, "HW");
+  check("historically: High Demand / Losing Money, no forward block yet", [HW.bucket, HW.forward], ["High Demand / Losing Money", null]);
+  check("every row already carries the transparent max buy cost", HW.maxBuyCost, 22.1);
+
+  const withCost = (cost: number | null, name: string | null = "Acme") => applySupplierCosts(baseC, new Map([["HW", { costUsd: cost, supplierName: name }]]));
+  const good = rowOf(withCost(18), "HW");
+  check("a supplier cost that makes it profitable → 'Buy Only at the Right Cost'", good.bucket, "High Demand — Buy Only at the Right Cost");
+  check("projected profit/unit and margin at the supplier cost (avg sale 26)", [good.forward?.projectedProfitPerUnit, Math.round((good.forward?.projectedMargin ?? 0) * 1000) / 1000], [8, 0.308]);
+  check("…meets the 15% target and shows the max buy cost", [good.forward?.meetsTargetMargin, good.forward?.maxBuyCost, good.forward?.status], [true, 22.1, "buy_only_at_right_cost"]);
+  ok("…with a conditional reorder suggestion tied to the max buy cost", good.suggestedQty > 0 && /≤ \$22\.10/.test(good.suggestedReason));
+  const thin = rowOf(withCost(24), "HW");
+  check("profitable but above the max buy cost: still Buy-Only, flagged below target", [thin.bucket, thin.forward?.meetsTargetMargin], ["High Demand — Buy Only at the Right Cost", false]);
+  const pricey = rowOf(withCost(30), "HW");
+  check("a supplier cost above the selling price keeps it Losing Money", [pricey.bucket, pricey.forward?.status, pricey.suggestedQty], ["High Demand / Losing Money", "still_too_expensive", 0]);
+  const none = rowOf(withCost(null), "HW");
+  check("no actionable offer: stays Losing Money — 'wait for a better supplier cost'", [none.bucket, none.forward?.status, none.suggestedQty], ["High Demand / Losing Money", "no_offer", 0]);
+  ok("…and says so in plain words", /wait for a better supplier cost/.test(none.forward?.message ?? ""));
+
+  // history and score are byte-identical whatever the supplier says
+  const HIST = (r: typeof HW) => ({ units: r.units, gmv: r.gmv, cost: r.cost, profit: r.profit, ppu: r.profitPerUnit, margin: r.margin, avg: r.avgSellingPrice, avgCost: r.avgUnitCost, score: r.score, breakdown: r.breakdown, lives: [r.livesSold, r.applicableLives], consistency: r.consistency });
+  for (const [label, r] of [["profitable", good], ["thin", thin], ["too expensive", pricey], ["no offer", none]] as const) {
+    check(`historical numbers + Reorder Score are unchanged (${label})`, HIST(r), HIST(HW));
+  }
+  check("the summary totals are unchanged by supplier guidance", [withCost(18).summary.totalProfit, withCost(18).summary.totalGmv], [baseC.summary.totalProfit, baseC.summary.totalGmv]);
+  ok("a Buy-Only product is still never a Top Reorder Candidate", !withCost(18).summary.topCandidates.some((r) => r.productId === "HW"));
+  check("forward projection helper agrees with the row (avg sale 26, cost 18)", forwardLookingFor({ avgSellingPrice: 26 }, 18, "Acme").projectedProfitPerUnit, 8);
+
+  // end to end with the real sale code + an injected Pricing lookup
+  await live.endLiveSession(live3);
+  const fwdSessions: string[] = [];
+  for (const nm of ["Forward 1", "Forward 2", "Forward 3"]) {
+    await new Promise((r) => setTimeout(r, 5));
+    const id = (await live.startLiveSession(nm, op)).id;
+    fwdSessions.push(id);
+    await fake.set(Core.products, [...((await fake.get<any[]>(Core.products)) ?? []).filter((p) => p.id !== "pX"), product("pX", "Xeno", 50, 99)]);
+    if (nm === "Forward 1") {
+      await fake.set(Intake.lots("pX"), [lot("lotX", "pX", 27, 50)]);
+      await fake.set(Intake.inventoryTransactions, [...((await fake.get<any[]>(Intake.inventoryTransactions)) ?? []), recv("lotX", "pX", 50)]);
+      await fake.set(Intake.pos, [...((await fake.get<any[]>(Intake.pos)) ?? []), { id: "po_pX", shippingCost: 0, totalExpectedQty: 50 }]);
+    }
+    await rec(id, "pX", 26);
+    await rec(id, "pX", 26);
+    await live.endLiveSession(id);
+  }
+  const rowX = async (lookup: any) => (await getReorderIntelligence("all", lookup)).rows.find((r) => r.productId === "pX")!;
+  const beforeLookup = await rowX(async () => ({ costUsd: null, supplierName: null }));
+  const afterLookup = await rowX(async () => ({ costUsd: 19, supplierName: "Acme" }));
+  check("real sale history: 6 units, −$6, Losing Money before any supplier offer", [beforeLookup.units, beforeLookup.profit, beforeLookup.bucket], [6, -6, "High Demand / Losing Money"]);
+  check("an offer at $19 makes it 'Buy Only at the Right Cost' with the projected numbers", [afterLookup.bucket, afterLookup.forward?.projectedProfitPerUnit, afterLookup.forward?.maxBuyCost], ["High Demand — Buy Only at the Right Cost", 7, 22.1]);
+  check("…but only the forward-looking fields moved: history and score are identical", [afterLookup.profit, afterLookup.avgUnitCost, afterLookup.gmv, afterLookup.score], [beforeLookup.profit, beforeLookup.avgUnitCost, beforeLookup.gmv, beforeLookup.score]);
+  check("…and the cost snapshots on the sale records are untouched", (await loadLiveHistory()).sales.filter((x) => x.productId === "pX").map((x) => x.landedCostAtSale), [27, 27, 27, 27, 27, 27]);
+
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);
 }

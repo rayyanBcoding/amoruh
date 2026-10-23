@@ -27,6 +27,7 @@ import {
   MIN_UNITS_FOR_CONFIDENCE,
   REORDER,
   SCORE_WEIGHTS,
+  TARGET_GROSS_MARGIN,
   type WindowKey,
 } from "./reorder-config";
 
@@ -65,6 +66,7 @@ export type Bucket =
   | "Hot + Profitable"
   | "High Demand / Thin Margin"
   | "High Demand / Losing Money"
+  | "High Demand — Buy Only at the Right Cost"
   | "High Profit / Lower Frequency"
   | "Steady Seller"
   | "Weak Performer"
@@ -85,6 +87,27 @@ export interface ScoreBreakdown {
   capped: boolean;
 }
 
+/** Forward-looking purchasing guidance, computed ONLY from a current actionable
+ *  supplier offer and the HISTORICAL average selling price. It is shown next to —
+ *  and never written into — the historical cost/profit, and it does not feed the
+ *  Reorder Score. */
+export interface ForwardLooking {
+  currentBestSupplierCost: number | null;
+  supplierName: string | null;
+  /** historical average selling price the projection is based on */
+  historicalAvgSellingPrice: number;
+  projectedProfitPerUnit: number | null;
+  projectedMargin: number | null;
+  targetMargin: number;
+  /** historical average selling price × (1 − target margin) */
+  maxBuyCost: number;
+  /** projected margin ≥ target margin */
+  meetsTargetMargin: boolean | null;
+  status: "no_offer" | "buy_only_at_right_cost" | "still_too_expensive";
+  /** plain-language one-liner for the UI */
+  message: string;
+}
+
 export interface ReorderRow {
   productId: string;
   name: string;
@@ -100,6 +123,11 @@ export interface ReorderRow {
   margin: number | null;
   avgSellingPrice: number;
   avgUnitCost: number | null;
+  /** historical average selling price × (1 − TARGET_GROSS_MARGIN): the most we should pay
+   *  to hit the target margin at what these actually sold for. Forward-looking guidance. */
+  maxBuyCost: number;
+  /** present only for High Demand / Losing Money products once a supplier lookup has run */
+  forward: ForwardLooking | null;
   /** share of units that carry a cost snapshot, 0–1 */
   costCoverage: number;
   costUnknown: boolean;
@@ -338,6 +366,8 @@ export function computeReorderIntelligence(input: {
       margin,
       avgSellingPrice: r2(a.gmv / a.units),
       avgUnitCost: a.costedUnits > 0 ? r2(a.costTotal / a.costedUnits) : null,
+      maxBuyCost: maxBuyCostFor(a.gmv / a.units),
+      forward: null,
       costCoverage: b.coverage,
       costUnknown: b.costUnknown,
       livesSold: a.sessions.size,
@@ -421,7 +451,7 @@ function classify(x: {
   return "Weak Performer";
 }
 
-function suggestQty(x: { bucket: Bucket; avgUnitsPerLive: number; consistency: number; stock: number; unitsInWindow: number }): { qty: number; reason: string } {
+export function suggestQty(x: { bucket: Bucket; avgUnitsPerLive: number; consistency: number; stock: number; unitsInWindow: number }): { qty: number; reason: string } {
   if (x.bucket === "New / Not Enough Data") return { qty: 0, reason: "Not enough history for a confident recommendation." };
   if (x.bucket === "High Demand / Losing Money") return { qty: 0, reason: "No reorder suggested while it loses money — improve cost or raise the floor first." };
   if (x.bucket === "Weak Performer") return { qty: 0, reason: "Weak demand and/or profit — no reorder suggested." };
@@ -434,6 +464,87 @@ function suggestQty(x: { bucket: Bucket; avgUnitsPerLive: number; consistency: n
     ` = ${expected.toFixed(1)}, minus ${x.stock} in stock` +
     (REORDER.capAtUnitsSoldInWindow && qty === x.unitsInWindow ? `, capped at the ${x.unitsInWindow} sold in this period` : "");
   return { qty, reason };
+}
+
+export function maxBuyCostFor(avgSellingPrice: number, targetMargin: number = TARGET_GROSS_MARGIN): number {
+  return r2(avgSellingPrice * (1 - targetMargin));
+}
+
+/** Pure forward-looking projection at a current supplier cost. */
+export function forwardLookingFor(row: Pick<ReorderRow, "avgSellingPrice">, supplierCostUsd: number | null, supplierName: string | null, targetMargin: number = TARGET_GROSS_MARGIN): ForwardLooking {
+  const maxBuyCost = maxBuyCostFor(row.avgSellingPrice, targetMargin);
+  if (supplierCostUsd === null) {
+    return {
+      currentBestSupplierCost: null,
+      supplierName: null,
+      historicalAvgSellingPrice: row.avgSellingPrice,
+      projectedProfitPerUnit: null,
+      projectedMargin: null,
+      targetMargin,
+      maxBuyCost,
+      meetsTargetMargin: null,
+      status: "no_offer",
+      message: `No current actionable supplier offer — wait for a better supplier cost (buy only at ≤ ${fmt(maxBuyCost)} for a ${Math.round(targetMargin * 100)}% margin).`,
+    };
+  }
+  const profit = r2(row.avgSellingPrice - supplierCostUsd);
+  const margin = row.avgSellingPrice > 0 ? profit / row.avgSellingPrice : null;
+  const meets = margin !== null && margin >= targetMargin - 1e-9;
+  if (profit > 0) {
+    return {
+      currentBestSupplierCost: supplierCostUsd,
+      supplierName,
+      historicalAvgSellingPrice: row.avgSellingPrice,
+      projectedProfitPerUnit: profit,
+      projectedMargin: margin,
+      targetMargin,
+      maxBuyCost,
+      meetsTargetMargin: meets,
+      status: "buy_only_at_right_cost",
+      message: meets
+        ? `Profitable at the current supplier cost (${fmt(supplierCostUsd)} → ~${fmt(profit)}/unit, ${pct(margin)}). Buy only at ≤ ${fmt(maxBuyCost)}.`
+        : `Profitable but below the ${Math.round(targetMargin * 100)}% target at ${fmt(supplierCostUsd)} (~${fmt(profit)}/unit, ${pct(margin)}). Buy only at ≤ ${fmt(maxBuyCost)}.`,
+    };
+  }
+  return {
+    currentBestSupplierCost: supplierCostUsd,
+    supplierName,
+    historicalAvgSellingPrice: row.avgSellingPrice,
+    projectedProfitPerUnit: profit,
+    projectedMargin: margin,
+    targetMargin,
+    maxBuyCost,
+    meetsTargetMargin: false,
+    status: "still_too_expensive",
+    message: `Current supplier cost ${fmt(supplierCostUsd)} is still above what it sells for — wait for a better supplier cost (buy only at ≤ ${fmt(maxBuyCost)}).`,
+  };
+}
+
+const fmt = (n: number) => `$${n.toFixed(2)}`;
+const pct = (m: number | null) => (m === null ? "—" : `${Math.round(m * 100)}%`);
+
+/** Attach forward-looking guidance to the High Demand / Losing Money rows and, where a current actionable supplier cost
+ *  would make the product profitable at its historical average selling price, move it to
+ *  "High Demand — Buy Only at the Right Cost". Historical cost/profit/score are untouched. */
+export function applySupplierCosts(result: ReorderResult, costs: Map<string, { costUsd: number | null; supplierName: string | null }>): ReorderResult {
+  const rows = result.rows.map((row) => {
+    if (row.bucket !== "High Demand / Losing Money") return row;
+    const c = costs.get(row.productId) ?? { costUsd: null, supplierName: null };
+    const forward = forwardLookingFor(row, c.costUsd, c.supplierName);
+    if (forward.status !== "buy_only_at_right_cost") {
+      return { ...row, forward, warnings: [...row.warnings.filter((w) => !/Sells often but loses money/.test(w)), `Sells often but loses money — ${forward.message} Improve supplier cost, raise the auction floor, or lower reorder priority.`] };
+    }
+    const reorder = suggestQty({ bucket: "High Demand — Buy Only at the Right Cost", avgUnitsPerLive: row.avgUnitsPerLive, consistency: row.consistency, stock: row.stock, unitsInWindow: row.units });
+    return {
+      ...row,
+      forward,
+      bucket: "High Demand — Buy Only at the Right Cost" as Bucket,
+      suggestedQty: reorder.qty,
+      suggestedReason: `${reorder.reason} — only if the buy cost is ≤ ${fmt(forward.maxBuyCost)}.`,
+      warnings: [`Historically unprofitable (${row.profit === null ? "—" : fmt(row.profit)} total). ${forward.message}`],
+    };
+  });
+  return { ...result, rows };
 }
 
 function stockFlag(score: number, bucket: Bucket, stock: number, exists: boolean): string | null {

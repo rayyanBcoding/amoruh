@@ -24,6 +24,7 @@ const BUCKET_STYLE: Record<Bucket, string> = {
   "Hot + Profitable": "bg-ld-green/15 text-ld-green",
   "High Demand / Thin Margin": "bg-ld-amber/15 text-ld-amber",
   "High Demand / Losing Money": "bg-ld-red/15 text-ld-red",
+  "High Demand — Buy Only at the Right Cost": "bg-ld-amber/15 text-ld-amber",
   "High Profit / Lower Frequency": "bg-ld-cyan/15 text-ld-cyan",
   "Steady Seller": "bg-ld-purple/15 text-ld-purple",
   "Weak Performer": "bg-ld-border/40 text-ld-muted",
@@ -36,6 +37,7 @@ const BUCKETS: Bucket[] = [
   "Steady Seller",
   "High Profit / Lower Frequency",
   "High Demand / Thin Margin",
+  "High Demand — Buy Only at the Right Cost",
   "High Demand / Losing Money",
   "Cost Unknown",
   "Weak Performer",
@@ -43,6 +45,11 @@ const BUCKETS: Bucket[] = [
 ];
 
 const money = (n: number | null) => (n === null ? "—" : formatCurrency(n));
+
+/** Losing-money products with no current supplier offer say so plainly. */
+function bucketLabel(r: ReorderRow): string {
+  return r.bucket === "High Demand / Losing Money" && r.forward ? "High Demand / Losing Money — wait for a better supplier cost" : r.bucket;
+}
 
 function SummaryCard({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -118,6 +125,15 @@ export function ReorderIntelligencePanel() {
       }
       setError(null);
       setData(body as ReorderResult);
+      // Supplier guidance for losing-money products arrives a moment later (it checks Pricing / Ordering).
+      void fetch(`/api/reorder-intelligence/forward?window=${w}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((fwd: { window: WindowKey; rows: ReorderRow[] } | null) => {
+          if (!fwd) return;
+          const byId = new Map(fwd.rows.map((row) => [row.productId, row]));
+          setData((cur) => (cur && cur.window === fwd.window ? { ...cur, rows: cur.rows.map((row) => byId.get(row.productId) ?? row) } : cur));
+        })
+        .catch(() => undefined);
     } catch {
       setError("Network error — is the server running?");
     } finally {
@@ -292,7 +308,7 @@ export function ReorderIntelligencePanel() {
                     <td className="max-w-[320px] px-3 py-2">
                       <p className="truncate font-semibold text-ld-white">{r.name}</p>
                       <p className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${BUCKET_STYLE[r.bucket]}`}>{r.bucket}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${BUCKET_STYLE[r.bucket]}`}>{bucketLabel(r)}</span>
                         {r.warnings.length > 0 && (
                           <span title={r.warnings.join("\n")} className="cursor-help text-[10px] font-bold uppercase text-ld-amber">
                             ⚠ {r.costUnknown ? "cost unknown" : r.confidence === "full" ? "check" : "lower confidence"}
@@ -300,6 +316,14 @@ export function ReorderIntelligencePanel() {
                         )}
                         {r.flag && <span className="text-[10px] font-semibold text-ld-cyan">{r.flag}</span>}
                       </p>
+                      {r.forward && (
+                        <p className="mt-0.5 text-[11px] text-ld-muted" title="Forward-looking only — never changes the historical profit shown in this row">
+                          Avg sale {formatCurrency(r.avgSellingPrice)} · max buy ≤ {formatCurrency(r.maxBuyCost)} ·{" "}
+                          {r.forward.currentBestSupplierCost !== null
+                            ? `supplier ${formatCurrency(r.forward.currentBestSupplierCost)} → ${money(r.forward.projectedProfitPerUnit)}/unit (${r.forward.projectedMargin === null ? "—" : Math.round(r.forward.projectedMargin * 100) + "%"})`
+                            : "no current supplier offer"}
+                        </p>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-ld-white">{r.units}</td>
                     <td className="px-3 py-2 text-ld-white">

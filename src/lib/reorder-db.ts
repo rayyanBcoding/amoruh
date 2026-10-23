@@ -1,9 +1,12 @@
 import { getProducts } from "./db";
 import { getPresentationsForSession, getRecentSessions } from "./live-db";
-import { getProductOfferComparison } from "./pricing-db";
+import { getProductBestActionableOffer } from "./pricing-db";
 import {
+  applySupplierCosts,
   computeReorderIntelligence,
   drilldownForProduct,
+  forwardLookingFor,
+  type ForwardLooking,
   type DrilldownSession,
   type HistorySale,
   type HistorySession,
@@ -44,14 +47,33 @@ export async function loadLiveHistory(): Promise<{ sessions: HistorySession[]; s
   return { sessions: sessions.map((s) => ({ id: s.id, name: s.name, startedAt: s.startedAt })), sales };
 }
 
-export async function getReorderIntelligence(window: WindowKey): Promise<ReorderResult> {
+/** A supplier-cost lookup, injectable so the rule can be tested without a Pricing database. */
+export type SupplierCostLookup = (productId: string) => Promise<{ costUsd: number | null; supplierName: string | null }>;
+
+const realSupplierCostLookup: SupplierCostLookup = async (productId) => {
+  const info = await getSupplierCostInfo(productId, 0);
+  return { costUsd: info.bestSupplierCostUsd, supplierName: info.supplierName };
+};
+
+/** Historical scoring (pure) + forward-looking supplier guidance for the High Demand / Losing Money
+ *  products only. The supplier lookups never touch the historical numbers or the score. */
+export async function getReorderIntelligence(window: WindowKey, lookup: SupplierCostLookup | null = realSupplierCostLookup): Promise<ReorderResult> {
   const [{ sessions, sales }, products] = await Promise.all([loadLiveHistory(), getProducts()]);
-  return computeReorderIntelligence({
+  const result = computeReorderIntelligence({
     sessions,
     sales,
     products: products.map((p) => ({ id: p.id, brand: p.brand, name: p.name, size: p.size, sku: p.sku, barcode: p.barcode, inventory: p.inventory })),
     window,
   });
+  if (lookup === null) return result; // historical-only: the fast first paint
+  const losing = result.rows.filter((r) => r.bucket === "High Demand / Losing Money");
+  const costs = new Map<string, { costUsd: number | null; supplierName: string | null }>();
+  for (let i = 0; i < losing.length; i += 6) {
+    const batch = losing.slice(i, i + 6);
+    const found = await Promise.all(batch.map((r) => lookup(r.productId).catch(() => ({ costUsd: null, supplierName: null }))));
+    batch.forEach((r, k) => costs.set(r.productId, found[k]));
+  }
+  return applySupplierCosts(result, costs);
 }
 
 export interface SupplierCostInfo {
@@ -65,8 +87,7 @@ export interface SupplierCostInfo {
 /** Forward-looking only: never feeds back into historical cost/profit. */
 export async function getSupplierCostInfo(productId: string, avgSellingPrice: number): Promise<SupplierCostInfo> {
   try {
-    const cmp = await getProductOfferComparison(productId);
-    const best = cmp.bestPrice;
+    const best = await getProductBestActionableOffer(productId);
     if (!best || !best.priceUsdValid) return { bestSupplierCostUsd: null, supplierName: null, expectedProfitPerUnit: null };
     return {
       bestSupplierCostUsd: best.priceUsd,
@@ -81,9 +102,11 @@ export async function getSupplierCostInfo(productId: string, avgSellingPrice: nu
 export async function getProductDrilldown(
   productId: string,
   window: WindowKey
-): Promise<{ sessions: DrilldownSession[]; row: ReorderResult["rows"][number] | null; supplier: SupplierCostInfo | null }> {
+): Promise<{ sessions: DrilldownSession[]; row: ReorderResult["rows"][number] | null; supplier: SupplierCostInfo | null; forward: ForwardLooking | null }> {
   const [{ sessions, sales }, result] = await Promise.all([loadLiveHistory(), getReorderIntelligence(window)]);
   const row = result.rows.find((r) => r.productId === productId) ?? null;
   const supplier = row ? await getSupplierCostInfo(productId, row.avgSellingPrice) : null;
-  return { sessions: drilldownForProduct({ productId, sessions, sales, window }), row, supplier };
+  // any product can show the projection; it is guidance only and never changes a historical value
+  const forward = row ? row.forward ?? forwardLookingFor(row, supplier?.bestSupplierCostUsd ?? null, supplier?.supplierName ?? null) : null;
+  return { sessions: drilldownForProduct({ productId, sessions, sales, window }), row, supplier, forward };
 }

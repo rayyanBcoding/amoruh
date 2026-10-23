@@ -2,16 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { DrilldownSession, ReorderRow } from "@/lib/reorder-intelligence";
+import type { DrilldownSession, ForwardLooking, ReorderRow } from "@/lib/reorder-intelligence";
 import type { SupplierCostInfo } from "@/lib/reorder-db";
 import type { WindowKey } from "@/lib/reorder-config";
-import { WINDOWS } from "@/lib/reorder-config";
+import { TARGET_GROSS_MARGIN, WINDOWS } from "@/lib/reorder-config";
 import { formatCurrency, formatDate } from "@/lib/format";
 
 interface DrilldownResponse {
   sessions: DrilldownSession[];
   row: ReorderRow | null;
   supplier: SupplierCostInfo | null;
+  forward: ForwardLooking | null;
 }
 
 const money = (n: number | null) => (n === null ? "—" : formatCurrency(n));
@@ -46,7 +47,7 @@ export function ReorderDrilldownModal({ row, windowKey, onClose }: { row: Reorde
   }, [onClose]);
 
   const windowLabel = WINDOWS.find((w) => w.key === windowKey)?.label ?? windowKey;
-  const supplier = data?.supplier ?? null;
+  const fwd = data?.forward ?? row.forward ?? null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -99,22 +100,33 @@ export function ReorderDrilldownModal({ row, windowKey, onClose }: { row: Reorde
           </p>
         </div>
 
-        <div className="mt-4 rounded-xl border border-ld-border p-4">
-          <p className="text-xs font-bold uppercase tracking-widest text-ld-muted">Current supplier cost (forward-looking only)</p>
-          {!data ? (
-            <p className="mt-1 text-xs text-ld-muted">Checking Pricing / Ordering…</p>
-          ) : supplier && supplier.bestSupplierCostUsd !== null ? (
-            <p className="mt-1 text-sm text-ld-white">
-              Avg LIVE sale {formatCurrency(row.avgSellingPrice)} · best current supplier {formatCurrency(supplier.bestSupplierCostUsd)}
-              {supplier.supplierName ? ` (${supplier.supplierName})` : ""} · expected profit ≈{" "}
-              <strong className={supplier.expectedProfitPerUnit !== null && supplier.expectedProfitPerUnit < 0 ? "text-ld-red" : "text-ld-green"}>
-                {supplier.expectedProfitPerUnit !== null ? formatCurrency(supplier.expectedProfitPerUnit) : "—"}/unit
-              </strong>
-            </p>
-          ) : (
-            <p className="mt-1 text-xs text-ld-muted">No current, actionable supplier offer for this product in Pricing / Ordering.</p>
-          )}
-          <p className="mt-1 text-[11px] text-ld-muted">Historical cost and profit above always use each sale&apos;s own cost snapshot — this figure never rewrites them.</p>
+        <div className="mt-4 rounded-xl border border-ld-amber/40 p-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-ld-amber">Forward-looking purchasing guidance — not history</p>
+          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {[
+              ["Historical avg sale", formatCurrency(row.avgSellingPrice)],
+              ["Historical avg cost", money(row.avgUnitCost)],
+              ["Historical profit / unit", money(row.profitPerUnit)],
+              ["Current best supplier cost", !data ? "…" : fwd && fwd.currentBestSupplierCost !== null ? formatCurrency(fwd.currentBestSupplierCost) : "none"],
+              ["Projected profit / unit", fwd?.projectedProfitPerUnit != null ? money(fwd.projectedProfitPerUnit) : "—"],
+              ["Projected margin", fwd?.projectedMargin != null ? `${(fwd.projectedMargin * 100).toFixed(1)}%` : "—"],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-ld-border bg-ld-bg-elevated p-2.5 text-center">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-ld-muted">{label}</p>
+                <p className="mt-0.5 text-sm font-extrabold text-ld-white">{value}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-sm text-ld-white">
+            Target maximum buy cost: <strong className="text-ld-cyan">{formatCurrency(row.maxBuyCost)}</strong>
+            <span className="text-xs text-ld-muted">
+              {" "}
+              = historical avg sale {formatCurrency(row.avgSellingPrice)} × (1 − {Math.round(TARGET_GROSS_MARGIN * 100)}% target margin)
+            </span>
+          </p>
+          {fwd && <p className="mt-1 text-xs text-ld-muted">{fwd.message}</p>}
+          {fwd?.supplierName && <p className="mt-1 text-[11px] text-ld-muted">Best current actionable offer: {fwd.supplierName}.</p>}
+          <p className="mt-2 text-[11px] text-ld-muted">The supplier cost is only a projection. Historical cost and profit above always use each sale&apos;s own cost snapshot and are never rewritten by it, and it does not change the Reorder Score.</p>
         </div>
 
         <div className="mt-5">
