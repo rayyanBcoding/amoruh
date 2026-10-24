@@ -326,7 +326,7 @@ async function main() {
   let refusal: any = null;
   try { await rec("pD", 100, 3); } catch (e) { refusal = e; }
   check("selling more than the system has is refused with a machine-readable code", [refusal?.code, refusal?.status], ["insufficient_stock", 409]);
-  ok("the refusal names the product and the system's count", /shows 2 in stock/.test(refusal?.message ?? ""));
+  ok("the refusal names the product and the system's count", /Inventory shows 2 of/.test(refusal?.message ?? ""));
   check("a refused sale changes nothing and burns no number", [await inventoryOf("pD"), await lotRemaining("pD", "lotD"), await fake.get(`amoruh:live:session_order_seq:${s8}`)], [2, 2, 1]);
 
   const over = await rec("pD", 100, 3, true);
@@ -363,6 +363,23 @@ async function main() {
   ok("quantity/product edits on an oversold sale are refused (price edits allowed)", /only its price can be edited/.test(editMsg));
   const priceEdit = await sales.editSale({ saleId: over.saleId, newPrice: 120, operator: op, idempotencyKey: uid("e") });
   check("...a price edit still works", priceEdit.price, 120);
+
+  // =====================================================================
+  section("G. Inventory count still shows units but the lot ledger is used up (drift)");
+  const s9 = await freshLive("Drift Live");
+  // inventory says 3, but lot B has 0 remaining
+  await fake.set(Core.products, ((await fake.get<any[]>(Core.products)) as any[]).map((p) => (p.id === "pB" ? { ...p, inventory: 3 } : p)));
+  await fake.set(Intake.inventoryTransactions, [...((await fake.get<any[]>(Intake.inventoryTransactions)) as any[]), { id: "txn_drain_b", productId: "pB", poId: "po_pB", poLineId: "pol_pB", lotId: "lotB", quantityDelta: -10, reason: "sale", receivingEventId: null, saleId: "sale_drain_b", operator: "x", timestamp: "2026-10-02T00:00:00.000Z" }]);
+  const drift = await sales.recordSale({ liveSessionId: s9, productId: "pB", quantity: 1, winningBid: 70, operator: op, idempotencyKey: uid("dr") });
+  const driftSale = await sales.getSaleRecordById(drift.saleId);
+  check("with 3 in the inventory count a 1-unit sale records WITHOUT 'Sell anyway'", [drift.liveOrderNumber, await inventoryOf("pB")], [1, 2]);
+  check("...it is not flagged oversold, and takes its cost from the product's latest lot", [driftSale?.oversoldQuantity, driftSale?.landedCostAtSale], [null, 40]);
+  await sales.cancelSale({ saleId: drift.saleId, operator: op, idempotencyKey: uid("c") });
+  check("...canceling it puts the unit back in the inventory count", await inventoryOf("pB"), 3);
+  let driftRefusal: any = null;
+  await fake.set(Core.products, ((await fake.get<any[]>(Core.products)) as any[]).map((p) => (p.id === "pB" ? { ...p, inventory: 0 } : p)));
+  try { await sales.recordSale({ liveSessionId: s9, productId: "pB", quantity: 1, winningBid: 70, operator: op, idempotencyKey: uid("dr") }); } catch (e) { driftRefusal = e; }
+  check("when the count is also 0 it still asks for 'Sell anyway'", driftRefusal?.code, "insufficient_stock");
 
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);
