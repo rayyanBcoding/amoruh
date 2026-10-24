@@ -28,7 +28,7 @@ export function SessionStatsBar({ stats }: { stats: LiveSessionStats }) {
   const ledger = stats.enteredOrders !== undefined;
   return (
     <div className="glass-panel space-y-3 rounded-2xl p-4">
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
         <Cell label="Live Time" value={formatDuration(stats.liveTimeMs)} />
         <Cell label="Presented" value={String(stats.productsPresented)} />
         <Cell label="Units Sold" value={String(stats.unitsSold)} />
@@ -38,7 +38,6 @@ export function SessionStatsBar({ stats }: { stats: LiveSessionStats }) {
           value={stats.estimatedGrossProfit != null ? formatCurrency(stats.estimatedGrossProfit) : "—"}
           note={stats.ordersMissingCost ? `excl. ${stats.ordersMissingCost} order${stats.ordersMissingCost === 1 ? "" : "s"} w/o cost` : undefined}
         />
-        <Cell label="Sell-Through" value={stats.presentationSellThrough != null ? `${Math.round(stats.presentationSellThrough * 100)}%` : "—"} />
       </div>
       {ledger && (
         <div className="grid grid-cols-3 gap-3 border-t border-ld-border/60 pt-3 sm:grid-cols-6">

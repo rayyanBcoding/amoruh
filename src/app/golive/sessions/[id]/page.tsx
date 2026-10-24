@@ -80,10 +80,6 @@ export default function LiveSessionSummaryPage() {
                     : "—"
                 }
               />
-              <StatCard
-                label="Sell-Through"
-                value={detail.stats.presentationSellThrough != null ? `${Math.round(detail.stats.presentationSellThrough * 100)}%` : "—"}
-              />
             </div>
 
             {detail.stats.ordersMissingCost ? (

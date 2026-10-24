@@ -1,4 +1,5 @@
 import { redis } from "./kv";
+import type { Product } from "./types";
 import type {
   LeaderboardData,
   LeaderboardOfferRow,
@@ -1173,7 +1174,9 @@ async function countUnresolvedOffersMatchingIdentity(target: MasterCandidate, ta
 /** Every current supplier offer for one master product, split into
  *  actionable (eligible to be "Best Current Price") vs. everything else
  *  shown only for context — see pricing-matching.ts's plan §4. */
-export async function getProductOfferComparison(productId: string): Promise<ProductOfferComparison> {
+/** The comparison rows for one real Product — every linked supplier offer, with USD conversion and
+ *  freshness — shared by the full comparison view and the light best-price lookup below. */
+async function buildProductOfferRows(productId: string): Promise<{ rows: OfferComparisonRow[]; product: Product | null }> {
   const refs = await getOffersByProduct(productId);
   const [suppliers, offers, product] = await Promise.all([
     getSuppliers(),
@@ -1213,10 +1216,14 @@ export async function getProductOfferComparison(productId: string): Promise<Prod
       ageDays: Math.round(ageDays * 10) / 10,
       uploadedAt: offer.uploadedAt,
       reviewStatus: offer.reviewStatus,
-      differenceFromBestUsd: null, // overwritten by splitAndRankComparisonRows below
+      differenceFromBestUsd: null, // overwritten by splitAndRankComparisonRows
     });
   }
+  return { rows, product };
+}
 
+export async function getProductOfferComparison(productId: string): Promise<ProductOfferComparison> {
+  const { rows, product } = await buildProductOfferRows(productId);
   const { actionable, nonActionable, bestPrice } = splitAndRankComparisonRows(rows);
   const unresolvedElsewhereCount = product
     ? await countUnresolvedOffersMatchingIdentity(
@@ -1231,6 +1238,14 @@ export async function getProductOfferComparison(productId: string): Promise<Prod
       )
     : 0;
   return { productId, actionable, nonActionable, bestPrice, unresolvedElsewhereCount };
+}
+
+/** Just the current best ACTIONABLE offer for a Product — the same eligibility and ranking as the comparison
+ *  view (isActionableOffer / splitAndRankComparisonRows), without the unresolved-offers scan that the full
+ *  comparison adds for its "other options may exist" warning. Cheap enough to call for many products. */
+export async function getProductBestActionableOffer(productId: string): Promise<OfferComparisonRow | null> {
+  const { rows } = await buildProductOfferRows(productId);
+  return splitAndRankComparisonRows(rows).bestPrice;
 }
 
 /** Backfill primitive for offers_by_reference_product — adds a

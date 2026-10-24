@@ -94,24 +94,6 @@ export function TopSellersTable({ rows }: { rows: Row[] }) {
   );
 }
 
-export function HighestSellThroughTable({ rows }: { rows: Row[] }) {
-  return (
-    <Table
-      title="Highest Sell-Through"
-      rows={rows}
-      emptyLabel="Not enough presentations yet (minimum 5 needed to rank)."
-      columns={[
-        { label: "Times Presented", render: (r) => r.timesPresented },
-        { label: "Times Sold", render: (r) => r.timesSold },
-        {
-          label: "Sell-Through",
-          render: (r) => <span className="font-semibold text-ld-cyan">{r.sellThrough != null ? `${Math.round(r.sellThrough * 100)}%` : "—"}</span>,
-        },
-      ]}
-    />
-  );
-}
-
 export function MostProfitableTable({ rows }: { rows: Row[] }) {
   return (
     <Table
@@ -122,24 +104,6 @@ export function MostProfitableTable({ rows }: { rows: Row[] }) {
         { label: "Units Sold", render: (r) => r.unitsSold },
         { label: "Gross Profit", render: (r) => <span className="font-semibold text-ld-green">{r.grossProfit != null ? formatCurrency(r.grossProfit) : "—"}</span> },
         { label: "Avg Profit / Unit", render: (r) => (r.averageProfitPerUnit != null ? formatCurrency(r.averageProfitPerUnit) : "—") },
-      ]}
-    />
-  );
-}
-
-export function ProductsToWatchTable({ rows }: { rows: Row[] }) {
-  return (
-    <Table
-      title="Products to Watch"
-      rows={rows}
-      emptyLabel="Nothing is underperforming enough to flag right now."
-      columns={[
-        { label: "Presented", render: (r) => r.timesPresented },
-        { label: "Sold", render: (r) => r.timesSold },
-        {
-          label: "Sell-Through",
-          render: (r) => <span className="font-semibold text-ld-amber">{r.sellThrough != null ? `${Math.round(r.sellThrough * 100)}%` : "—"}</span>,
-        },
       ]}
     />
   );

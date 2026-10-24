@@ -51,7 +51,6 @@ export default function LiveHistoryPage() {
                     <th className="px-5 py-3">GMV</th>
                     <th className="px-5 py-3">Units Sold</th>
                     <th className="px-5 py-3">Gross Profit</th>
-                    <th className="px-5 py-3">Sell-Through</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -84,9 +83,6 @@ export default function LiveHistoryPage() {
                       <td className="px-5 py-3 text-ld-white">{stats.unitsSold}</td>
                       <td className="px-5 py-3 text-ld-white">
                         {stats.estimatedGrossProfit != null ? formatCurrency(stats.estimatedGrossProfit) : "—"}
-                      </td>
-                      <td className="px-5 py-3 text-ld-white">
-                        {stats.presentationSellThrough != null ? `${Math.round(stats.presentationSellThrough * 100)}%` : "—"}
                       </td>
                     </tr>
                   ))}

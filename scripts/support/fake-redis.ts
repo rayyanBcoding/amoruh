@@ -116,6 +116,12 @@ export class FakeRedis {
     const end = stop < 0 ? l.length + stop : stop;
     return l.slice(start < 0 ? Math.max(0, l.length + start) : start, end + 1).map((v) => this.decode(v));
   }
+  /** Single-pass SCAN: returns every matching key and cursor "0". */
+  async scan(_cursor: string | number, opts?: { match?: string; count?: number }): Promise<[string, string[]]> {
+    const re = new RegExp("^" + (opts?.match ?? "*").replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+    const keys = [...this.strings.keys(), ...this.zsets.keys(), ...this.lists.keys()].filter((k) => re.test(k));
+    return ["0", keys];
+  }
   async llen(key: string) {
     return this.lists.get(key)?.length ?? 0;
   }
