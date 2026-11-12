@@ -15,6 +15,7 @@ import { SellingConfigPanel } from "@/components/golive/SellingConfigPanel";
 import { GoLiveEntryChoice } from "@/components/golive/GoLiveEntryChoice";
 import { EndTestLiveModal } from "@/components/golive/EndTestLiveModal";
 import { OrderLedgerPanel } from "@/components/golive/OrderLedgerPanel";
+import { TikTokLivePanel } from "@/components/golive/TikTokLivePanel";
 
 function GoLiveScreen({ onExit }: { onExit: () => void }) {
   const router = useRouter();
@@ -93,6 +94,9 @@ function GoLiveScreen({ onExit }: { onExit: () => void }) {
       )}
 
       {data.stats && <SessionStatsBar stats={data.stats} />}
+
+      {/* TikTok-assisted matching — preview only; the manual flow below is unchanged. */}
+      {mode === "real" && <TikTokLivePanel />}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_380px]">
         <div className="space-y-6">

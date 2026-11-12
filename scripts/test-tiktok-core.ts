@@ -691,6 +691,94 @@ async function main() {
   const gap = await importRoom(gapRoom, { dryRun: true }, { fetchPage: pagesOf(newestFirst([...gapOrders, ...olderOnes]), 10).fetchPage });
   check("gaps and a start other than #1 are reported, not hidden", [gap.scanned.startsAtOne, gap.scanned.auctionNoMin, gap.scanned.missingNumbers], [false, 5, [1, 2, 3, 4, 7]]);
 
+  // ---------- Go Live TikTok panel: totals, search, saved matches, latest-room refresh ----------
+  const { computeTotals, searchProducts } = await import("../src/lib/tiktok/live-totals");
+  const { getPanel, setPanelMatch } = await import("../src/lib/tiktok/live-panel");
+
+  const prodMap = new Map([
+    ["p_a", { id: "p_a", cost: 18, inventory: 6 }],
+    ["p_b", { id: "p_b", cost: 7.25, inventory: 1 }],
+    ["p_free", { id: "p_free", cost: 0, inventory: 3 }],
+  ]);
+  const R = (sku: string, state: string, price: string | null, match: { productId: string; health: string } | null) => ({ sellerSku: sku, state: state as never, salePrice: price, match: match as never });
+  const tot = computeTotals([
+    R("1", "PAID", "36", { productId: "p_a", health: "OK" }),          // $36 - $18 = $18
+    R("2", "PAID", "4.89", { productId: "p_b", health: "OK" }),        // $4.89 - $7.25 = -$2.36
+    R("3", "PAID", "10", { productId: "p_free", health: "OK" }),       // matched but no cost on file
+    R("4", "PAID", "22", null),                                          // paid, needs product
+    R("5", "UNPAID_CANCELLED", "50", null),                              // never counted
+    R("6", "UNPAID_CANCELLED", "9", { productId: "p_a", health: "OK" }), // match on an unpaid auction → stale, excluded
+    R("7", "PAID", "15", { productId: "p_a", health: "STALE_ORDER_NOT_PAID" }), // order changed → excluded, needs attention
+    R("8", "PAID", "12", { productId: "p_gone", health: "OK" }),         // product deleted → excluded
+    R("9", "UNPAID_OPEN", "8", null),
+    R("10", "CONFLICT", "8", null),
+    R("11", "PAID", "36", { productId: "p_a", health: "OK" }),
+  ], prodMap);
+  check("revenue counts only matched, still-paid auctions (36+4.89+10+36)", tot.revenueCents, 8689);
+  check("cost counts only matched products that have a cost (18+7.25+18)", tot.costCents, 4325);
+  check("gross profit uses only rows that have a cost (36+4.89+36-43.25)", tot.profitCents, 3364);
+  check("units matched", tot.unitsMatched, 4);
+  check("matched without cost is surfaced", tot.matchedWithoutCost, 1);
+  check("needs product = unmatched + stale + missing-product paid auctions", [tot.unmatchedPaid, tot.unmatchedPaidCents], [3, 4900]);
+  check("unpaid / cancelled / awaiting / conflict never count", [tot.unpaid, tot.paidAuctions, tot.paidCents], [4, 7, 13589]);
+  check("stale and missing-product matches are reported", [tot.staleMatches, tot.missingProduct], [2, 1]);
+  check("product usage per product (for the oversold flag)", tot.usage, { p_a: 2, p_b: 1, p_free: 1 });
+  check("margin on rows with a cost", Math.round((tot.marginPct ?? 0) * 10) / 10, 43.8);
+  check("decimal cents are exact (0.10 × 3 = $0.30, no float drift)", computeTotals([R("a", "PAID", "0.10", { productId: "p_a", health: "OK" }), R("b", "PAID", "0.10", { productId: "p_a", health: "OK" }), R("c", "PAID", "0.10", { productId: "p_a", health: "OK" })], prodMap).revenueCents, 30);
+  check("empty room is safe", [computeTotals([], prodMap).revenueCents, computeTotals([], prodMap).marginPct], [0, null]);
+
+  const catalog = [
+    { id: "1", name: "9 PM", brand: "Afnan", sku: "AFN-9PM", barcode: "6290171074250", size: "3.4oz", inventory: 4 },
+    { id: "2", name: "9 PM Elixir", brand: "Afnan", sku: "AFN-9PM-E", barcode: "6290171999999", size: "3.4oz", inventory: 0 },
+    { id: "3", name: "Bloom", brand: "Gucci", sku: "GUC-BLOOM", barcode: "3614227748569", size: "3.4oz", inventory: 2 },
+    { id: "4", name: "Light Blue", brand: "Dolce & Gabbana", sku: "DG-LB", barcode: "8057971180431", size: "3.4oz", inventory: 5 },
+  ];
+  check("search by name", searchProducts(catalog, "bloom").map((p) => p.id), ["3"]);
+  check("every typed word may match name, brand or SKU, in any order (9pm hits the SKU)", searchProducts(catalog, "9pm afnan").map((p) => p.id), ["1", "2"]);
+  check("search by brand + name", searchProducts(catalog, "afnan 9 pm").map((p) => p.id), ["1", "2"]);
+  check("exact barcode ranks first", searchProducts(catalog, "6290171074250").map((p) => p.id), ["1"]);
+  check("search by SKU", searchProducts(catalog, "guc-bloom").map((p) => p.id), ["3"]);
+  check("in-stock results come before out-of-stock", searchProducts(catalog, "afnan").map((p) => p.id), ["1", "2"]);
+  check("empty query returns nothing", searchProducts(catalog, "  ").length, 0);
+  check("limit respected", searchProducts(catalog, "3.4oz", 2).length, 2);
+
+  // saved matches through the panel layer (TikTok-side record only)
+  const nsBefore = [...mem.m.keys()].filter((k) => !k.startsWith("amoruh:tiktok:")).length;
+  const pn0 = await getPanel(RM);
+  check("panel rows are sorted by auction number and carry price + state", [pn0.rows.length, pn0.rows[0].sellerSku, pn0.rows[0].state, pn0.rows[29].sellerSku], [30, "1", "PAID", "30"]);
+  const row20 = pn0.rows.find((r) => r.sellerSku === "20")!;
+  check("unpaid auction is listed, not matchable, keeps its TikTok price", [row20.state, row20.matchable, row20.salePrice !== null], ["UNPAID_CANCELLED", false, true]);
+  const set1 = await setPanelMatch({ roomId: RM, sellerSku: "5", productId: "p_a" }, { productExists: async () => true });
+  check("choosing a product saves the match", set1.match, { productId: "p_a", version: 1 });
+  const pn1 = await getPanel(RM);
+  check("…and it shows on the panel as a healthy match", pn1.rows.find((r) => r.sellerSku === "5")!.match, { productId: "p_a", version: 1, health: "OK" });
+  check("totals follow the saved matches", computeTotals(pn1.rows, new Map([["p_a", { id: "p_a", cost: 4, inventory: 9 }]])).unitsMatched, 1);
+  check("changing the product replaces the match (version 2)", (await setPanelMatch({ roomId: RM, sellerSku: "5", productId: "p_b" })).match, { productId: "p_b", version: 2 });
+  await throwsAsync("an unpaid / cancelled auction cannot be matched", () => setPanelMatch({ roomId: RM, sellerSku: "20", productId: "p_a" }), /cannot be matched/);
+  await throwsAsync("an unknown product id is refused", () => setPanelMatch({ roomId: RM, sellerSku: "6", productId: "p_zzz" }, { productExists: async () => false }), /no longer exists/);
+  check("clearing a match removes it from the panel", [(await setPanelMatch({ roomId: RM, sellerSku: "5", productId: null })).match, (await getPanel(RM)).rows.find((r) => r.sellerSku === "5")!.match], [null, null]);
+  check("clearing something that was never matched is a harmless no-op", (await setPanelMatch({ roomId: RM, sellerSku: "6", productId: null })).match, null);
+  ok("matching wrote nothing outside the TikTok namespace (no SaleRecord / inventory keys)", [...mem.m.keys()].filter((k) => !k.startsWith("amoruh:tiktok:")).length === nsBefore);
+
+  await setPanelMatch({ roomId: RM, sellerSku: "7", productId: "p_a" });
+  await importOrders([fx({ id: roomOrders30[6].id as string, line: (roomOrders30[6].line_items as { id: string }[])[0].id, room: RM, sku: "7", price: "13", created: isoSec(T0 + 7 * 60), status: "CANCELLED", paid: null, cancel: ["Customer overdue to pay", "SYSTEM"], group: "50007", pkg: null })]);
+  const pnStale = await getPanel(RM);
+  const r7 = pnStale.rows.find((r) => r.sellerSku === "7")!;
+  check("TikTok cancels a matched auction → match kept but flagged, auction no longer matchable", [r7.state, r7.match?.health], ["UNPAID_CANCELLED", "STALE_ORDER_NOT_PAID"]);
+  check("…and it is excluded from totals (counted as stale)", [computeTotals(pnStale.rows, new Map([["p_a", { id: "p_a", cost: 4, inventory: 9 }]])).unitsMatched, computeTotals(pnStale.rows, new Map([["p_a", { id: "p_a", cost: 4, inventory: 9 }]])).staleMatches], [0, 1]);
+
+  const latestPanel = await getPanel("latest");
+  check("'latest' selects the newest stored room", latestPanel.roomId, (await getRoomsIndex())!.rooms[0].roomId);
+  check("rooms list is newest first and capped", latestPanel.rooms.map((r) => r.roomId)[0], latestPanel.roomId);
+  check("an unknown room is an empty panel, not an error", (await getPanel("123")).rows, []);
+
+  // refresh with "latest": the room of the newest order that carries a room_id
+  const refLatest = await importRoom("latest", {}, { fetchPage: pagesOf(world, 10).fetchPage });
+  check("'latest' resolves to the room of the newest order and imports it", [refLatest.roomId, refLatest.scanned.orders, refLatest.complete], [RM_OTHER, 12, true]);
+  let noRoom: unknown = null;
+  try { await importRoom("latest", {}, { fetchPage: pagesOf(strays, 10).fetchPage }); } catch (e) { noRoom = e; }
+  ok("'latest' with no LIVE room in the newest orders fails clearly and writes nothing", noRoom instanceof RoomImportError && /No TikTok LIVE room/.test((noRoom as Error).message));
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 }
