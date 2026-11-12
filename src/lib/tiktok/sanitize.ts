@@ -14,7 +14,7 @@
 // Large numeric IDs are already strings (json.ts); numbers are shown as-is only
 // for allow-listed keys.
 
-const DENY_KEY = /(buyer|recipient|address|phone|email|postal|zip|first_name|last_name|full_name|district|street|user_id|nickname|message|note|remark|id_number|passport|card|payment_method|ip_address|cipher|token|secret|signature)/i;
+export const DENY_KEY = /(buyer|recipient|address|phone|email|postal|zip|first_name|last_name|full_name|district|street|user_id|nickname|message|note|remark|id_number|passport|card|payment_method|ip_address|cipher|token|secret|signature)/i;
 
 export const ALLOW_KEYS: ReadonlySet<string> = new Set([
   // identity / ids (kept as strings)
