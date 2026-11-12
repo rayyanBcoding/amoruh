@@ -319,6 +319,64 @@ async function main() {
   try { buildAuthorizeUrl(s1, { TIKTOK_SERVICE_ID: "x", TIKTOK_AUTHORIZE_BASE: "http://evil.example/open/authorize" }); } catch { insecure = true; }
   check("non-https authorize base rejected", insecure, true);
 
+  // ---------- Auction validation sample: projection + analysis ----------
+  const { projectOrder, analyzeAuctionRows } = await import("../src/lib/tiktok/auction-sample");
+  const T = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+  const mk = (id: string, room: string | null, sku: string, over: Record<string, unknown> = {}, li: Record<string, unknown> = {}) => ({
+    id, order_type: "AUCTION", status: "DELIVERED", create_time: T("2026-11-05T20:00:00Z"), paid_time: T("2026-11-05T20:00:05Z"),
+    auto_combine_group_id: "9" + id, buyer_nickname: "SECRET-NICK", buyer_email: "secret@x.test", recipient_address: { name: "SECRET-NAME", full_address: "SECRET-ADDR" },
+    user_id: "SECRET-UID", payment_method_name: "SECRET-CARD", packages: [{ id: "pk" + id }], shipping_provider: "USPS", tracking_number: "9400111899223344556677",
+    line_items: [{ id: "li" + id, room_id: room, seller_sku: sku, sku_name: sku, sale_price: "31.50", currency: "USD", display_status: "DELIVERED", package_id: "pk" + id, ...li }], ...over,
+  });
+  const rowsFor = (orders: unknown[]) => orders.flatMap(projectOrder);
+
+  const priv = rowsFor([mk("1", "R1", "5")]);
+  const privJson = JSON.stringify(priv);
+  ok("projection never carries buyer / recipient / user / card data", !/SECRET/.test(privJson));
+  check("projection keeps ids as strings", [typeof priv[0].orderId, typeof priv[0].roomId, typeof priv[0].sellerSku], ["string", "string", "string"]);
+  check("sale price stays a decimal string", priv[0].salePrice, "31.50");
+  check("auction number parsed from seller_sku", priv[0].auctionNo, 5);
+  check("tracking exposed only as last 4", priv[0].trackingLast4, "6677");
+  ok("full tracking number is not in the projection", !privJson.includes("9400111899223344556677"));
+  check("paid order", priv[0].paidState, "PAID");
+  check("cancelled with no paid_time is UNPAID_CANCELLED", rowsFor([mk("2", "R1", "6", { status: "CANCELLED", paid_time: undefined })])[0].paidState, "UNPAID_CANCELLED");
+  check("cancelled WITH paid_time is flagged separately", rowsFor([mk("3", "R1", "7", { status: "CANCELLED" })])[0].paidState, "CANCELLED_AFTER_PAID");
+  check("order without id yields no rows", projectOrder({ line_items: [] }).length, 0);
+
+  const newer = (n: number) => ({ create_time: T("2026-11-05T21:00:00Z") + n, paid_time: T("2026-11-05T21:00:05Z") + n });
+  const older = (n: number) => ({ create_time: T("2026-10-20T21:00:00Z") + n, paid_time: T("2026-10-20T21:00:05Z") + n });
+  const orders = [
+    mk("a1", "ROOM_NEW", "1", newer(1), {}),
+    mk("a2", "ROOM_NEW", "2", { ...newer(2), auto_combine_group_id: "G1" }),
+    mk("a3", "ROOM_NEW", "3", { ...newer(3), auto_combine_group_id: "G1" }),
+    mk("a5", "ROOM_NEW", "5", { ...newer(4), status: "CANCELLED", paid_time: undefined, cancel_reason: "Customer overdue to pay", cancellation_initiator: "SYSTEM" }),
+    mk("a5b", "ROOM_NEW", "5", newer(5)), // duplicate auction number in the room
+    mk("x1", "ROOM_NEW", "abc", newer(6)), // non-numeric sku
+    mk("x2", null, "9", newer(7)), // no room
+    mk("x3", "ROOM_NEW", "8", { ...newer(8), order_type: "NORMAL" }),
+    mk("o1", "ROOM_OLD", "1", older(1)),
+    mk("o2", "ROOM_OLD", "2", older(2)),
+    mk("o4", "ROOM_OLD", "4", older(4)),
+  ];
+  const an = analyzeAuctionRows(rowsFor(orders), orders.length);
+  check("focus room is the newest room", an.focusRoomId, "ROOM_NEW");
+  check("rooms found", an.rooms.map((r) => r.roomId), ["ROOM_NEW", "ROOM_OLD"]);
+  const rn = an.rooms[0], ro = an.rooms[1];
+  ok("newest room is fully covered only because an older room is in the window", rn.fullyCovered === true && ro.fullyCovered === false);
+  check("older room is NOT claimed complete (window may cut it off)", ro.missingNumbers, null);
+  check("numbering restarts per room (both rooms start at 1)", [rn.auctionNoMin, ro.auctionNoMin], [1, 1]);
+  check("missing numbers reported for the covered room", rn.missingNumbers, [4, 6, 7]);
+  check("duplicate auction number detected", rn.duplicateAuctionNos.map((d) => d.auctionNo), ["5"]);
+  check("unpaid-cancelled counted", rn.unpaidCancelled, 1);
+  check("exception: non-auction", an.exceptionCounts["NON_AUCTION"], 1);
+  check("exception: no room id", an.exceptionCounts["NO_ROOM_ID"], 1);
+  check("exception: non-numeric sku", an.exceptionCounts["NON_NUMERIC_SKU"], 1);
+  check("exception: duplicate auction no", an.exceptionCounts["DUPLICATE_AUCTION_NO_IN_ROOM"], 1);
+  check("order type counts", an.orderTypeCounts["AUCTION"], 10);
+  check("combined package group found", an.combineGroups.map((g) => [g.autoCombineGroupId, g.auctionNos.join(",")]), [["G1", "2,3"]]);
+  check("sku_name mismatch flagged", analyzeAuctionRows(rowsFor([mk("m1", "R", "10", {}, { sku_name: "Gucci" })]), 1).exceptionCounts["SKU_NAME_MISMATCH"], 1);
+  check("empty window is safe", analyzeAuctionRows([], 0).focusRoomId, null);
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 }
