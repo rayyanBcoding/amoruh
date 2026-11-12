@@ -67,6 +67,19 @@ class MemRedis {
   async del(k: string) {
     return this.m.delete(k) ? 1 : 0;
   }
+  writes = 0;
+  async mget<T>(...keys: string[]): Promise<(T | null)[]> {
+    return Promise.all(keys.map((k) => this.get<T>(k)));
+  }
+  pipeline() {
+    const ops: (() => Promise<unknown>)[] = [];
+    const p = {
+      set: (k: string, v: unknown) => { ops.push(async () => { this.writes++; return this.set(k, v); }); return p; },
+      del: (k: string) => { ops.push(async () => this.del(k)); return p; },
+      exec: async () => { const out: unknown[] = []; for (const op of ops) out.push(await op()); return out; },
+    };
+    return p;
+  }
 }
 const mem = new MemRedis();
 (globalThis as { __amoruhTiktokRedis?: unknown }).__amoruhTiktokRedis = mem;
@@ -376,6 +389,190 @@ async function main() {
   check("combined package group found", an.combineGroups.map((g) => [g.autoCombineGroupId, g.auctionNos.join(",")]), [["G1", "2,3"]]);
   check("sku_name mismatch flagged", analyzeAuctionRows(rowsFor([mk("m1", "R", "10", {}, { sku_name: "Gucci" })]), 1).exceptionCounts["SKU_NAME_MISMATCH"], 1);
   check("empty window is safe", analyzeAuctionRows([], 0).focusRoomId, null);
+
+  // ---------- Milestone 2 data layer: orders, slots, rooms, groups, packages, matches ----------
+  const { importOrders, ImportInProgressError, getRoomView, getOrder, getSlot, getGroup, getPackage, getRoom, getRoomsIndex } = await import("../src/lib/tiktok/order-store");
+  const { selectMatch, voidMatch, getMatch, matchHealth, linkRoomToSession, unlinkRoom, getSessionLink, getRoomSession, MatchError } = await import("../src/lib/tiktok/matches");
+  const { K, assertNoPersonalData, toOrderContent } = await import("../src/lib/tiktok/records");
+  const { normalizeMoney, toCents } = await import("../src/lib/tiktok/money");
+
+  const ROOM_NEW = "7706328801780763422", ROOM_OLD = "7705645796045179662";
+  const iso2 = (x: string) => Math.floor(Date.parse(x) / 1000);
+  interface Spec { id: string; line: string; room: string | null; sku: string | null; price: string; created: string; paid?: string | null; status?: string; group?: string | null; pkg?: string | null; tracking?: string | null; type?: string; cancel?: [string, string]; extra?: Record<string, unknown> }
+  const fx = (o: Spec) => ({
+    id: o.id, order_type: o.type ?? "AUCTION", status: o.status ?? "IN_TRANSIT", create_time: iso2(o.created),
+    paid_time: o.paid === null ? undefined : iso2(o.paid ?? new Date(Date.parse(o.created) + 4000).toISOString()), update_time: iso2(o.created) + 100,
+    auto_combine_group_id: o.group ?? undefined, packages: o.pkg ? [{ id: o.pkg }] : [], shipping_provider: "USPS", shipping_type: "TIKTOK",
+    delivery_option_name: "Standard shipping", fulfillment_type: "FULFILLMENT_BY_SELLER", tracking_number: o.tracking ?? undefined,
+    cancel_reason: o.cancel?.[0], cancellation_initiator: o.cancel?.[1],
+    // personal data TikTok really sends — must NEVER reach storage:
+    buyer_email: "SECRET@x.test", buyer_nickname: "SECRET-NICK", buyer_message: "SECRET-MSG", user_id: "SECRET-UID", payment_method_name: "SECRET-CARD",
+    recipient_address: { full_address: "SECRET-ADDR", phone_number: "SECRET-PHONE", name: "SECRET-NAME" },
+    line_items: [{ id: o.line, room_id: o.room ?? undefined, seller_sku: o.sku ?? undefined, sku_name: o.sku ?? undefined, sale_price: o.price, original_price: o.price, seller_discount: "0", platform_discount: "0",
+      currency: "USD", display_status: o.status ?? "IN_TRANSIT", package_id: o.pkg ?? undefined, tracking_number: o.tracking ?? undefined, product_id: "1732774835048780102", sku_id: "1732774836822774086", cancel_reason: o.cancel?.[0] }],
+    ...o.extra,
+  });
+  // Values below are real ids / prices / packages from the production sample; full tracking numbers, product ids and a few prices were not in the sample and are placeholders.
+  const G_A = "2994363699444683427", P_A = "1158216285475607203", G_B = "2994369010644325239", P_B = "1158216338944660343";
+  const base = [
+    fx({ id: "577669111496872611", line: "577669111497003683", room: ROOM_NEW, sku: "25", price: "3", created: "2026-11-10T00:38:34Z", group: G_A, pkg: P_A, tracking: "TEST000000000000001963" }),
+    fx({ id: "577669125000696483", line: "577669125000827555", room: ROOM_NEW, sku: "29", price: "15", created: "2026-11-10T00:45:42Z", group: G_A, pkg: P_A, tracking: "TEST000000000000001963" }),
+    fx({ id: "577669137360589475", line: "577669137360720547", room: ROOM_NEW, sku: "33", price: "21", created: "2026-11-10T00:51:39Z", group: G_A, pkg: P_A, tracking: "TEST000000000000001963" }),
+    fx({ id: "577669155394917027", line: "577669155395048099", room: ROOM_NEW, sku: "39", price: "21", created: "2026-11-10T01:01:00Z", group: G_A, pkg: P_A, tracking: "TEST000000000000001963" }),
+    fx({ id: "577669157018243959", line: "577669157018375031", room: ROOM_NEW, sku: "40", price: "23", created: "2026-11-10T01:02:01Z", group: G_B, pkg: P_B, tracking: "TEST000000000000002014" }),
+    fx({ id: "577669162669282167", line: "577669162669413239", room: ROOM_NEW, sku: "43", price: "14", created: "2026-11-10T01:05:35Z", group: G_B, pkg: P_B, tracking: "TEST000000000000002014" }),
+    // SAME auction number (#40) in the OLDER room — must be a different slot
+    fx({ id: "577665408387682855", line: "577665408387814000", room: ROOM_OLD, sku: "40", price: "10", created: "2026-11-08T05:00:00Z", group: "2993754139863716391", pkg: "1158197726292513319", tracking: "TEST000000000000009999" }),
+    // an unpaid auction win (real earlier-sample order #73: cancelled by SYSTEM, never paid)
+    fx({ id: "577629543777538988", line: "577629543777670060", room: "7698947531304864543", sku: "73", price: "62", created: "2026-10-21T22:00:00Z", paid: null, status: "CANCELLED", cancel: ["Customer overdue to pay", "SYSTEM"] }),
+    fx({ id: "900000000000000001", line: "900000000000000002", room: null, sku: "5", price: "9", created: "2026-11-10T01:06:00Z", type: "NORMAL" }), // not an auction, no room
+  ];
+
+  const keysBefore = new Set(mem.m.keys());
+  const writesBefore = mem.writes;
+  const imp1 = await importOrders(base);
+  check("first import creates every order", [imp1.created, imp1.updated, imp1.unchanged], [9, 0, 0]);
+  check("rooms touched: new, old, unpaid-sample room", [...imp1.roomsTouched].sort(), [ROOM_NEW, ROOM_OLD, "7698947531304864543"].sort());
+  check("the non-auction / roomless order is parked as unslotted, not slotted", imp1.unslotted, 1);
+  check("slots written (6 + 1 + 1)", imp1.slotsWritten, 8);
+
+  const newKeys = [...mem.m.keys()].filter((k) => !keysBefore.has(k));
+  ok("every new key is inside the TikTok dev namespace", newKeys.length > 0 && newKeys.every((k) => k.startsWith("amoruh:tiktok:dev:")));
+  ok("nothing outside the TikTok namespace was created (no SaleRecord / inventory / product keys)", ![...mem.m.keys()].some((k) => !k.startsWith("amoruh:tiktok:")));
+  const storedJson = newKeys.map((k) => JSON.stringify(mem.m.get(k))).join("\n");
+  ok("NO buyer / recipient / contact / payment data in any stored record", !/SECRET/.test(storedJson));
+  ok("tracking numbers ARE preserved in full", storedJson.includes("TEST000000000000001963"));
+
+  const o25 = (await getOrder("577669111496872611"))!;
+  check("order id kept as exact string", o25.orderId, "577669111496872611");
+  check("line item id kept as exact string", o25.lineItems[0].lineItemId, "577669111497003683");
+  check("room id is a string", o25.roomId, ROOM_NEW);
+  check("auction number string + numeric sort key", [o25.lineItems[0].sellerSku, o25.lineItems[0].auctionNo], ["25", 25]);
+  check("sale price kept as the decimal string TikTok sent", o25.lineItems[0].salePrice, "3");
+  check("paid state, status and version recorded", [o25.paidState, o25.status, o25.version, o25.statusHistory.length], ["PAID", "IN_TRANSIT", 1, 1]);
+  check("product / sku ids kept as strings", [o25.lineItems[0].productId, o25.lineItems[0].skuId], ["1732774835048780102", "1732774836822774086"]);
+
+  // ---- slots are keyed by (room_id, seller_sku) ----
+  const sNew40 = (await getSlot(ROOM_NEW, "40"))!, sOld40 = (await getSlot(ROOM_OLD, "40"))!;
+  ok("auction #40 exists as TWO separate slots, one per room", !!sNew40 && !!sOld40 && sNew40.entries[0].orderId !== sOld40.entries[0].orderId);
+  check("…and their storage keys differ", [K.slot(ROOM_NEW, "40") !== K.slot(ROOM_OLD, "40"), sNew40.roomId, sOld40.roomId], [true, ROOM_NEW, ROOM_OLD]);
+  check("room summary counts", (({ slotCount, orderCount, paidSlots, auctionNoMin, auctionNoMax }) => ({ slotCount, orderCount, paidSlots, auctionNoMin, auctionNoMax }))((await getRoom(ROOM_NEW))!), { slotCount: 6, orderCount: 6, paidSlots: 6, auctionNoMin: 25, auctionNoMax: 43 });
+  check("rooms index is newest-first", (await getRoomsIndex())!.rooms.map((x) => x.roomId), [ROOM_NEW, ROOM_OLD, "7698947531304864543"]);
+
+  // ---- unpaid / cancelled representation ----
+  const unpaid = (await getSlot("7698947531304864543", "73"))!;
+  check("unpaid win is stored, not dropped", [unpaid.state, unpaid.matchable, unpaid.activeEntry, unpaid.salePrice], ["UNPAID_CANCELLED", false, null, "62"]);
+  const unpaidOrder = (await getOrder("577629543777538988"))!;
+  check("order keeps TikTok's cancel details and has no paid_time", [unpaidOrder.paidState, unpaidOrder.status, unpaidOrder.paidTime, unpaidOrder.cancelReason, unpaidOrder.cancellationInitiator], ["UNPAID_CANCELLED", "CANCELLED", null, "Customer overdue to pay", "SYSTEM"]);
+  await throwsAsync("an unpaid slot cannot be matched", () => selectMatch({ roomId: "7698947531304864543", sellerSku: "73", productId: "p_1" }), /cannot be matched/);
+  let matchErr: unknown = null;
+  try { await selectMatch({ roomId: "7698947531304864543", sellerSku: "73", productId: "p_1" }); } catch (e) { matchErr = e; }
+  ok("…with the typed error code SLOT_NOT_MATCHABLE", matchErr instanceof MatchError && matchErr.code === "SLOT_NOT_MATCHABLE");
+  const un = (await mem.get<{ entries: { orderId: string; reason: string }[] }>(K.unslotted()))!;
+  check("unslotted list records why", un.entries.map((e) => [e.orderId, e.reason]), [["900000000000000001", "NON_AUCTION"]]);
+
+  // ---- combined packages ----
+  const gA = (await getGroup(G_A))!;
+  check("combine group lists all 4 orders / the one package / the room", [gA.orderIds.length, gA.packageIds, gA.roomIds], [4, [P_A], [ROOM_NEW]]);
+  check("combine group remembers which auction slots it holds", gA.slotKeys.map((x) => x.sellerSku).sort(), ["25", "29", "33", "39"]);
+  const pA = (await getPackage(P_A))!;
+  check("package: orders, line items, shared tracking, carrier", [pA.orderIds.length, pA.lineItemIds.length, pA.trackingNumbers, pA.carrier, pA.autoCombineGroupId], [4, 4, ["TEST000000000000001963"], "USPS", G_A]);
+
+  // ---- duplicate imports ----
+  const snap = () => JSON.stringify([...mem.m.entries()].filter(([k]) => !k.includes(":import")).sort(([a], [b]) => a.localeCompare(b)));
+  const snapBefore = snap();
+  const wBefore = mem.writes;
+  const imp2 = await importOrders(base);
+  check("re-importing identical data creates / updates nothing", [imp2.created, imp2.updated, imp2.unchanged, imp2.slotsWritten], [0, 0, 9, 0]);
+  check("…and rewrites no order / slot / room / group / package", snap(), snapBefore);
+  check("…only the import log + index are written", mem.writes - wBefore, 2);
+  const imp3 = await importOrders([base[0], base[0], base[1]]);
+  check("duplicates inside one batch are collapsed and counted", [imp3.uniqueOrders, imp3.duplicatesInBatch, imp3.created], [2, 1, 0]);
+  check("slot never gains a duplicate entry", (await getSlot(ROOM_NEW, "25"))!.entries.length, 1);
+
+  // ---- concurrent importer is refused ----
+  await mem.set(K.importLock(), "lock-someone-else", { ex: 60 });
+  await throwsAsync("a second importer fails fast while the lock is held", () => importOrders(base), /already running/);
+  let lockErr: unknown = null;
+  try { await importOrders(base); } catch (e) { lockErr = e; }
+  ok("…with a typed ImportInProgressError (route maps it to HTTP 409)", lockErr instanceof ImportInProgressError);
+  await mem.del(K.importLock());
+
+  // ---- explicit matches (no SaleRecord, no inventory) ----
+  const m1 = await selectMatch({ roomId: ROOM_NEW, sellerSku: "25", productId: "p_gucci_bloom", selectedBy: "tester" });
+  check("match links slot → order → AMORUH product by explicit ids", [m1.roomId, m1.sellerSku, m1.orderId, m1.lineItemId, m1.productId, m1.state, m1.version], [ROOM_NEW, "25", "577669111496872611", "577669111497003683", "p_gucci_bloom", "selected", 1]);
+  check("match snapshots TikTok's price and starts with NO sale record", [m1.tiktokSalePrice, m1.saleRecordId, m1.confirmedAt], ["3", null, null]);
+  check("changing the product bumps the version", (await selectMatch({ roomId: ROOM_NEW, sellerSku: "25", productId: "p_afnan" })).version, 2);
+  await throwsAsync("stale expectedVersion is rejected", () => selectMatch({ roomId: ROOM_NEW, sellerSku: "25", productId: "p_x", expectedVersion: 1 }), /changed since/);
+  await throwsAsync("empty product id rejected", () => selectMatch({ roomId: ROOM_NEW, sellerSku: "29", productId: " " }), /product id/);
+  await throwsAsync("unknown slot rejected", () => selectMatch({ roomId: ROOM_NEW, sellerSku: "999", productId: "p" }), /No TikTok auction slot/);
+  check("a match for #40 in one room does not touch #40 in the other room", [(await selectMatch({ roomId: ROOM_NEW, sellerSku: "40", productId: "p_a" })).roomId, await getMatch(ROOM_OLD, "40")], [ROOM_NEW, null]);
+  check("health is OK while TikTok still says paid", await matchHealth(ROOM_NEW, "25"), "OK");
+
+  const view = (await getRoomView(ROOM_NEW))!;
+  check("room view is sorted by auction number", view.rows.map((r) => r.auctionNo), [25, 29, 33, 39, 40, 43]);
+  const row25 = view.rows[0];
+  check("room view row joins price / package / group size / match", [row25.salePrice, row25.packageId, row25.ordersInGroup, row25.trackingLast4, row25.match?.productId, row25.match?.health], ["3", P_A, 4, "1963", "p_afnan", "OK"]);
+  ok("room view never exposes a full tracking number or personal data", !/TEST000000000000001963|SECRET/.test(JSON.stringify(view)));
+
+  // ---- TikTok later cancels a paid order: record the flip, never edit silently ----
+  const cancelled = fx({ id: "577669111496872611", line: "577669111497003683", room: ROOM_NEW, sku: "25", price: "3", created: "2026-11-10T00:38:34Z", status: "CANCELLED", group: G_A, pkg: P_A, tracking: "TEST000000000000001963", cancel: ["Seller cancelled", "SELLER"] });
+  const imp4 = await importOrders([cancelled]);
+  check("a status change is an update, counted as a status change", [imp4.created, imp4.updated, imp4.statusChanges], [0, 1, 1]);
+  const o25b = (await getOrder("577669111496872611"))!;
+  check("history keeps both states; version bumped", [o25b.version, o25b.statusHistory.map((h) => h.paidState)], [2, ["PAID", "CANCELLED_AFTER_PAID"]]);
+  const slot25 = (await getSlot(ROOM_NEW, "25"))!;
+  check("slot is no longer matchable", [slot25.state, slot25.matchable], ["CANCELLED_AFTER_PAID", false]);
+  check("existing match is flagged STALE, not deleted or changed", [await matchHealth(ROOM_NEW, "25"), (await getMatch(ROOM_NEW, "25"))!.productId], ["STALE_ORDER_NOT_PAID", "p_afnan"]);
+  check("room counters follow", (await getRoom(ROOM_NEW))!.paidSlots, 5);
+  check("the group still holds the order (it is still a TikTok order)", (await getGroup(G_A))!.orderIds.length, 4);
+  const voided = await voidMatch({ roomId: ROOM_NEW, sellerSku: "25", reason: "order cancelled on TikTok" });
+  check("clearing a match keeps an audit record", [voided.state, voided.voidReason], ["voided", "order cancelled on TikTok"]);
+
+  // ---- same auction number re-sold after a cancel, and true conflicts ----
+  await importOrders([
+    fx({ id: "800000000000000001", line: "800000000000000011", room: ROOM_NEW, sku: "50", price: "7", created: "2026-11-10T01:10:00Z", paid: null, status: "CANCELLED", cancel: ["Customer overdue to pay", "SYSTEM"] }),
+    fx({ id: "800000000000000002", line: "800000000000000012", room: ROOM_NEW, sku: "50", price: "9", created: "2026-11-10T01:12:00Z" }),
+  ]);
+  const s50 = (await getSlot(ROOM_NEW, "50"))!;
+  check("cancelled attempt + later paid order → slot is PAID with the paid order active", [s50.state, s50.activeEntry?.orderId, s50.salePrice, s50.entries.length], ["PAID", "800000000000000002", "9", 2]);
+  await importOrders([
+    fx({ id: "800000000000000003", line: "800000000000000013", room: ROOM_NEW, sku: "51", price: "5", created: "2026-11-10T01:13:00Z" }),
+    fx({ id: "800000000000000004", line: "800000000000000014", room: ROOM_NEW, sku: "51", price: "6", created: "2026-11-10T01:14:00Z" }),
+  ]);
+  check("two PAID orders for one slot → CONFLICT", (await getSlot(ROOM_NEW, "51"))!.state, "CONFLICT");
+  await throwsAsync("a conflicting slot cannot be matched", () => selectMatch({ roomId: ROOM_NEW, sellerSku: "51", productId: "p" }), /more than one paid/);
+
+  // ---- an order moving to another combine group is removed from the old one ----
+  await importOrders([fx({ id: "577669162669282167", line: "577669162669413239", room: ROOM_NEW, sku: "43", price: "14", created: "2026-11-10T01:05:35Z", group: "2994369999999999999", pkg: "1158216999999999999", tracking: "TEST000000000000002014" })]);
+  check("old group no longer lists the moved order", (await getGroup(G_B))!.orderIds, ["577669157018243959"]);
+  check("new group lists it", (await getGroup("2994369999999999999"))!.orderIds, ["577669162669282167"]);
+  check("old package no longer lists it", (await getPackage(P_B))!.orderIds, ["577669157018243959"]);
+
+  // ---- rooms are never merged; sessions only LINK rooms ----
+  const slotsSnap = JSON.stringify([...mem.m.entries()].filter(([k]) => k.includes(":slot:")).sort(([a], [b]) => a.localeCompare(b)));
+  await linkRoomToSession("session_A", ROOM_NEW);
+  const link = await linkRoomToSession("session_A", ROOM_OLD);
+  check("one AMORUH session can hold several TikTok rooms", link.roomIds, [ROOM_NEW, ROOM_OLD]);
+  check("room → session lookup", (await getRoomSession(ROOM_OLD))!.sessionId, "session_A");
+  check("linking never changes any slot", JSON.stringify([...mem.m.entries()].filter(([k]) => k.includes(":slot:")).sort(([a], [b]) => a.localeCompare(b))), slotsSnap);
+  check("#40 is still two distinct slots after linking", [(await getSlot(ROOM_NEW, "40"))!.roomId, (await getSlot(ROOM_OLD, "40"))!.roomId], [ROOM_NEW, ROOM_OLD]);
+  await throwsAsync("a room cannot belong to two sessions", () => linkRoomToSession("session_B", ROOM_NEW), /already linked/);
+  await throwsAsync("unknown room cannot be linked", () => linkRoomToSession("session_A", "123"), /Unknown TikTok room/);
+  await unlinkRoom(ROOM_OLD);
+  check("unlink removes only the association", [(await getSessionLink("session_A"))!.roomIds, await getRoomSession(ROOM_OLD), !!(await getRoom(ROOM_OLD))], [[ROOM_NEW], null, true]);
+
+  // ---- guards ----
+  throwsSync("personal-data guard rejects a buyer field", () => assertNoPersonalData({ ok: 1, nested: { buyer_email: "x" } }), /Refusing to store/);
+  throwsSync("…and recipient / address / phone fields", () => assertNoPersonalData([{ recipient_address: {} }]), /Refusing to store/);
+  const noLeak = toOrderContent(fx({ id: "1", line: "2", room: "3", sku: "4", price: "5", created: "2026-11-10T00:00:00Z" }))!;
+  ok("projection of a raw order contains no personal data", !/SECRET/.test(JSON.stringify(noLeak)));
+  assertNoPersonalData(noLeak);
+  check("bad money is not stored as a number, it is flagged", toOrderContent(fx({ id: "1", line: "2", room: "3", sku: "4", price: "12,5", created: "2026-11-10T00:00:00Z" }))!.anomalies, ["BAD_MONEY:salePrice", "BAD_MONEY:originalPrice"]);
+  check("normalizeMoney", [normalizeMoney("4.89"), normalizeMoney("007"), normalizeMoney("1e3"), normalizeMoney("abc"), normalizeMoney(null)], ["4.89", "7", null, null, null]);
+  check("toCents is exact", [toCents("4.89"), toCents("31"), toCents("0.07"), toCents("19.99"), toCents("1.005")], [489, 3100, 7, 1999, null]);
+  ok("no new key was written outside the TikTok namespace, and SaleRecord-style keys never appear", ![...mem.m.keys()].some((k) => !k.startsWith("amoruh:tiktok:") ));
+  void writesBefore;
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);

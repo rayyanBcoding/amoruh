@@ -2,6 +2,7 @@ import { getValidAccessToken } from "./auth";
 import { callOpenApi } from "./client";
 import { TIKTOK_API, TIKTOK_ENV, type TikTokEnv } from "./config";
 import { getAuthorizedShops } from "./shops";
+import { paidStateOf, type PaidState } from "./records";
 
 // Milestone 1 validation: does (room_id, seller_sku) identify an AMORUH auction number?
 //
@@ -21,7 +22,7 @@ export const PAGE_SIZE = 50;
 export const ROWS_DEFAULT = 25;
 export const ROWS_MAX = 60;
 
-export type PaidState = "PAID" | "UNPAID_CANCELLED" | "CANCELLED_AFTER_PAID" | "UNPAID_OPEN";
+export type { PaidState };
 
 export interface AuctionRow {
   orderId: string;
@@ -103,12 +104,6 @@ export interface AuctionAnalysis {
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : null);
 const isoOf = (v: unknown): string | null => (typeof v === "number" && v > 0 ? new Date(v * 1000).toISOString() : null);
 const asObj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
-
-function paidStateOf(status: string | null, paidTime: unknown): PaidState {
-  const paid = typeof paidTime === "number" && paidTime > 0;
-  if (status === "CANCELLED") return paid ? "CANCELLED_AFTER_PAID" : "UNPAID_CANCELLED";
-  return paid ? "PAID" : "UNPAID_OPEN";
-}
 
 /** One row per line item. Only allow-listed, non-personal fields are copied. */
 export function projectOrder(order: unknown): AuctionRow[] {
@@ -275,10 +270,9 @@ export interface AuctionSample {
   focusRoomRows: AuctionRow[];
 }
 
-export async function fetchAuctionSample(opts: { rows?: number; window?: number } = {}): Promise<AuctionSample> {
-  const rowsWanted = Math.min(Math.max(Math.floor(Number(opts.rows)) || ROWS_DEFAULT, 1), ROWS_MAX);
-  const windowSize = Math.min(Math.max(Math.floor(Number(opts.window)) || WINDOW_DEFAULT, PAGE_SIZE), WINDOW_MAX);
-
+/** Newest-first orders (raw TikTok objects, in memory only), paged up to `windowSize`. Read-only. */
+export async function fetchRecentOrdersRaw(windowSize: number): Promise<{ orders: unknown[]; requestIds: (string | null)[]; shop: { name: string; region: string } }> {
+  const size = Math.min(Math.max(Math.floor(Number(windowSize)) || WINDOW_DEFAULT, PAGE_SIZE), WINDOW_MAX);
   const { accessToken, conn } = await getValidAccessToken();
   const shops = conn.shops.length ? conn.shops : (await getAuthorizedShops(accessToken)).shops;
   const shop = shops[0];
@@ -287,13 +281,19 @@ export async function fetchAuctionSample(opts: { rows?: number; window?: number 
   const orders: unknown[] = [];
   const requestIds: (string | null)[] = [];
   let token: string | undefined;
-  while (orders.length < windowSize) {
+  while (orders.length < size) {
     const page = await searchPage(accessToken, shop.cipher, token);
     requestIds.push(page.requestId);
     orders.push(...page.orders);
     if (!page.next || page.orders.length === 0) break;
     token = page.next;
   }
+  return { orders, requestIds, shop: { name: shop.name, region: shop.region } };
+}
+
+export async function fetchAuctionSample(opts: { rows?: number; window?: number } = {}): Promise<AuctionSample> {
+  const rowsWanted = Math.min(Math.max(Math.floor(Number(opts.rows)) || ROWS_DEFAULT, 1), ROWS_MAX);
+  const { orders, requestIds, shop } = await fetchRecentOrdersRaw(opts.window ?? WINDOW_DEFAULT);
 
   const rows = orders.flatMap(projectOrder);
   const analysis = analyzeAuctionRows(rows, orders.length);
@@ -303,5 +303,5 @@ export async function fetchAuctionSample(opts: { rows?: number; window?: number 
     .slice(0, rowsWanted)
     .sort((a, b) => (a.auctionNo ?? Infinity) - (b.auctionNo ?? Infinity));
 
-  return { generatedAt: new Date().toISOString(), env: TIKTOK_ENV, shop: { name: shop.name, region: shop.region }, requestIds, analysis, focusRoomRows: focus };
+  return { generatedAt: new Date().toISOString(), env: TIKTOK_ENV, shop, requestIds, analysis, focusRoomRows: focus };
 }
