@@ -574,6 +574,123 @@ async function main() {
   ok("no new key was written outside the TikTok namespace, and SaleRecord-style keys never appear", ![...mem.m.keys()].some((k) => !k.startsWith("amoruh:tiktok:") ));
   void writesBefore;
 
+  // ---------- Bounded per-room import ----------
+  const { scanForRoom, importRoom, RoomImportError, resolveLimits, ROOM_LIMIT_DEFAULTS, ROOM_LIMIT_CEILING } = await import("../src/lib/tiktok/import-room");
+  const RM = "7705000000000000001", RM_OTHER = "7705000000000000002", RM_OLDER = "7705000000000000003";
+  const T0 = Math.floor(Date.parse("2026-11-08T04:00:00Z") / 1000);
+  const isoSec = (sec: number) => new Date(sec * 1000).toISOString();
+  let rmN = 0;
+  const rmId = () => `91${String(++rmN).padStart(16, "0")}`;
+  const rmOrder = (room: string | null, sku: string, sec: number, extra: Partial<Spec> = {}) =>
+    fx({ id: rmId(), line: rmId(), room, sku, price: String(10 + (rmN % 7)), created: isoSec(sec), group: `5000${sku}`, pkg: `6000${sku}`, tracking: `TRK${sku.padStart(6, "0")}`, ...extra });
+  const rmTimeOf = (o: ReturnType<typeof fx>) => o.create_time as number;
+  const newestFirst = (xs: ReturnType<typeof fx>[]) => [...xs].sort((a, b) => rmTimeOf(b) - rmTimeOf(a));
+  const pagesOf = (list: unknown[], size: number) => {
+    const calls: (string | undefined)[] = [];
+    const fetchPage = async (token?: string) => {
+      calls.push(token);
+      const i = token ? Number(token) : 0;
+      const orders = list.slice(i, i + size);
+      return { orders, next: i + size < list.length ? String(i + size) : null, requestId: `req-${calls.length}` };
+    };
+    return { fetchPage, calls };
+  };
+
+  // 30-auction room: #20 unpaid, #3/#9/#15 combined, #4/#5 combined, two stray non-room orders inside it
+  const roomOrders30 = Array.from({ length: 30 }, (_, i) => i + 1).map((n) => {
+    const sku = String(n);
+    const grp: Partial<Spec> = [3, 9, 15].includes(n) ? { group: "991", pkg: "881" } : [4, 5].includes(n) ? { group: "992", pkg: "882" } : {};
+    const un: Partial<Spec> = n === 20 ? { paid: null, status: "CANCELLED", cancel: ["Customer overdue to pay", "SYSTEM"], pkg: null } : {};
+    return rmOrder(RM, sku, T0 + n * 60, { ...grp, ...un });
+  });
+  const strays = [rmOrder(null, "7", T0 + 14 * 60 + 30, { type: "NORMAL", group: null, pkg: null }), rmOrder(null, "8", T0 + 22 * 60 + 30, { type: "NORMAL", group: null, pkg: null })];
+  const newerOnes = Array.from({ length: 12 }, (_, i) => rmOrder(RM_OTHER, String(i + 1), T0 + 100000 + i));
+  const olderOnes = Array.from({ length: 10 }, (_, i) => rmOrder(RM_OLDER, String(i + 1), T0 - 1000 - i));
+  const world = newestFirst([...newerOnes, ...roomOrders30, ...strays, ...olderOnes]);
+
+  // --- scan: boundary logic ---
+  const pg1 = pagesOf(world, 10);
+  const sc1 = await scanForRoom({ roomId: RM, fetchPage: pg1.fetchPage });
+  check("scan collects exactly the room's orders", sc1.roomOrders.length, 30);
+  check("scan stops at the confirmed boundary, not at the end of history", [sc1.stats.boundary, sc1.stats.inspected, sc1.stats.pages, pg1.calls.length], ["streak", 12 + 30 + 2 + 8, 6, 6]);
+  ok("stray non-room orders inside the room did not end the scan", sc1.roomOrders.length === 30 && sc1.stats.inspected === 52);
+  check("room time window recorded", [sc1.stats.firstRoomOrderTime, sc1.stats.lastRoomOrderTime], [T0 + 60, T0 + 1800]);
+  const early = await scanForRoom({ roomId: RM, fetchPage: pagesOf(world, 10).fetchPage, limits: { boundaryConfirm: 1 } });
+  ok("boundaryConfirm=1 would have stopped early at a stray (so the default of 8 matters)", early.roomOrders.length < 30);
+  const tail = await scanForRoom({ roomId: RM, fetchPage: pagesOf(newestFirst([...newerOnes, ...roomOrders30]), 10).fetchPage });
+  check("room at the very end of TikTok's list → boundary 'exhausted'", [tail.roomOrders.length, tail.stats.boundary], [30, "exhausted"]);
+
+  // --- scan: failures never return a partial room ---
+  const fail1 = async (label: string, limits: Record<string, number>, code: string, pages = pagesOf(world, 10), now?: () => number) => {
+    let err: unknown = null;
+    try { await scanForRoom({ roomId: RM, fetchPage: pages.fetchPage, limits, now }); } catch (e) { err = e; }
+    ok(`${label} → RoomImportError ${code}, "Nothing was imported"`, err instanceof RoomImportError && err.code === code && /Nothing was imported/.test(err.message) && !!err.stats);
+  };
+  await fail1("page limit", { maxPages: 3 }, "MAX_PAGES");
+  await fail1("inspected-orders limit", { maxOrdersInspected: 20 }, "MAX_ORDERS_INSPECTED");
+  let clock = 0;
+  const slow = pagesOf(world, 10);
+  const slowFetch = async (t?: string) => { clock += 100; return slow.fetchPage(t); };
+  let rtErr: unknown = null;
+  try { await scanForRoom({ roomId: RM, fetchPage: slowFetch, limits: { maxRuntimeMs: 150 }, now: () => clock }); } catch (e) { rtErr = e; }
+  ok("runtime limit → MAX_RUNTIME", rtErr instanceof RoomImportError && rtErr.code === "MAX_RUNTIME");
+  let nf: unknown = null;
+  try { await scanForRoom({ roomId: "7705999999999999999", fetchPage: pagesOf(world, 10).fetchPage }); } catch (e) { nf = e; }
+  ok("unknown room → ROOM_NOT_FOUND after exhausting the list", nf instanceof RoomImportError && nf.code === "ROOM_NOT_FOUND" && nf.stats?.entered === false);
+  const shuffled = [...world]; [shuffled[3], shuffled[40]] = [shuffled[40], shuffled[3]];
+  let ord: unknown = null;
+  try { await scanForRoom({ roomId: RM, fetchPage: pagesOf(shuffled, 10).fetchPage }); } catch (e) { ord = e; }
+  ok("out-of-order results → ORDER_NOT_NEWEST_FIRST (boundary cannot be trusted)", ord instanceof RoomImportError && ord.code === "ORDER_NOT_NEWEST_FIRST");
+  let bad: unknown = null;
+  try { await scanForRoom({ roomId: "abc", fetchPage: pg1.fetchPage }); } catch (e) { bad = e; }
+  ok("non-numeric room id rejected", bad instanceof RoomImportError && bad.code === "BAD_ROOM_ID");
+  check("limits default and clamp to ceilings", [resolveLimits({}), resolveLimits({ maxPages: 9999, maxOrdersInspected: 99999, maxRuntimeMs: 1e9, boundaryConfirm: -5 })], [ROOM_LIMIT_DEFAULTS, { ...ROOM_LIMIT_CEILING, boundaryConfirm: ROOM_LIMIT_DEFAULTS.boundaryConfirm }]);
+
+  // --- importRoom against the store: partial room already stored (#11–#30), complete it ---
+  const rmIds = (n: number) => roomOrders30[n - 1].id as string;
+  await importOrders(roomOrders30.filter((_, i) => i + 1 >= 11)); // the earlier capped import saw only #11–#30
+  const holdBefore = new Map<string, { hash: string; version: number; first: string }>();
+  for (let n = 11; n <= 30; n++) { const o = (await getOrder(rmIds(n)))!; holdBefore.set(rmIds(n), { hash: o.contentHash, version: o.version, first: o.firstSeenAt }); }
+  check("before: room holds only #11–#30", [(await getRoom(RM))!.auctionNoMin, (await getRoom(RM))!.slotCount], [11, 20]);
+
+  const storeSnap = () => JSON.stringify([...mem.m.entries()].sort(([a], [b]) => a.localeCompare(b)));
+  const snapPartial = storeSnap();
+  let failedImport: unknown = null;
+  try { await importRoom(RM, { limits: { maxPages: 2 } }, { fetchPage: pagesOf(world, 10).fetchPage }); } catch (e) { failedImport = e; }
+  ok("a limit hit during importRoom throws", failedImport instanceof RoomImportError);
+  check("…and the store is byte-for-byte unchanged (no partial room written)", storeSnap(), snapPartial);
+
+  const dry = await importRoom(RM, { dryRun: true }, { fetchPage: pagesOf(world, 10).fetchPage });
+  check("dry run reports the full room without writing", [dry.dryRun, dry.scanned.orders, dry.scanned.slots, dry.import, storeSnap() === snapPartial], [true, 30, 30, null, true]);
+
+  const done = await importRoom(RM, {}, { fetchPage: pagesOf(world, 10).fetchPage });
+  check("import completes the room", [done.complete, done.scan.boundary, done.scanned.orders, done.scanned.slots], [true, "streak", 30, 30]);
+  check("final range starts at #1 with no gaps", [done.scanned.auctionNoMin, done.scanned.auctionNoMax, done.scanned.startsAtOne, done.scanned.missingNumbers], [1, 30, true, []]);
+  check("paid / unpaid counts", [done.scanned.paid, done.scanned.unpaidCancelled], [29, 1]);
+  check("combined groups / multi-order groups / packages", [done.scanned.combinedGroups, done.scanned.multiOrderGroups, done.scanned.ordersInMultiOrderGroups, done.scanned.packages], [27, 2, 5, 26]);
+  check("no anomalies, no duplicate auction numbers", [done.scanned.exceptions, done.scanned.duplicateAuctionNos, done.import!.anomalyCounts], [{}, [], {}]);
+  check("only the 10 missing orders were created; the 20 already stored were left alone", [done.import!.created, done.import!.updated, done.import!.unchanged], [10, 0, 20]);
+  check("stored room matches what was scanned", [done.stored, done.consistent], [{ slotCount: 30, orderCount: 30, paidSlots: 29, unpaidSlots: 1, conflictSlots: 0, auctionNoMin: 1, auctionNoMax: 30 }, true]);
+  let heldSame = 0;
+  for (const [id, b] of holdBefore) { const o = (await getOrder(id))!; if (o.contentHash === b.hash && o.version === b.version && o.firstSeenAt === b.first) heldSame++; }
+  check("the previously stored #11–#30 are unchanged (hash, version, first-seen)", heldSame, 20);
+  check("unpaid #20 is stored but not matchable", [(await getSlot(RM, "20"))!.state, (await getSlot(RM, "20"))!.matchable], ["UNPAID_CANCELLED", false]);
+  ok("orders of OTHER rooms and stray orders were not imported", !mem.m.has(K.order(newerOnes[0].id as string)) && !mem.m.has(K.order(olderOnes[0].id as string)) && !mem.m.has(K.order(strays[0].id as string)));
+
+  // --- re-running the same room import ---
+  const keysAfter = [...mem.m.keys()].filter((k) => !k.includes(":import")).length;
+  const snapDone = JSON.stringify([...mem.m.entries()].filter(([k]) => !k.includes(":import")).sort(([a], [b]) => a.localeCompare(b)));
+  const again = await importRoom(RM, {}, { fetchPage: pagesOf(world, 10).fetchPage });
+  check("re-run: nothing created or updated", [again.import!.created, again.import!.updated, again.import!.unchanged, again.import!.slotsWritten], [0, 0, 30, 0]);
+  check("re-run: no new keys and no changed records", [[...mem.m.keys()].filter((k) => !k.includes(":import")).length, JSON.stringify([...mem.m.entries()].filter(([k]) => !k.includes(":import")).sort(([a], [b]) => a.localeCompare(b))) === snapDone], [keysAfter, true]);
+  check("re-run: still exactly 30 orders and 30 slots for the room", [[...mem.m.keys()].filter((k) => k.includes(":slot:" + RM + ":")).length, (await getRoom(RM))!.orderCount], [30, 30]);
+
+  // --- completeness is honest about gaps / a room that does not start at #1 ---
+  const gapRoom = "7705000000000000004";
+  const gapOrders = [5, 6, 8, 9].map((n) => rmOrder(gapRoom, String(n), T0 + 200000 + n * 60));
+  const gap = await importRoom(gapRoom, { dryRun: true }, { fetchPage: pagesOf(newestFirst([...gapOrders, ...olderOnes]), 10).fetchPage });
+  check("gaps and a start other than #1 are reported, not hidden", [gap.scanned.startsAtOne, gap.scanned.auctionNoMin, gap.scanned.missingNumbers], [false, 5, [1, 2, 3, 4, 7]]);
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 }

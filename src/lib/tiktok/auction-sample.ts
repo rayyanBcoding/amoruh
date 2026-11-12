@@ -249,7 +249,7 @@ export function analyzeAuctionRows(rows: AuctionRow[], orderCount: number): Auct
 
 // ---------- fetch (read-only) ----------
 
-async function searchPage(accessToken: string, shopCipher: string, pageToken?: string) {
+export async function searchPage(accessToken: string, shopCipher: string, pageToken?: string) {
   const { data, requestId } = await callOpenApi<{ orders?: unknown[]; next_page_token?: string }>({
     method: "POST",
     path: TIKTOK_API.orderSearchPath,
