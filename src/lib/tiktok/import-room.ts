@@ -174,10 +174,11 @@ export interface RoomImportResult {
 
 /** Import one complete room. `deps.fetchPage` is a test seam; production uses Order Search. */
 export async function importRoom(
-  roomId: string,
+  roomIdInput: string,
   opts: { limits?: Partial<RoomScanLimits>; dryRun?: boolean } = {},
   deps: { fetchPage?: (pageToken?: string) => Promise<OrderPage>; now?: () => number } = {}
 ): Promise<RoomImportResult> {
+  let roomId = roomIdInput;
   let fetchPage = deps.fetchPage;
   if (!fetchPage) {
     const { accessToken, conn } = await getValidAccessToken();
@@ -185,6 +186,14 @@ export async function importRoom(
     const shop = shops[0];
     if (!shop?.cipher) throw new Error("No authorized shop (with a shop cipher) found for this connection.");
     fetchPage = async (token) => searchPage(accessToken, shop.cipher, token).then((p) => ({ orders: p.orders, next: p.next, requestId: p.requestId }));
+  }
+
+  // "latest" = the room of the newest order that carries a room_id (the LIVE in progress).
+  if (roomId === "latest") {
+    const first = await fetchPage();
+    const found = first.orders.map(toOrderContent).find((c) => c && c.roomId)?.roomId ?? null;
+    if (!found) throw new RoomImportError("ROOM_NOT_FOUND", "No TikTok LIVE room was found among the newest orders. Nothing was imported.");
+    roomId = found;
   }
 
   const { roomOrders, stats } = await scanForRoom({ roomId, fetchPage, limits: opts.limits, now: deps.now });
