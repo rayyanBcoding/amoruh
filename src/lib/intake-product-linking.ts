@@ -1,6 +1,7 @@
 import { createProduct, getProducts } from "./db";
 import { getPO, getPOLines, savePOLines, recomputePOFromLines } from "./intake-db";
 import { isLineConfirmed } from "./intake-review";
+import { lineMatchEditBlock } from "./intake-line-edit";
 import { ValidationError } from "./validation";
 import {
   getCommittedOffers,
@@ -132,7 +133,8 @@ export interface CreateAndLinkResult {
 export async function createAndLinkProductForLine(
   poId: string,
   lineId: string,
-  productOverrides?: Partial<Product>
+  productOverrides?: Partial<Product>,
+  opts: { replaceExisting?: boolean } = {}
 ): Promise<CreateAndLinkResult> {
   const po = await getPO(poId);
   if (!po) return { lineId, status: "failed", error: "Purchase order not found." };
@@ -149,7 +151,16 @@ export async function createAndLinkProductForLine(
   // Already resolved to a real, existing product — nothing to do. This
   // is what makes retries/double-clicks safe: a line a prior attempt
   // already linked is simply skipped.
-  if (isLineConfirmed(line, existingProductIds)) {
+  // "Change my mind" path (PO Detail → Edit → Create New Product instead): the line is
+  // already linked, but the operator wants a NEW product. Allowed only while the intake is
+  // pending (same rule as changing/clearing a match); the old link is kept until the new
+  // product has been created successfully, and the old product is never touched.
+  if (opts.replaceExisting && isLineConfirmed(line, existingProductIds)) {
+    const block = lineMatchEditBlock(po, line, existingProductIds);
+    if (block) return { lineId, status: "failed", error: block.message };
+  }
+
+  if (isLineConfirmed(line, existingProductIds) && !opts.replaceExisting) {
     const product = products.find((p) => p.id === line.productId)!;
     await linkMasterProductForReceivedItem(product, line, po.supplierId);
     return { lineId, status: "linked_existing", productId: product.id, product };
