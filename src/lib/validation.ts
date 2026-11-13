@@ -1,4 +1,5 @@
 import type { Product } from "./types";
+import { liveNotesError } from "./live-notes";
 
 // Thrown by validateProductInput; route handlers catch this specifically
 // and turn it into a real 400 with field-level messages instead of a bare
@@ -77,6 +78,9 @@ export function validateProductInput(
       fields.barcode = `Barcode/UPC "${input.barcode.trim()}" is already used by ${dupe.brand} ${dupe.name}.`;
     }
   }
+
+  const liveNotesMsg = liveNotesError((input as { liveNotes?: unknown }).liveNotes);
+  if (liveNotesMsg) fields.liveNotes = liveNotesMsg;
 
   if (Object.keys(fields).length > 0) {
     throw new ValidationError("Please fix the highlighted fields.", fields);

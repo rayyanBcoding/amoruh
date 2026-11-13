@@ -7,6 +7,25 @@
 
 export type ProductStatus = "active" | "draft" | "sold_out" | "archived";
 
+/** Short, scannable talking points shown on the Go Live screen while selling.
+ *  Separate from every other notes field; only ever written by the Edit Notes
+ *  UI or scripts/populate-live-notes.ts — never by pricing/inventory code. */
+export interface LiveNotes {
+  /** 3–5 main scent notes. */
+  keyNotes: string[];
+  /** Short vibe words, e.g. "Fresh, clean, easy". */
+  vibe: string;
+  /** Season + day/night/occasion, e.g. "Spring/summer · daytime, office". */
+  bestFor: string;
+  /** "ai_draft" = written from general fragrance knowledge (not verified
+   *  against the brand page); "researched" = reused from the sourced selling
+   *  reference; "manual" = typed/edited by the operator. */
+  source: "ai_draft" | "researched" | "manual";
+  /** True when the draft is less certain — double-check before quoting it. */
+  check?: boolean;
+  updatedAt: string;
+}
+
 export interface Product {
   id: string;
   /** AMORUH internal SKU — what you print on your own shelf/barcode labels. */
@@ -90,6 +109,8 @@ export interface Product {
   /** Operator-editable seller talking points ("sells well on live",
    *  "similar vibe to X") — never written or overwritten by research. */
   manualSellingNote?: string;
+  /** LIVE Notes shown at a glance on Go Live — see LiveNotes. */
+  liveNotes?: LiveNotes;
 }
 
 export interface Sale {

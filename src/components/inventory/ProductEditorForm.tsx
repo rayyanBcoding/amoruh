@@ -11,6 +11,7 @@ import { formatCurrency } from "@/lib/format";
 import { displayStatus } from "@/lib/product-status";
 import { getFragranceNotes } from "@/lib/fragrance-notes";
 import { computeWeightedAverageLandedCost } from "@/lib/intake-costing";
+import { LiveNotesCard } from "@/components/LiveNotesCard";
 
 type FormState = Omit<Product, "fragranceNotes"> & {
   fragranceNotes: string;
@@ -59,8 +60,12 @@ function toFormState(product: Product): FormState {
 }
 
 function toPayload(form: FormState): Partial<Product> {
+  // liveNotes is saved on its own by LiveNotesCard (PUT { liveNotes } only); the
+  // full-form Save must never resend a possibly stale copy of it.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { liveNotes: _liveNotes, ...rest } = form;
   return {
-    ...form,
+    ...rest,
     fragranceNotes: form.fragranceNotes.split(",").map((s) => s.trim()).filter(Boolean),
     cost: Number(form.cost) || 0,
     retailPrice: Number(form.retailPrice) || 0,
@@ -516,6 +521,8 @@ export function ProductEditorForm({
               onChange={(e) => set("lootPrice", Number(e.target.value) as never)}
             />
           </Field>
+
+          {!isCreate && product && <LiveNotesCard product={product} size="compact" />}
 
           <Field label="Fragrance Notes (comma separated)">
             <input

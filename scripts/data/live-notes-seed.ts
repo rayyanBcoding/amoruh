@@ -1,0 +1,206 @@
+// LIVE Notes draft content, keyed by fragrance (brand|name, see fragranceKey in
+// src/lib/live-notes.ts — one entry covers every size / tester / set variant).
+// Written from general fragrance knowledge plus quick web lookups for the
+// less-known ones. Rows marked check=true are less certain: Go Live shows
+// "check before quoting" until someone edits them.
+//
+// Row: [key, keyNotes, vibe, bestFor, check?]
+// A "#m" / "#w" suffix on a key limits it to men's / women's listings
+// (needed where the same name exists for both, e.g. Guess Seductive).
+import type { SeedRow } from "../../src/lib/live-notes-plan";
+
+export const SEED: SeedRow[] = [
+  // ---- Afnan / Ariana Grande / Armaf / Azzaro
+  ["Afnan|9 PM", "Vanilla, Tonka, Apple, Cinnamon, Amber", "Sweet, warm, sexy", "Fall/winter · night out, date"],
+  ["Afnan|9PM", "Vanilla, Tonka, Apple, Cinnamon, Amber", "Sweet, warm, sexy", "Fall/winter · night out, date"],
+  ["Afnan|Zimaya Fatima Velvet Love", "Pear, Rose, Vanilla, Musk, Amber", "Sweet, floral, velvety", "Fall/winter · evening, date", true],
+  ["Ariana Grande|Ari", "Pear, Whipped Cream, Vanilla, Musk, Woods", "Sweet, creamy, playful", "Spring/fall · casual daytime", true],
+  ["Ariana Grande|Moonlight", "Lavender, Pear, Vanilla, Tonka, Musk", "Sweet, cozy, dreamy", "Fall/winter · evening", true],
+  ["Ariana Grande|Sweet Like Candy", "Pear, Black Currant, Orange Blossom, Vanilla, Musk", "Sweet, fruity, candy-like", "Spring/summer · daytime, casual", true],
+  ["Armaf|Club De Nuit Intense", "Lemon, Pineapple, Birch Smoke, Musk, Ambergris", "Bold, fresh-smoky, masculine", "Spring/fall · day or night out"],
+  ["Armaf|Odyssey Aoud", "Oud, Amber, Saffron, Woods, Musk", "Dark, woody, rich", "Fall/winter · night out", true],
+  ["Armaf|Odyssey Homme", "Apple, Bergamot, Lavender, Vanilla, Cedar", "Fresh-sweet, easy, clean", "Spring/fall · daytime, casual", true],
+  ["Azzaro|Azzaro Pour Homme", "Lavender, Anise, Basil, Vetiver, Oakmoss", "Classic barbershop, aromatic", "All seasons · daytime, office"],
+  ["Azzaro|Pour Homme", "Lavender, Anise, Basil, Vetiver, Oakmoss", "Classic barbershop, aromatic", "All seasons · daytime, office"],
+  ["Azzaro|Chrome Legend", "Green Apple, Bitter Orange, Tea, Vetiver, Amber", "Fresh, clean, easy", "Spring/summer · daytime, office"],
+  ["Azzaro|The Most Wanted Intense", "Cardamom, Toffee, Amberwood, Tonka", "Sweet, warm, seductive", "Fall/winter · night out, date", true],
+  ["Bond No. 9|New York Off-Broadway", "Grapefruit Blossom, Black Currant, Lily, Osmanthus, Sandalwood", "Floral, warm, woody", "Spring/fall · day to evening"],
+
+  // ---- Burberry
+  ["Burberry|Bespoke Collection Garden Roses 20%", "Bulgarian Rose, Italian Lemon, Vetiver", "Fresh, rosy, elegant", "Spring/summer · daytime, gifting"],
+  ["Burberry|Bespoke Collection Hawthorn Bloom 12%", "Bergamot, Violet, Jasmine, Musk, Patchouli", "Fresh, floral, soft musky", "Spring/summer · daytime, office"],
+  ["Burberry|Brit For Her", "Pear, Sweet Pea, Vanilla, Musk, Sandalwood", "Soft, sweet, girly", "Spring/fall · daytime, casual", true],
+  ["Burberry|Brit", "Bergamot, Mandarin, Ginger, Cedar, Tonka", "Zesty, spicy, woody", "Spring/fall · daytime, casual"],
+  ["Burberry|Goddess", "Lavender, Vanilla, Tonka, Musk", "Sweet, creamy, cozy", "Fall/winter · evening, date", true],
+  ["Burberry|London", "Bergamot, Lavender, Cinnamon, Leather, Tobacco", "Warm, spicy, dressy", "Fall/winter · evening, dressy occasions"],
+  ["Burberry|London Fabric", "Bergamot, Peony, Amber, Sandalwood, Musk", "Warm, floral, elegant", "Fall/winter · evening", true],
+  ["Burberry|My Burberry Blush", "Pomegranate, Lemon, Rose, Musk", "Fresh, fruity-floral, feminine", "Spring/summer · daytime", true],
+  ["Burberry|Touch", "Mandarin, Violet, Almond, Vanilla, Sandalwood", "Soft, sweet, powdery", "Spring/fall · daytime", true],
+  ["Burberry|Weekend", "Citrus, Basil, Cypress, Cedar, Musk", "Fresh, clean, casual", "Spring/summer · daytime, weekend", true],
+
+  // ---- Calvin Klein / Carolina Herrera / Carrera
+  ["Calvin Klein|CK IN2U", "Grapefruit, Mandarin, Freesia, Musk", "Fresh, fruity, youthful", "Spring/summer · daytime, casual", true],
+  ["Carolina Herrera|Bad Boy Elixir", "Sage, Lavender, Leather, Iris, Cedar", "Bold, leathery, aromatic", "Fall/winter · night out"],
+  ["Carolina Herrera|Good Girl Blush", "Almond, Rose, Tuberose, Tonka, Musk", "Sweet, floral, flirty", "Spring/fall · date, evening", true],
+  ["Carolina Herrera|Good Girl", "Tuberose, Jasmine, Tonka, Cocoa, Almond", "Sweet, sexy, bold", "Fall/winter · night out, date"],
+  ["Carrera Jeans|700 Original Uomo", "Pineapple, Bergamot, Rose, Patchouli, Vanilla", "Fruity-fresh, warm, easy", "Spring/fall · daytime, casual"],
+  ["Carrera Jeans|707 Camouflage Uomo", "Citrus, Lavender, Jasmine, Vetiver, Sandalwood", "Fresh, woody, easy", "All seasons · daily wear"],
+  ["Carrera Jeans|767 Camouflage Donna", "Strawberry, Pineapple, Grapefruit, Peony, Musk", "Fruity, fresh, playful", "Spring/summer · daytime"],
+  ["Carrera Jeans|770 Original Donna", "Bitter Orange, Damask Rose, Vanilla, Almond, Tonka", "Warm, sweet, powdery", "Fall/winter · evening, date"],
+
+  // ---- Dior / Louboutin / Clive Christian / Coach
+  ["Christian Dior|Miss Dior Hair Oil 1.5ml + Hair Mist 1ml", "Rose, Peony, Lily of the Valley, Musk", "Fresh, floral, romantic", "Spring/summer · everyday (hair mini)", true],
+  ["Christian Louboutin|Loubicrown", "Grapefruit Wood, Atlas Cedar, Cypriol, Tonka, Patchouli", "Amber-woody, spicy, sensual", "Fall/winter · evening, night out"],
+  ["Clive Christian|Noble Collection VIII Rococo Magnolia", "Magnolia, Rose, Peach, Musk, Woods", "Floral, luxurious, soft", "Spring/summer · daytime, special occasions", true],
+  ["Clive Christian|Original Collection No.1 Feminine", "Mandarin, Jasmine, Ylang-Ylang, Sandalwood, Vanilla", "Rich, floral, luxurious", "Fall/winter · evening, special occasions", true],
+  ["Clive Christian|Original Collection No.1 Masculine", "Lemon, Cardamom, Lavender, Sandalwood, Vanilla", "Refined, spicy-woody, luxurious", "Fall/winter · evening, formal", true],
+  ["Clive Christian|X", "Floral, Vanilla, Sandalwood, Musk", "Luxurious, floral, warm", "Fall/winter · evening", true],
+  ["Coach|Coach Man Blue", "Citrus, Mint, Cedar, Musk", "Fresh, clean, cool", "Spring/summer · daytime", true],
+  ["Coach|Coach for Men", "Bergamot, Cardamom, Cedar, Vetiver", "Fresh, woody, casual", "All seasons · daily wear", true],
+  ["Coach|Dreams Moonlight Perfumed Body Lotion", "Pear, Jasmine, Amber, Musk", "Soft, floral, dreamy", "Fall/winter · evening (body lotion)", true],
+  ["Coach|Floral", "Rose, Pink Pepper, Peony, Musk", "Fresh, floral, feminine", "Spring/summer · daytime", true],
+  ["Coach|Gold Body Lotion", "Floral, Vanilla, Amber, Musk", "Warm, glam, soft", "Fall/winter · evening (body lotion)", true],
+  ["Coach|NYC Gold", "Floral, Amber, Vanilla, Musk", "Warm, floral, glam", "Fall/winter · evening", true],
+  ["Coach|Signature", "Citrus, Cedar, Musk", "Fresh, woody, clean", "All seasons · daily wear", true],
+
+  // ---- Creed / Davidoff / D&G
+  ["Creed|Aventus", "Pineapple, Birch, Bergamot, Musk, Oakmoss", "Fruity-smoky, bold, powerful", "Spring/fall · day or night, office"],
+  ["Creed|Aventus Cologne", "Citrus, Pineapple, Ginger, Cedar, Musk", "Fresh, sporty, luxe", "Spring/summer · daytime", true],
+  ["Creed|Fleurissimo", "Iris, Orange Blossom, Tuberose, Bergamot, Musk", "Soft, powdery, luxe floral", "Spring/summer · daytime, weddings", true],
+  ["Creed|Himalaya", "Bergamot, Grapefruit, Sandalwood, Ambergris, Cedar", "Fresh, woody, refined", "Spring/summer · daytime, office"],
+  ["Creed|Love In Black", "Violet, Raspberry, Cranberry, Rose, Cedarwood", "Powdery, floral, woody-musky", "Fall/winter · evening"],
+  ["Creed|Wind Flowers", "Jasmine, Peony, Rose, Musk", "Fresh, floral, airy", "Spring · daytime", true],
+  ["Davidoff|Cool Water Woman", "Watermelon, Pineapple, Lily of the Valley, Blackcurrant, Woods", "Fresh, aquatic, light", "Spring/summer · daytime, casual"],
+  ["Dolce & Gabbana|Devotion", "Lemon, Coffee, Patchouli", "Zesty, dark-roast, modern", "Fall/spring · evening, date"],
+  ["Dolce & Gabbana|K", "Blood Orange, Juniper, Geranium, Patchouli, Vetiver", "Fresh, aromatic, masculine", "Spring/fall · daytime, casual", true],
+  ["Dolce & Gabbana|Light Blue Summer Vibes", "Lemon, Apple, Jasmine, Cedar, Amber", "Fresh, breezy, sunny", "Summer · daytime, beach", true],
+  ["Dolce & Gabbana|Pour Homme", "Mandarin, Lavender, Carnation, Tobacco, Cedar", "Classic, aromatic, clean", "All seasons · daytime, office", true],
+  ["Dolce & Gabbana|The One", "Grapefruit, Ginger, Tobacco, Amber, Cedar", "Warm, smooth, classy", "Fall/winter · evening, date"],
+
+  // ---- French Avenue / Armani / Givenchy / Gucci
+  ["French Avenue|Liquid Brun", "Cinnamon, Cardamom, Bourbon Vanilla, Praline, Ambroxan", "Sweet, warm, gourmand", "Fall/winter · night out"],
+  ["Giorgio Armani|Acqua Di Gio", "Bergamot, Marine Notes, Jasmine, Rosemary, Patchouli", "Fresh, aquatic, clean", "Spring/summer · daytime, office"],
+  ["Givenchy|Irresistible Fraiche", "Sparkling Orange, Pink Pepper, Turkish Rose, Iris, White Musk", "Fresh, rosy, bright", "Spring/summer · daytime"],
+  ["Givenchy|Organza", "Jasmine, Rose, Vanilla, Amber, Sandalwood", "Rich, floral, oriental", "Fall/winter · evening", true],
+  ["Givenchy|Pi", "Tarragon, Basil, Vanilla, Tonka, Amber", "Warm, aromatic, vanilla-woody", "Fall/winter · evening", true],
+  ["Gucci|Flora Gorgeous Jasmine", "Jasmine, Gardenia, Musk", "Fresh, white floral", "Spring/summer · daytime", true],
+  ["Gucci|Guilty", "Lemon, Lavender, Orange Blossom, Cedar, Patchouli", "Fresh, aromatic, woody", "Spring/fall · daytime, date"],
+  ["Gucci|Rush", "Gardenia, Freesia, Peach, Vanilla, Musk", "Sweet, floral, retro", "Spring/fall · day to evening", true],
+  ["Gucci|The Alchemist's Garden", "Floral, Woody, Amber", "Artsy, niche, trio of 3 scents", "Collector/gift set · all seasons", true],
+
+  // ---- Guess
+  ["Guess|1981 Indigo", "Citrus, Lavender, Woods, Musk", "Fresh, clean, easy", "Spring/summer · daytime, casual", true],
+  ["Guess|Amore Roma", "Citrus, Jasmine, Amber, Musk", "Fresh-floral, easy", "Spring/summer · daytime", true],
+  ["Guess|Girl", "Berries, Peach, Vanilla, Musk", "Sweet, fruity, youthful", "Spring/summer · daytime, casual", true],
+  ["Guess|Gold", "Vanilla, Amber, Musk, White Flowers", "Warm, sweet, glam", "Fall/winter · evening", true],
+  ["Guess|Seductive Homme Blue", "Bergamot, Mint, Cedar, Musk", "Fresh, cool, clean", "Spring/summer · daytime", true],
+  ["Guess|Seductive Noir Body Lotion", "Rose, Vanilla, Patchouli, Amber", "Dark, sweet, sexy", "Fall/winter · night out (body lotion)", true],
+  ["Guess|Seductive#w", "Mandarin, Orchid, Vanilla, Sandalwood", "Sweet, sexy, floral", "Fall/winter · night out", true],
+  ["Guess|Seductive#m", "Citrus, Spices, Woods, Musk", "Warm, sexy, woody", "Fall/winter · night out", true],
+  ["Guess|Seductive", "Vanilla, Woods, Musk", "Warm, sexy", "Fall/winter · night out", true],
+  ["Guess|Sexy Skin Metallique Rose Body Mist", "Rose, Peach, Musk", "Sweet, floral, shimmery", "Spring/summer · casual (body mist)", true],
+
+  // ---- Hugo Boss / Initio / Issey Miyake / JPG
+  ["Hugo Boss|Boss Intense", "Vanilla, Spices, Woods", "Warm, spicy, woody", "Fall/winter · evening", true],
+  ["Hugo Boss|Boss Selection", "Grapefruit, Mandarin, Pink Pepper, Geranium, Patchouli", "Fresh, bright, modern", "Spring/summer · daytime, office"],
+  ["Hugo Boss|Deep Red", "Blackcurrant, Blood Orange, Pear, Freesia, Sandalwood", "Fruity, sweet, bold", "Fall/spring · evening"],
+  ["Hugo Boss|Hugo Green", "Green Notes, Citrus, Mint, Cedar", "Fresh, green, clean", "Spring/summer · daytime", true],
+  ["Hugo Boss|Hugo Man Deo Spray", "Green Apple, Mint, Sage, Fir, Cedar", "Fresh, green, minty", "Spring/summer · daytime, post-gym (deodorant)", true],
+  ["Hugo Boss|Hugo Man Shower Gel", "Green Apple, Mint, Sage, Fir, Cedar", "Fresh, green, minty", "Spring/summer · daytime, post-gym (shower gel)", true],
+  ["Hugo Boss|The Scent For Her", "Osmanthus, Peach, Cocoa, Musk", "Sweet, warm, flirty", "Fall/winter · evening, date", true],
+  ["Initio Parfums Prives|Side Effect", "Rum, Cinnamon, Tobacco, Vanilla, Benzoin", "Boozy, sweet, smoky", "Fall/winter · night out, date"],
+  ["Issey Miyake|L'Eau d'Issey Pour Homme Sport", "Citrus, Mint, Marine Notes, Cedar, Musk", "Fresh, aquatic, sporty", "Spring/summer · daytime, gym", true],
+  ["Jean Paul Gaultier|Le Male", "Mint, Lavender, Vanilla, Tonka, Amber", "Classic, fresh-sweet, sexy", "Spring/fall · day or night"],
+  ["Jean Paul Gaultier|Scandal", "Mandarin, Clary Sage, Caramel, Tonka", "Sweet, sexy, bold", "Fall/winter · night out", true],
+  ["Jean Paul Gaultier|Ultra Male Intense", "Pear, Mint, Lavender, Vanilla, Amber", "Sweet, icy-warm, clubby", "Fall/winter · night out", true],
+
+  // ---- Jimmy Choo
+  ["Jimmy Choo|Blossom Special Edition", "Peach, Rose, Jasmine, Musk", "Sweet, fruity-floral, girly", "Spring/summer · daytime", true],
+  ["Jimmy Choo|Flash", "Pink Pepper, Tangerine, Strawberry, Tuberose, Powdery Woods", "Fruity-floral, bright, flirty", "Spring/summer · day to night"],
+  ["Jimmy Choo|I Want Choo", "Mandarin, Tuberose, Jasmine, Vanilla, Sandalwood", "Sweet, floral, glamorous", "Fall/spring · night out", true],
+  ["Jimmy Choo|Illicit Flower", "Tangerine, Peony, Jasmine, Musk", "Fresh, floral, sweet", "Spring/summer · daytime", true],
+  ["Jimmy Choo|Illicit", "Mandarin, Jasmine, Tuberose, Sandalwood, Musk", "Floral, warm, sexy", "Fall/winter · evening", true],
+  ["Jimmy Choo|Man Urban Hero", "Lemon, Black Pepper, Rosewood, Vetiver, Grey Amber", "Fresh, woody, modern", "Spring/fall · day or night out"],
+
+  // ---- Lacoste
+  ["Lacoste|Blanc Intense", "Citrus, Vetiver, Cedar, Musk", "Fresh, clean, sporty", "Spring/summer · daytime", true],
+  ["Lacoste|Matchpoint", "Citrus, Pink Pepper, Vetiver, Woods", "Fresh, sporty, clean", "Spring/summer · daytime", true],
+  ["Lacoste|Red", "Citrus, Spices, Woods", "Fresh-spicy, sporty", "Spring/fall · daytime", true],
+
+  // ---- Lattafa
+  ["Lattafa|Abaan", "Bergamot, Orange Blossom, Musk", "Fresh, floral, musky", "Spring/summer · daytime", true],
+  ["Lattafa|Adeeb", "Cinnamon, Oud, Amber, Sandalwood, Musk", "Warm, spicy, sweet", "Fall/winter · evening", true],
+  ["Lattafa|Ameer Al Oudh", "Oud, Amber, Musk, Woods", "Rich, woody, oud", "Fall/winter · night", true],
+  ["Lattafa|Asad", "Black Pepper, Tobacco, Coffee, Vanilla, Amber", "Warm, spicy, bold", "Fall/winter · night out"],
+  ["Lattafa|Narissa Et Moi", "Floral, Vanilla, Musk", "Soft, sweet, feminine", "Spring/fall · daytime", true],
+  ["Lattafa|Pride Ansaam Gold", "Pear, Mandarin, Rose, Raspberry, Vanilla", "Fruity-floral, sweet, musky", "Spring/fall · day to evening"],
+  ["Lattafa|Pride Embrace", "Citrus, Spices, Incense, Ambergris", "Aromatic, smoky, fresh", "Spring/fall · daytime", true],
+  ["Lattafa|Pride Nebras", "Amber, Musk, Woods", "Warm, smooth", "Fall/winter · evening", true],
+  ["Lattafa|Qaed Al Fursan Unlimited", "Coconut, Citrus, Pineapple, Vanilla, Musk", "Tropical, sweet, fruity", "Spring/summer · daytime", true],
+  ["Lattafa|Raed Intensely", "Amber, Vanilla, Spices, Woods", "Warm, sweet, spicy", "Fall/winter · evening", true],
+  ["Lattafa|Sherif", "Amber, Woods, Musk", "Warm, smooth, woody", "Fall/winter · evening", true],
+  ["Lattafa|Thameem Musk Wild Vanilla", "Musk, Vanilla, Amber", "Sweet, creamy, cozy", "Fall/winter · casual evening", true],
+  ["Lattafa|Thameem Sugar Plum", "Plum, Sugar, Vanilla, Musk", "Sweet, gourmand, fruity", "Fall/winter · casual evening", true],
+  ["Lattafa|Yara Moi", "Orchid, Vanilla, Musk, Tropical Fruit", "Sweet, creamy, soft", "Spring/fall · daytime", true],
+
+  // ---- MFK / Margiela / Mont Blanc / Moschino / Nautica / New Brand
+  ["Maison Francis Kurkdjian|A La Rose", "Rose, Peony, Musk", "Fresh, rosy, elegant", "Spring/summer · daytime", true],
+  ["Maison Margiela|Replica From The Garden", "Green Notes, Florals, Musk", "Fresh, green, garden", "Spring/summer · daytime", true],
+  ["Mont Blanc|Explorer Platinum", "Bergamot, Lavender, Vetiver, Patchouli", "Fresh, woody, clean", "Spring/fall · daytime, office", true],
+  ["Mont Blanc|Legend Red", "Bergamot, Pink Pepper, Lavender, Tonka, Amberwood", "Warm, spicy, bold", "Fall/winter · night out", true],
+  ["Mont Blanc|Legend Spirit", "Bergamot, Citrus, Lavender, Woods, Musk", "Fresh, clean", "Spring/summer · daytime", true],
+  ["Mont Blanc|Legend", "Pineapple, Bergamot, Lavender, Tonka, Oakmoss", "Fresh, aromatic, classic", "Spring/fall · daytime, office"],
+  ["Moschino|Moschino", "Floral, Fruity, Musk", "Soft, floral", "Spring/summer · daytime", true],
+  ["Nautica|Blue", "Citrus, Marine Notes, Cedar, Musk", "Fresh, aquatic", "Summer · daytime", true],
+  ["New Brand|Gold", "Citrus, Spices, Amber, Woods", "Warm, flashy", "Fall/winter · night out", true],
+  ["New Brand|Invincible", "Citrus, Aquatic, Woods, Musk", "Fresh, sporty", "Spring/summer · daytime", true],
+  ["New Brand|Prestige Extasia Black", "Spices, Woods, Amber", "Dark, spicy", "Fall/winter · night out", true],
+  ["New Brand|Prestige The NB", "Citrus, Aromatics, Woods", "Fresh, clean", "Spring/fall · daytime", true],
+  ["New Brand|Prestige Volcano", "Citrus, Spices, Woods", "Fresh-spicy, bold", "Spring/fall · day or night", true],
+  ["New Brand|Unic", "Aromatics, Woods, Musk", "Woody, easy", "All seasons · daily wear", true],
+
+  // ---- Paco Rabanne / Parfums de Marly / Prada / Polo
+  ["Paco Rabanne|1 Million", "Blood Orange, Mint, Cinnamon, Leather, Amber", "Sweet, spicy, flashy", "Fall/winter · night out, club"],
+  ["Paco Rabanne|Invictus", "Grapefruit, Sea Notes, Bay Leaf, Guaiac Wood, Ambergris", "Fresh, aquatic, sporty", "Spring/summer · daytime, gym"],
+  ["Paco Rabanne|Lady Million", "Raspberry, Orange Blossom, Jasmine, Honey, Patchouli", "Sweet, fruity-floral, glam", "Fall/spring · evening, date"],
+  ["Parfums de Marly|Delina La Rosee", "Rose, Lychee, Peony, Musk", "Fresh, rosy, soft", "Spring/summer · daytime", true],
+  ["Parfums de Marly|Godolphin", "Thyme, Saffron, Iris, Amber, Vanilla", "Rich, aromatic, amber", "Fall/winter · evening"],
+  ["Parfums de Marly|Haltane", "Clary Sage, Saffron, Oud, Vetiver, Patchouli", "Bold, smoky, oud-woody", "Fall/winter · night out"],
+  ["Parfums de Marly|Layton Exclusif", "Apple, Lavender, Vanilla, Cardamom, Sandalwood", "Sweet, warm, spicy-woody", "Fall/winter · evening"],
+  ["Parfums de Marly|Pegasus", "Almond, Heliotrope, Vanilla, Sandalwood, Bergamot", "Sweet, creamy, powdery", "Fall/winter · evening"],
+  ["Parfums de Marly|Sedley", "Mint, Bergamot, Lemon, Lavender, Cedar", "Fresh, aromatic, sporty", "Spring/summer · daytime"],
+  ["Prada|Paradoxe", "Neroli, Bergamot, Jasmine, Amber, Musk", "Fresh-floral, modern, clean", "All seasons · day to evening"],
+  ["Ralph Lauren|Polo Black", "Mango, Cypress, Patchouli, Amber", "Fruity-fresh, woody", "Spring/fall · daytime", true],
+  ["Ralph Lauren|Polo Sport Fresh", "Citrus, Mint, Marine Notes, Musk", "Fresh, sporty, clean", "Spring/summer · daytime, gym", true],
+
+  // ---- Rasasi / Ferragamo / Mugler / Tom Ford / Versace / Viktor & Rolf / Xerjoff / YSL
+  ["Rasasi|Daarej", "Peach, Tuberose, Jasmine, Vanilla, Amber", "Sweet, floral, warm", "Fall/winter · evening", true],
+  ["Rasasi|Shuhrah", "Rose, Cedar, Oud, Amber, Musk", "Rich, smoky, rosy", "Fall/winter · night", true],
+  ["Rasasi|Yumn", "Rose, Amber, Vanilla, Musk", "Warm, smooth, sweet", "Fall/winter · evening", true],
+  ["Salvatore Ferragamo|Fiamma", "Red Fruits, Florals, Vanilla, Musk", "Sweet, fruity-floral, feminine", "Fall/spring · evening", true],
+  ["Salvatore Ferragamo|Incanto Charm", "Honeysuckle, Passion Fruit, Rose, Jasmine, Musk", "Fruity, floral, playful", "Spring/summer · daytime"],
+  ["Salvatore Ferragamo|Incanto Shine", "Passion Fruit, Pineapple, Freesia, Peach, Cedarwood", "Fruity, bright, happy", "Spring/summer · daytime"],
+  ["Salvatore Ferragamo|Incanto", "Fruits, Flowers, Musk", "Fruity-floral, bright", "Spring/summer · daytime", true],
+  ["Salvatore Ferragamo|Signorina", "Red Currant, Jasmine, Peony, Pink Pepper, Panna Cotta", "Sweet, floral, flirty", "Fall/spring · evening, date"],
+  ["Salvatore Ferragamo|Subtil", "Citrus, Aromatics, Woods, Musk", "Fresh, woody, easy", "Spring/fall · daytime", true],
+  ["Thierry Mugler|Angel Men", "Lavender, Caramel, Patchouli, Tonka, Amber", "Sweet, gourmand, bold", "Fall/winter · night out", true],
+  ["Tom Ford|Noir Extreme", "Saffron, Kulfi, Vanilla, Amber, Rose", "Rich, sweet, smoky-amber", "Fall/winter · night out, date"],
+  ["Versace|Bright Crystal Absolu", "Pomegranate, Peony, Magnolia, Amber, Musk", "Fresh, fruity-floral, feminine", "Spring/summer · daytime"],
+  ["Versace|Crystal Noir", "Pepper, Peony, Gardenia, Amber, Musk", "Warm, sensual, floral", "Fall/winter · evening"],
+  ["Versace|Dylan Blue", "Bergamot, Grapefruit, Black Pepper, Patchouli, Incense", "Fresh, aromatic, bold", "Spring/summer · day or night out"],
+  ["Versace|Eau Fraiche", "Lemon, Bergamot, Tarragon, Cedar, Musk", "Fresh, citrusy, clean", "Spring/summer · daytime", true],
+  ["Versace|Eros Energy", "Grapefruit, Pink Pepper, Vetiver, Cedar", "Fresh, energetic, spicy", "Spring/summer · day to night", true],
+  ["Versace|Eros Najim", "Mint, Lavender, Vanilla, Tonka, Amber", "Sweet, warm, bold", "Fall/winter · night out", true],
+  ["Versace|Eros", "Mint, Green Apple, Tonka, Vanilla, Cedar", "Fresh-sweet, bold, clubby", "Spring/fall · night out"],
+  ["Versace|Pour Homme", "Neroli, Bergamot, Hyacinth, Cedar, Tonka", "Fresh, clean, Mediterranean", "Spring/summer · daytime, office"],
+  ["Versace|Yellow Diamond", "Lemon, Bergamot, Freesia, Amber, Musk", "Fresh, floral, sunny", "Spring/summer · daytime"],
+  ["Viktor & Rolf|Spicebomb Dark Leather Pour Homme", "Leather, Tobacco, Pepper, Woods", "Dark, leathery, smoky", "Fall/winter · night out", true],
+  ["Viktor & Rolf|Spicebomb Extreme", "Tobacco, Vanilla, Cinnamon, Leather", "Sweet, smoky, intense", "Fall/winter · night out", true],
+  ["Viktor & Rolf|Spicebomb", "Pink Pepper, Cinnamon, Saffron, Tobacco, Leather", "Spicy, warm, bold", "Fall/winter · evening"],
+  ["Xerjoff|Amabile", "Citrus, Florals, Musk", "Fresh, floral, soft", "Spring/summer · daytime", true],
+  ["Xerjoff|Groove Xcape", "Citrus, Spices, Woods", "Fresh, spicy, modern", "Spring/fall · daytime", true],
+  ["Xerjoff|XJ 1861 Zefiro", "Citrus, Aromatic Herbs, Cedar, Musk", "Fresh, Mediterranean, airy", "Spring/summer · daytime", true],
+  ["Yves Saint Laurent|Libre Le Parfum", "Lavender, Orange Blossom, Vanilla, Amber", "Warm, floral, sexy", "Fall/winter · evening"],
+  ["Yves Saint Laurent|MYSLF", "Bergamot, Orange Blossom, Patchouli, Woods", "Fresh-woody, modern", "Spring/fall · day or night"],
+  ["Yves Saint Laurent|Y", "Apple, Ginger, Sage, Amberwood, Tonka", "Fresh, clean, polished", "All seasons · day or night, office"],
+];

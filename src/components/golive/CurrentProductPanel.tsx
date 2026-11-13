@@ -11,6 +11,7 @@ import { formatCurrency } from "@/lib/format";
 import { getFragranceNotes } from "@/lib/fragrance-notes";
 import { useLiveSession } from "@/context/LiveSessionContext";
 import { RecordSaleModal } from "./RecordSaleModal";
+import { LiveNotesCard } from "@/components/LiveNotesCard";
 
 function Stat({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) {
   return (
@@ -114,6 +115,8 @@ export function CurrentProductPanel({
                   {product.size} · {product.concentration || "—"} · SKU {product.sku}
                 </p>
               </div>
+
+              <LiveNotesCard key={product.id} product={product} size="live" />
 
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <Stat
