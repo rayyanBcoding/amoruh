@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Product } from "@/lib/types";
 import { Button } from "@/components/Button";
 import { formatCurrency } from "@/lib/format";
+import { getLiveNotesView, liveNotesOneLiner } from "@/lib/live-notes";
 import { computeTotals, isPaidRow, searchProducts, type ProductLite } from "@/lib/tiktok/live-totals";
 import { toCents } from "@/lib/tiktok/money";
 import type { PanelData, PanelRow } from "@/lib/tiktok/live-panel";
@@ -292,6 +293,7 @@ export function TikTokLivePanel() {
                         <td className={`px-3 py-1.5 text-right font-semibold ${paid ? "text-ld-white" : "text-ld-muted line-through"}`}>{cents !== null ? money(cents) : "—"}</td>
                         <td className="px-3 py-1.5">
                           {paid ? (
+                            <>
                             <div className="flex items-center gap-1">
                               <input
                                 ref={(el) => {
@@ -338,6 +340,12 @@ export function TikTokLivePanel() {
                                 </button>
                               )}
                             </div>
+                            {prod && liveNotesOneLiner(getLiveNotesView(prod)) && (
+                              <p className="mt-0.5 max-w-[420px] truncate text-xs font-medium text-ld-cyan" title={liveNotesOneLiner(getLiveNotesView(prod))}>
+                                {liveNotesOneLiner(getLiveNotesView(prod))}
+                              </p>
+                            )}
+                            </>
                           ) : (
                             <span className="text-xs text-ld-muted">matching disabled</span>
                           )}
@@ -387,9 +395,14 @@ export function TikTokLivePanel() {
                 onMouseEnter={() => setHi(i)}
                 className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm ${i === hi ? "bg-ld-purple/15 text-ld-white" : "text-ld-white hover:bg-ld-border/30"}`}
               >
-                <span className="min-w-0 truncate">
-                  <b>{p.brand}</b> {p.name} {p.size}
-                  <span className="ml-2 text-xs text-ld-muted">{p.sku}</span>
+                <span className="min-w-0">
+                  <span className="block truncate">
+                    <b>{p.brand}</b> {p.name} {p.size}
+                    <span className="ml-2 text-xs text-ld-muted">{p.sku}</span>
+                  </span>
+                  {liveNotesOneLiner(getLiveNotesView(p)) && (
+                    <span className="block truncate text-xs font-medium text-ld-cyan">{liveNotesOneLiner(getLiveNotesView(p))}</span>
+                  )}
                 </span>
                 <span className={`shrink-0 text-xs font-bold ${p.inventory > 0 ? "text-ld-muted" : "text-ld-red"}`}>
                   {p.inventory} in stock · {p.cost > 0 ? formatCurrency(p.cost) : "no cost"}
