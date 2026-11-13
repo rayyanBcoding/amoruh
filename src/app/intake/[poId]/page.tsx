@@ -10,6 +10,7 @@ import { POStatusBadge, LineStatusBadge, MatchBadge } from "@/components/intake/
 import { CreateProductModal } from "@/components/intake/CreateProductModal";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { computePOReviewSummary, isLineConfirmed } from "@/lib/intake-review";
+import { lineMatchEditBlock } from "@/lib/intake-line-edit";
 import { matchLineItem } from "@/lib/intake-matching";
 import type { InvoiceDocument, PurchaseOrder, PurchaseOrderLine } from "@/lib/intake-types";
 import type { Product } from "@/lib/types";
@@ -35,6 +36,9 @@ export default function PODetailPage() {
   const [shippingInput, setShippingInput] = useState("");
   const [savingShipping, setSavingShipping] = useState(false);
   const [modalLineId, setModalLineId] = useState<string | null>(null);
+  // Edit an already-chosen match (pending intake only — see lib/intake-line-edit.ts).
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [modalReplace, setModalReplace] = useState(false);
   const [bulkCreating, setBulkCreating] = useState(false);
   const [bulkResult, setBulkResult] = useState<BulkCreateResultSummary | null>(null);
   const [canceling, setCanceling] = useState(false);
@@ -62,7 +66,7 @@ export default function PODetailPage() {
       .catch(() => {});
   }, [load]);
 
-  const resolveLine = async (lineId: string, productId: string | null) => {
+  const resolveLine = async (lineId: string, productId: string | null): Promise<boolean> => {
     setError(null);
     const res = await fetch(`/api/intake/pos/${params.poId}`, {
       method: "PATCH",
@@ -72,9 +76,10 @@ export default function PODetailPage() {
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       setError(body?.error ?? "Could not update this line.");
-      return;
+      return false;
     }
     load();
+    return true;
   };
 
   const saveShipping = async () => {
@@ -362,9 +367,78 @@ export default function PODetailPage() {
                           </td>
                           <td className="rounded-r-xl px-3 py-3">
                             {product ? (
-                              <p className="text-ld-white">
-                                {product.sku} — {product.brand} {product.name}
-                              </p>
+                              <div className="space-y-1.5">
+                                <p className="text-ld-white">
+                                  {product.sku} — {product.brand} {product.name}
+                                </p>
+                                {(() => {
+                                  const block = lineMatchEditBlock(detail.po, line, existingProductIds);
+                                  if (block) {
+                                    return (
+                                      <span className="text-[11px] text-ld-muted" title={block.message}>
+                                        🔒 Locked — {block.code === "ALREADY_RECEIVED" ? "stock already received" : "PO is no longer pending"}
+                                      </span>
+                                    );
+                                  }
+                                  if (editingLineId !== line.id) {
+                                    return (
+                                      <button
+                                        onClick={() => setEditingLineId(line.id)}
+                                        className="block text-xs font-bold text-ld-purple hover:underline"
+                                      >
+                                        Edit match
+                                      </button>
+                                    );
+                                  }
+                                  return (
+                                    <div className="space-y-2 rounded-lg border border-ld-border bg-ld-bg p-3">
+                                      <p className="text-[11px] font-bold uppercase tracking-widest text-ld-muted">Change product match</p>
+                                      <select
+                                        defaultValue=""
+                                        onChange={async (e) => {
+                                          if (!e.target.value) return;
+                                          if (await resolveLine(line.id, e.target.value)) setEditingLineId(null);
+                                        }}
+                                        className="w-full rounded-lg border border-ld-border bg-ld-bg-elevated px-2 py-1 text-xs text-ld-white outline-none focus:border-ld-purple"
+                                      >
+                                        <option value="">Choose a different existing product…</option>
+                                        {products
+                                          .filter((p) => p.id !== line.productId)
+                                          .map((p) => (
+                                            <option key={p.id} value={p.id}>
+                                              {p.sku} — {p.brand} {p.name} ({p.size})
+                                            </option>
+                                          ))}
+                                      </select>
+                                      <div className="flex flex-wrap items-center gap-3">
+                                        <button
+                                          onClick={() => {
+                                            setModalReplace(true);
+                                            setModalLineId(line.id);
+                                          }}
+                                          className="text-xs font-bold text-ld-cyan hover:underline"
+                                        >
+                                          + Create New Product instead
+                                        </button>
+                                        <button
+                                          onClick={async () => {
+                                            if (await resolveLine(line.id, null)) setEditingLineId(null);
+                                          }}
+                                          className="text-xs font-bold text-ld-red hover:underline"
+                                        >
+                                          Clear match
+                                        </button>
+                                        <button onClick={() => setEditingLineId(null)} className="text-xs text-ld-muted hover:text-ld-white">
+                                          Cancel
+                                        </button>
+                                      </div>
+                                      <p className="text-[11px] text-ld-muted">
+                                        Nothing is received until you receive this PO. A product created earlier stays in Inventory as a draft with 0 stock.
+                                      </p>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
                             ) : (
                               <div className="space-y-1.5">
                                 <div className="flex items-center gap-2">
@@ -444,12 +518,17 @@ export default function PODetailPage() {
             cost: modalLine.unitCost,
             status: "draft",
           }}
-          createUrl={`/api/intake/pos/${params.poId}/lines/${modalLine.id}/create-product`}
+          createUrl={`/api/intake/pos/${params.poId}/lines/${modalLine.id}/create-product${modalReplace ? "?replace=1" : ""}`}
           onCreated={() => {
             setModalLineId(null);
+            setModalReplace(false);
+            setEditingLineId(null);
             load();
           }}
-          onClose={() => setModalLineId(null)}
+          onClose={() => {
+            setModalLineId(null);
+            setModalReplace(false);
+          }}
         />
       )}
     </div>

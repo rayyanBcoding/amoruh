@@ -31,7 +31,10 @@ export async function POST(
 
   const { product: wrapped, ...topLevel } = body;
   const overrides = wrapped ?? (Object.keys(topLevel).length > 0 ? topLevel : undefined);
-  const result = await createAndLinkProductForLine(id, lineId, overrides);
+  // ?replace=1 → the line is already linked and the operator is switching it to a NEW product
+  // (only honoured while the intake is still pending; see lib/intake-line-edit.ts).
+  const replaceExisting = new URL(req.url).searchParams.get("replace") === "1";
+  const result = await createAndLinkProductForLine(id, lineId, overrides, { replaceExisting });
 
   if (result.status === "failed") {
     // `fields` lets the form highlight the offending inputs (same shape as POST /api/products).

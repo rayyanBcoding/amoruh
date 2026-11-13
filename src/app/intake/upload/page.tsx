@@ -462,19 +462,27 @@ export default function UploadInvoicePage() {
                               </option>
                             ))}
                           </select>
-                          {!resolved[i] && (
-                            <div className="mt-1 flex items-center gap-2">
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={() => setModalLineIndex(i)}
+                              className="text-xs font-bold text-ld-cyan hover:underline"
+                            >
+                              {resolved[i] ? "+ Create New Product instead" : "+ Create New Product From Invoice"}
+                            </button>
+                            {resolved[i] && (
                               <button
-                                onClick={() => setModalLineIndex(i)}
-                                className="text-xs font-bold text-ld-cyan hover:underline"
+                                onClick={() => setResolved((prev) => prev.map((v, idx) => (idx === i ? null : v)))}
+                                className="text-xs font-bold text-ld-red hover:underline"
                               >
-                                + Create New Product From Invoice
+                                Clear match
                               </button>
+                            )}
+                            {!resolved[i] && (
                               <button onClick={loadProducts} className="text-xs text-ld-muted hover:text-ld-white">
                                 ↻ Refresh
                               </button>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}

@@ -11,6 +11,7 @@ import {
 } from "@/lib/intake-db";
 import { checkPODeleteEligibility } from "@/lib/po-delete";
 import { linkMasterProductForReceivedItem } from "@/lib/intake-product-linking";
+import { lineMatchEditBlock } from "@/lib/intake-line-edit";
 import { getProducts } from "@/lib/db";
 import type { POStatus } from "@/lib/intake-types";
 
@@ -51,6 +52,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const lines = await getPOLines(id);
     const idx = lines.findIndex((l) => l.id === body.lineId);
     if (idx === -1) return NextResponse.json({ error: "Line not found." }, { status: 404 });
+
+    // Changing or clearing an EXISTING match is only allowed while the intake is still
+    // pending (nothing received against this line, PO not received/closed/canceled).
+    // Linking an unlinked or stale line, and re-selecting the same product, are unchanged.
+    const nextProductId = body.productId ?? null;
+    if (nextProductId !== lines[idx].productId) {
+      const existingIds = new Set((await getProducts()).map((p) => p.id));
+      const block = lineMatchEditBlock(po, lines[idx], existingIds);
+      if (block) return NextResponse.json({ error: block.message, code: block.code }, { status: 409 });
+    }
+
     lines[idx] = {
       ...lines[idx],
       productId: body.productId ?? null,
