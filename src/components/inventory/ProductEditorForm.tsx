@@ -63,7 +63,7 @@ function toPayload(form: FormState): Partial<Product> {
   // liveNotes is saved on its own by LiveNotesCard (PUT { liveNotes } only); the
   // full-form Save must never resend a possibly stale copy of it.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { liveNotes: _liveNotes, ...rest } = form;
+  const { liveNotes: _liveNotes, retailReference: _retailReference, ...rest } = form;
   return {
     ...rest,
     fragranceNotes: form.fragranceNotes.split(",").map((s) => s.trim()).filter(Boolean),

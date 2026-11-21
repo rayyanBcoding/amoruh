@@ -111,6 +111,8 @@ export interface Product {
   manualSellingNote?: string;
   /** LIVE Notes shown at a glance on Go Live — see LiveNotes. */
   liveNotes?: LiveNotes;
+  /** Full-size mainstream retail reference, independent of MSRP/accounting. */
+  retailReference?: import("./retail-reference").RetailReference | null;
 }
 
 export interface Sale {

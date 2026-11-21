@@ -1,0 +1,1821 @@
+[
+  {
+    "productId": "p_1795144568835_oaufog",
+    "identity": {
+      "brand": "Burberry",
+      "name": "Goddess",
+      "concentration": "Eau de Parfum",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "3616302020683",
+      "sku": "3616302020683"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Vanilla infusion",
+        "Vanilla caviar",
+        "Lavender"
+      ],
+      "vibe": "Creamy, aromatic, comforting",
+      "bestFor": "Fall/winter; everyday or dates"
+    },
+    "liveNotesSourceUrl": "https://www.sephora.com/product/burberry-goddess-eau-de-parfum-P507316",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 18500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": "Sephora",
+      "sourceUrl": "https://www.sephora.com/product/burberry-goddess-eau-de-parfum-P507316?skuId=2689644",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Burberry\",\"Goddess\",\"Eau de Parfum\",\"3.3oz\",\"New\",\"3616302020683\",\"3616302020683\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Sephora and Ulta agree on $185 regular for 100 mL. Refill and subscription prices excluded."
+    }
+  },
+  {
+    "productId": "p_1792286854524_7hr81p",
+    "identity": {
+      "brand": "Ralph Lauren",
+      "name": "Polo Black (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "4.2oz",
+      "condition": "New",
+      "barcode": "3360377044357",
+      "sku": "3360377044357"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Ralph Lauren\",\"Polo Black (Tester)\",\"Eau de Toilette\",\"4.2oz\",\"New\",\"3360377044357\",\"3360377044357\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795144440242_z6ouzv",
+    "identity": {
+      "brand": "Lattafa",
+      "name": "Give Me Gourmand Choco Overdose",
+      "concentration": "Eau de Parfum",
+      "size": "2.53oz",
+      "condition": "New",
+      "barcode": "6290362349679",
+      "sku": "6290362349679"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Chocolate fudge",
+        "Cocoa",
+        "Cupcake accord",
+        "Vanilla",
+        "Caramel"
+      ],
+      "vibe": "Chocolatey, sweet, cozy",
+      "bestFor": "Fall/winter; cozy evenings"
+    },
+    "liveNotesSourceUrl": "https://lattafa.com/product/choco-overdose/",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Lattafa\",\"Give Me Gourmand Choco Overdose\",\"Eau de Parfum\",\"2.53oz\",\"New\",\"6290362349679\",\"6290362349679\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795144257331_ucxuji",
+    "identity": {
+      "brand": "Burberry",
+      "name": "Goddess 2PC Set",
+      "concentration": "Eau de Parfum",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "3616307081061",
+      "sku": "3616307081061"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Vanilla infusion",
+        "Vanilla caviar",
+        "Lavender"
+      ],
+      "vibe": "Creamy, aromatic, comforting",
+      "bestFor": "Fall/winter; everyday or gifting"
+    },
+    "liveNotesSourceUrl": "https://www.sephora.com/product/burberry-goddess-eau-de-parfum-P507316",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Burberry\",\"Goddess 2PC Set\",\"Eau de Parfum\",\"3.3oz\",\"New\",\"3616307081061\",\"3616307081061\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1795144277685_4rr5jq",
+    "identity": {
+      "brand": "Guess",
+      "name": "Girl 3PC Set",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "085715350657",
+      "sku": "085715350657"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "No approved-source scent notes verified in this pass.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Guess\",\"Girl 3PC Set\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"085715350657\",\"085715350657\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1795144286702_gs8e62",
+    "identity": {
+      "brand": "Guess",
+      "name": "Seductive Red 2PC Set",
+      "concentration": "Eau de Toilette",
+      "size": "2.5oz",
+      "condition": "New",
+      "barcode": "085715350572",
+      "sku": "085715350572"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose Seductive Red for women EDT (cherry/almond), not the men's cinnamon/fig scent. Confirm.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Guess\",\"Seductive Red 2PC Set\",\"Eau de Toilette\",\"2.5oz\",\"New\",\"085715350572\",\"085715350572\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1795144297448_umpdd7",
+    "identity": {
+      "brand": "Guess",
+      "name": "Seductive 2PC Set",
+      "concentration": "Eau de Toilette",
+      "size": "2.5oz",
+      "condition": "New",
+      "barcode": "085715350442",
+      "sku": "085715350442"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose original Seductive for women EDT, not Homme. Confirm.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Guess\",\"Seductive 2PC Set\",\"Eau de Toilette\",\"2.5oz\",\"New\",\"085715350442\",\"085715350442\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1795143066916_hmeq46",
+    "identity": {
+      "brand": "Dolce & Gabbana",
+      "name": "Q Intense",
+      "concentration": "Eau de Parfum Intense",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "8057971187843",
+      "sku": "8057971187843"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Dark cherry",
+        "Heliotrope",
+        "Amber"
+      ],
+      "vibe": "Sweet, powdery, warm",
+      "bestFor": "Fall/winter; dates"
+    },
+    "liveNotesSourceUrl": "https://www.ulta.com/p/q-by-dolce-gabbana-eau-de-parfum-intense-pimprod2043408",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 18400,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum Intense",
+      "retailer": "Ulta",
+      "sourceUrl": "https://www.ulta.com/p/q-by-dolce-gabbana-eau-de-parfum-intense-pimprod2043408?sku=2620270",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Dolce & Gabbana\",\"Q Intense\",\"Eau de Parfum Intense\",\"1.7oz\",\"New\",\"8057971187843\",\"8057971187843\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact Q EDP Intense 100 mL. Ulta $184 and Nordstrom $184. Macy's page unavailable; no sale/subscription price used."
+    }
+  },
+  {
+    "productId": "p_1795142804527_hxvb9z",
+    "identity": {
+      "brand": "Hugo Boss",
+      "name": "Hugo XX",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "737052130729",
+      "sku": "737052130729"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose HUGO XX for women EDT; sources also list EDP. Confirm bottle concentration.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Hugo Boss\",\"Hugo XX\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"737052130729\",\"737052130729\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Propose HUGO XX for women EDT; sources also list EDP. Confirm bottle concentration."
+    }
+  },
+  {
+    "productId": "p_1795142151561_7fljbo",
+    "identity": {
+      "brand": "Rasasi",
+      "name": "Hawas Pink",
+      "concentration": "Eau de Parfum",
+      "size": "3.38oz",
+      "condition": "New",
+      "barcode": "614514178072",
+      "sku": "614514178072"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Neroli",
+        "Tuberose",
+        "Marshmallow",
+        "Cotton candy",
+        "Vanilla"
+      ],
+      "vibe": "Sweet, floral, fluffy",
+      "bestFor": "Spring/fall; casual or dates"
+    },
+    "liveNotesSourceUrl": "https://rasasistore.com/products/hawas-pink",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Rasasi\",\"Hawas Pink\",\"Eau de Parfum\",\"3.38oz\",\"New\",\"614514178072\",\"614514178072\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795142167968_vhz0n6",
+    "identity": {
+      "brand": "Ralph Lauren",
+      "name": "Polo Big Pony #2 Pink",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3605973048270",
+      "sku": "3605973048270"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose Big Pony 2 for women (cranberry/tonka), not men's #2 (chocolate/musk). Confirm.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Ralph Lauren\",\"Polo Big Pony #2 Pink\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3605973048270\",\"3605973048270\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Propose Big Pony 2 for women (cranberry/tonka), not men's #2 (chocolate/musk). Confirm."
+    }
+  },
+  {
+    "productId": "p_1795141206794_5xaux0",
+    "identity": {
+      "brand": "Jimmy Choo",
+      "name": "Jimmy Choo (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3386460025836",
+      "sku": "3386460025836"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Tea rose",
+        "Tiger orchid",
+        "Cedarwood"
+      ],
+      "vibe": "Fresh, floral, woody",
+      "bestFor": "Spring/summer; daytime"
+    },
+    "liveNotesSourceUrl": "https://www.jimmychoo.com/en/jimmy-choo-100ml/jimmy-choo-eau-de-toilette-100ml-J000060008001.html",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Jimmy Choo\",\"Jimmy Choo (Tester)\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3386460025836\",\"3386460025836\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1791861342187_7623t2",
+    "identity": {
+      "brand": "Jimmy Choo",
+      "name": "Flash",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3386460048149",
+      "sku": "3386460048149"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Jimmy Choo\",\"Flash\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"3386460048149\",\"3386460048149\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1794532615083_lan9v6",
+    "identity": {
+      "brand": "Swiss Arabian",
+      "name": "Shaghaf Oud (Tester)",
+      "concentration": "Eau de Parfum",
+      "size": "2.5oz",
+      "condition": "New",
+      "barcode": "SOUD098501T",
+      "sku": "SOUD098501T"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Saffron",
+        "Oud",
+        "Rose",
+        "Praline",
+        "Vanilla"
+      ],
+      "vibe": "Sweet, rich, woody",
+      "bestFor": "Fall/winter; evenings"
+    },
+    "liveNotesSourceUrl": "https://us.swissarabian.com/products/shaghaf-oud-3",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 4400,
+      "currency": "USD",
+      "referenceSize": "75 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": "Official brand website",
+      "sourceUrl": "https://us.swissarabian.com/products/shaghaf-oud-3",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Swiss Arabian\",\"Shaghaf Oud (Tester)\",\"Eau de Parfum\",\"2.5oz\",\"New\",\"SOUD098501T\",\"SOUD098501T\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Normal retail EDP 75 mL $44 from brand US site; standard 75 mL in checked brand catalog, no 100 mL found. Backordered."
+    }
+  },
+  {
+    "productId": "p_1795144220689_xkjle2",
+    "identity": {
+      "brand": "Mont Blanc",
+      "name": "Explorer Platinum 4PC Set",
+      "concentration": "Eau de Parfum",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "3386460154420",
+      "sku": "3386460154420"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Violet leaf",
+        "Clary sage",
+        "Cedarwood"
+      ],
+      "vibe": "Green, aromatic, woody",
+      "bestFor": "Spring/fall; work or gifting"
+    },
+    "liveNotesSourceUrl": "https://www.interparfumsinc.com/products/explorer-platinum",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Mont Blanc\",\"Explorer Platinum 4PC Set\",\"Eau de Parfum\",\"3.3oz\",\"New\",\"3386460154420\",\"3386460154420\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1792271309810_fy0ftj",
+    "identity": {
+      "brand": "Givenchy",
+      "name": "Pi",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3274872395572",
+      "sku": "3274872395572"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 13400,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": "Official brand website",
+      "sourceUrl": "https://www.givenchybeauty.com/us/p/pi-F10100063.html",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Givenchy\",\"Pi\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3274872395572\",\"3274872395572\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Official US EDT 100 mL regular $134. Selected 100 mL, not 50 mL."
+    }
+  },
+  {
+    "productId": "p_1792271223674_lo2f21",
+    "identity": {
+      "brand": "Paco Rabanne",
+      "name": "1 Million (tester)",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3349668678112",
+      "sku": "3349668678112"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 12600,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": "Sephora",
+      "sourceUrl": "https://www.sephora.com/product/1-million-P269120",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Paco Rabanne\",\"1 Million (tester)\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3349668678112\",\"3349668678112\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Normal retail EDT 100 mL $126, agrees Ulta SKU 2265045. Tester resale value and subscription price excluded."
+    }
+  },
+  {
+    "productId": "p_1795144165069_ubesc0",
+    "identity": {
+      "brand": "Burberry",
+      "name": "Her Intense (Tester)",
+      "concentration": "Eau de Parfum Intense",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "3616305181077",
+      "sku": "3616305181077"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose Her Eau de Parfum Intense (2025 strawberry/orange blossom/amber), not the older Her Intense or Her Elixir. Confirm bottle/box.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum Intense",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Burberry\",\"Her Intense (Tester)\",\"Eau de Parfum Intense\",\"3.3oz\",\"New\",\"3616305181077\",\"3616305181077\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Propose Her Eau de Parfum Intense (2025 strawberry/orange blossom/amber), not the older Her Intense or Her Elixir. Confirm bottle/box."
+    }
+  },
+  {
+    "productId": "p_1795143968653_fnzu0t",
+    "identity": {
+      "brand": "Gucci",
+      "name": "Guilty 3PC Set",
+      "concentration": "Eau de Toilette",
+      "size": "3.0oz",
+      "condition": "New",
+      "barcode": "3616307101509",
+      "sku": "3616307101509"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose Guilty Pour Homme EDT; gender omitted. Confirm gender and set contents.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Gucci\",\"Guilty 3PC Set\",\"Eau de Toilette\",\"3.0oz\",\"New\",\"3616307101509\",\"3616307101509\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1795144112001_h89j73",
+    "identity": {
+      "brand": "Paco Rabanne",
+      "name": "Phantom 2PC Set",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3349668628711",
+      "sku": "3349668628711"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Lemon",
+        "Lavender",
+        "Vanilla"
+      ],
+      "vibe": "Fresh, creamy, aromatic",
+      "bestFor": "Spring/fall; casual or gifting"
+    },
+    "liveNotesSourceUrl": "https://www.rabanne.com/nl/en/fragrance/p/phantom--000000000065158923",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Paco Rabanne\",\"Phantom 2PC Set\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3349668628711\",\"3349668628711\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1795144039451_hx5ccp",
+    "identity": {
+      "brand": "Paco Rabanne",
+      "name": "Invictus 2PC Set",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3349668642571",
+      "sku": "3349668642571"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Grapefruit",
+        "Marine accord",
+        "Guaiac wood"
+      ],
+      "vibe": "Fresh, aquatic, woody",
+      "bestFor": "Spring/summer; daytime or gifting"
+    },
+    "liveNotesSourceUrl": "https://www.rabanne.com/ww/en/fragrance/p/invictus--000000000065249520",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Paco Rabanne\",\"Invictus 2PC Set\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3349668642571\",\"3349668642571\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1795143897384_n8edi8",
+    "identity": {
+      "brand": "Prada",
+      "name": "Luna Rossa Sport",
+      "concentration": "Eau de Toilette",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "3614273544962",
+      "sku": "3614273544962"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Ginger",
+        "Juniper",
+        "Lavender",
+        "Tonka bean",
+        "Vanilla"
+      ],
+      "vibe": "Aromatic, spicy, smooth",
+      "bestFor": "Spring/fall; everyday or evenings"
+    },
+    "liveNotesSourceUrl": "https://www.prada.com/us/en/p/prada-luna-rossa-sport-edt-100-ml/2A1152_2HC9_F0Z99_P_ML100",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 13400,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": "Official brand website",
+      "sourceUrl": "https://www.prada.com/us/en/p/prada-luna-rossa-sport-edt-100-ml/2A1152_2HC9_F0Z99_P_ML100",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Prada\",\"Luna Rossa Sport\",\"Eau de Toilette\",\"3.3oz\",\"New\",\"3614273544962\",\"3614273544962\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact Sport EDT 100 mL official US regular $134. Listed unavailable/notify; no alternative concentration used."
+    }
+  },
+  {
+    "productId": "p_1795141112811_tbmj4t",
+    "identity": {
+      "brand": "Lattafa",
+      "name": "Raed Absolu",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "6298043161695",
+      "sku": "6298043161695"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Hold: current brand page lacks notes and secondary sources disagree. Do not invent a cue card.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Lattafa\",\"Raed Absolu\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"6298043161695\",\"6298043161695\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Hold: current brand page lacks notes and secondary sources disagree. Do not invent a cue card."
+    }
+  },
+  {
+    "productId": "p_1794533167881_1f4f3y",
+    "identity": {
+      "brand": "Jean Paul Gaultier",
+      "name": "Le Male 2PC Set",
+      "concentration": "Eau de Toilette",
+      "size": "4.2oz",
+      "condition": "New",
+      "barcode": "8435415092081",
+      "sku": "8435415092081"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Jean Paul Gaultier\",\"Le Male 2PC Set\",\"Eau de Toilette\",\"4.2oz\",\"New\",\"8435415092081\",\"8435415092081\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1794533191454_62u5v7",
+    "identity": {
+      "brand": "Jean Paul Gaultier",
+      "name": "Scandal 2PC Set",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8435415092043",
+      "sku": "8435415092043"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Jean Paul Gaultier\",\"Scandal 2PC Set\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"8435415092043\",\"8435415092043\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1794532542591_n9d5sp",
+    "identity": {
+      "brand": "Rasasi",
+      "name": "Daarej",
+      "concentration": "Eau de Parfum",
+      "size": "3.38oz",
+      "condition": "New",
+      "barcode": "614514177013",
+      "sku": "614514177013"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Rasasi\",\"Daarej\",\"Eau de Parfum\",\"3.38oz\",\"New\",\"614514177013\",\"614514177013\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Existing notes preserved. Propose Daarej Pour Femme; do not assume Pour Homme. Confirm before adding line."
+    }
+  },
+  {
+    "productId": "p_1795143666932_sut41o",
+    "identity": {
+      "brand": "Lattafa",
+      "name": "Give Me Gourmand Cookie Crave",
+      "concentration": "Eau de Parfum",
+      "size": "2.53oz",
+      "condition": "New",
+      "barcode": "6290362349662",
+      "sku": "6290362349662"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Cocoa butter",
+        "Cookie",
+        "Milk",
+        "Vanilla",
+        "Whipped cream"
+      ],
+      "vibe": "Creamy, sweet, cozy",
+      "bestFor": "Fall/winter; casual"
+    },
+    "liveNotesSourceUrl": "https://lattafa.com/product/cookie-crave/",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Lattafa\",\"Give Me Gourmand Cookie Crave\",\"Eau de Parfum\",\"2.53oz\",\"New\",\"6290362349662\",\"6290362349662\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795143613782_gpqdep",
+    "identity": {
+      "brand": "Rasasi",
+      "name": "La Yuqawam Orchid Prairie",
+      "concentration": "Eau de Parfum",
+      "size": "2.53oz",
+      "condition": "New",
+      "barcode": "614514204054",
+      "sku": "614514204054"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Rose",
+        "Geranium",
+        "Oud",
+        "Vanilla",
+        "Amber"
+      ],
+      "vibe": "Rosy, woody, warm",
+      "bestFor": "Fall/winter; evenings"
+    },
+    "liveNotesSourceUrl": "https://rasasistore.com/products/la-yuqawam-orchid-prairie",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Rasasi\",\"La Yuqawam Orchid Prairie\",\"Eau de Parfum\",\"2.53oz\",\"New\",\"614514204054\",\"614514204054\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795143449211_yajuqu",
+    "identity": {
+      "brand": "Dolce & Gabbana",
+      "name": "K Intense",
+      "concentration": "Eau de Parfum Intense",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "8057971187904",
+      "sku": "8057971187904"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Saffron",
+        "Fig",
+        "Leather"
+      ],
+      "vibe": "Warm, creamy, leathery",
+      "bestFor": "Fall/winter; evening"
+    },
+    "liveNotesSourceUrl": "https://www.ulta.com/p/k-by-dolce-gabbana-eau-de-parfum-intense-pimprod2043410",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 17500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum Intense",
+      "retailer": "Ulta",
+      "sourceUrl": "https://www.ulta.com/p/k-by-dolce-gabbana-eau-de-parfum-intense-pimprod2043410",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Dolce & Gabbana\",\"K Intense\",\"Eau de Parfum Intense\",\"1.7oz\",\"New\",\"8057971187904\",\"8057971187904\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact K EDP Intense, 3.3 oz/100 mL. Ulta $175, corroborated Nordstrom listing. Subscription excluded."
+    }
+  },
+  {
+    "productId": "p_1795143319042_cjvp1h",
+    "identity": {
+      "brand": "Jean Paul Gaultier",
+      "name": "Scandal",
+      "concentration": "Eau de Parfum Intense",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8435415102728",
+      "sku": "8435415102728"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose Scandal Pour Homme Intense EDP, not women's Scandal Le Parfum or Pour Homme Le Parfum. Confirm.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum Intense",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Jean Paul Gaultier\",\"Scandal\",\"Eau de Parfum Intense\",\"3.4oz\",\"New\",\"8435415102728\",\"8435415102728\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Propose Scandal Pour Homme Intense EDP, not women's Scandal Le Parfum or Pour Homme Le Parfum. Confirm."
+    }
+  },
+  {
+    "productId": "p_1793929775824_sirhzv",
+    "identity": {
+      "brand": "Burberry",
+      "name": "Weekend (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3614227748569",
+      "sku": "3614227748569"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Burberry\",\"Weekend (Tester)\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3614227748569\",\"3614227748569\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795142725966_0m89ff",
+    "identity": {
+      "brand": "Coach",
+      "name": "Gold",
+      "concentration": "Parfum",
+      "size": "3.0oz",
+      "condition": "New",
+      "barcode": "3386460156707",
+      "sku": "3386460156707"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Pink pepper",
+        "Almond blossom",
+        "Vanilla"
+      ],
+      "vibe": "Warm, creamy, floral",
+      "bestFor": "Fall/spring; everyday or dinner"
+    },
+    "liveNotesSourceUrl": "https://www.ulta.com/p/coach-gold-parfum-pimprod2052477",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 14200,
+      "currency": "USD",
+      "referenceSize": "90 mL",
+      "concentration": "Parfum",
+      "retailer": "Official brand website",
+      "sourceUrl": "https://www.coach.com/products/gold-parfum-90ml/CBR68-L38.html",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Coach\",\"Gold\",\"Parfum\",\"3.0oz\",\"New\",\"3386460156707\",\"3386460156707\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Brand 90 mL Parfum $142, corroborated Ulta and Bloomingdale's; standard bottle range tops at 90 mL in checked sources."
+    }
+  },
+  {
+    "productId": "p_1795142674226_6zllje",
+    "identity": {
+      "brand": "Jean Paul Gaultier",
+      "name": "Le Male Elixir Absolu",
+      "concentration": "Parfum Intense",
+      "size": "4.2oz",
+      "condition": "New",
+      "barcode": "8435415102346",
+      "sku": "8435415102346"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Plum",
+        "Lavender",
+        "Tonka bean"
+      ],
+      "vibe": "Rich, fruity, warm",
+      "bestFor": "Fall/winter; evening"
+    },
+    "liveNotesSourceUrl": "https://www.jeanpaulgaultier.com/us/en_US/p/range-le-male/le-male-elixir-absolu-parfum-intense-000000000065214878",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 24400,
+      "currency": "USD",
+      "referenceSize": "200 mL",
+      "concentration": "Parfum Intense",
+      "retailer": "Official brand website",
+      "sourceUrl": "https://www.jeanpaulgaultier.com/us/en_US/p/range-le-male/le-male-elixir-absolu-parfum-intense-000000000065214879",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Jean Paul Gaultier\",\"Le Male Elixir Absolu\",\"Parfum Intense\",\"4.2oz\",\"New\",\"8435415102346\",\"8435415102346\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Official sizes 75/125/200 mL; no 100 mL. Largest 200 mL regular $244, not sale $183 or 125 mL $189."
+    }
+  },
+  {
+    "productId": "p_1795141866261_i1xpgv",
+    "identity": {
+      "brand": "Paco Rabanne",
+      "name": "1 Million Lucky",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3349668562671",
+      "sku": "3349668562671"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Green plum",
+        "Hazelnut",
+        "Cedarwood"
+      ],
+      "vibe": "Fruity, nutty, woody",
+      "bestFor": "Fall/spring; dates or evenings"
+    },
+    "liveNotesSourceUrl": "https://www.sephora.com/product/1-million-lucky-P431565",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 12600,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": "Sephora",
+      "sourceUrl": "https://www.sephora.com/product/1-million-lucky-P431565?skuId=2038354",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Paco Rabanne\",\"1 Million Lucky\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3349668562671\",\"3349668562671\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact Lucky EDT 100 mL $126, agrees Ulta SKU 2528697. Subscription excluded."
+    }
+  },
+  {
+    "productId": "p_1795142604856_hqgpkv",
+    "identity": {
+      "brand": "Maison Margiela",
+      "name": "Replica Jazz Club",
+      "concentration": "Eau de Toilette",
+      "size": "1.0oz",
+      "condition": "New",
+      "barcode": "3614273185868",
+      "sku": "3614273185868"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Pink pepper",
+        "Rum",
+        "Tobacco leaf",
+        "Vanilla"
+      ],
+      "vibe": "Boozy, smoky, warm",
+      "bestFor": "Fall/winter; dates or evenings"
+    },
+    "liveNotesSourceUrl": "https://www.maisonmargiela-fragrances.us/fragrances/replica-eau-de-toilette/replica-jazz-club/MM008.html",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 17000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": "Official brand website",
+      "sourceUrl": "https://www.maisonmargiela-fragrances.us/fragrances/replica-eau-de-toilette/replica-jazz-club/MM008.html",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Maison Margiela\",\"Replica Jazz Club\",\"Eau de Toilette\",\"1.0oz\",\"New\",\"3614273185868\",\"3614273185868\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "EDT spray bottle 100 mL $170, corroborated Nordstrom. Not the $136 refill. Inventory is 30 mL."
+    }
+  },
+  {
+    "productId": "p_1795142506810_ububu5",
+    "identity": {
+      "brand": "Gucci",
+      "name": "Bamboo (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "2.5oz",
+      "condition": "New",
+      "barcode": "8005610295107",
+      "sku": "8005610295107"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Mandarin",
+        "Ylang-ylang",
+        "Casablanca lily",
+        "Sandalwood",
+        "Amber"
+      ],
+      "vibe": "Bright, floral, creamy",
+      "bestFor": "Spring/summer; daytime or work"
+    },
+    "liveNotesSourceUrl": "https://www.nordstrom.com/s/gucci-bamboo-eau-de-toilette/4420560",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Gucci\",\"Bamboo (Tester)\",\"Eau de Toilette\",\"2.5oz\",\"New\",\"8005610295107\",\"8005610295107\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1793929275147_w6tbpw",
+    "identity": {
+      "brand": "Salvatore Ferragamo",
+      "name": "Subtil",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8056860211669",
+      "sku": "8056860211669"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose Subtil Pour Homme EDT, not Subtil for women EDP. Confirm.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Salvatore Ferragamo\",\"Subtil\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"8056860211669\",\"8056860211669\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Propose Subtil Pour Homme EDT, not Subtil for women EDP. Confirm."
+    }
+  },
+  {
+    "productId": "p_1793928518539_zwklf6",
+    "identity": {
+      "brand": "Jean Paul Gaultier",
+      "name": "Ultra Male Intense",
+      "concentration": "Eau de Toilette",
+      "size": "4.2oz",
+      "condition": "New",
+      "barcode": "8435415012027",
+      "sku": "8435415012027"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Jean Paul Gaultier\",\"Ultra Male Intense\",\"Eau de Toilette\",\"4.2oz\",\"New\",\"8435415012027\",\"8435415012027\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795141472000_3el726",
+    "identity": {
+      "brand": "Hugo Boss",
+      "name": "Hugo Green",
+      "concentration": "Eau de Toilette",
+      "size": "2.5oz",
+      "condition": "New",
+      "barcode": "3614229823790",
+      "sku": "3614229823790"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose HUGO Man EDT green flask; Green is informal. Confirm box identity/edition.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Hugo Boss\",\"Hugo Green\",\"Eau de Toilette\",\"2.5oz\",\"New\",\"3614229823790\",\"3614229823790\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Propose HUGO Man EDT green flask; Green is informal. Confirm box identity/edition."
+    }
+  },
+  {
+    "productId": "p_1791861342113_p4i915",
+    "identity": {
+      "brand": "Dolce & Gabbana",
+      "name": "Devotion",
+      "concentration": "Eau de Parfum",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "",
+      "sku": "8054754401059"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Dolce & Gabbana\",\"Devotion\",\"Eau de Parfum\",\"3.3oz\",\"New\",\"\",\"8054754401059\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795142310286_3sgeg7",
+    "identity": {
+      "brand": "Hugo Boss",
+      "name": "Hugo Dark Blue",
+      "concentration": "Eau de Toilette",
+      "size": "2.5oz",
+      "condition": "New",
+      "barcode": "737052031415",
+      "sku": "737052031415"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "No approved-source scent notes verified in this pass.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Hugo Boss\",\"Hugo Dark Blue\",\"Eau de Toilette\",\"2.5oz\",\"New\",\"737052031415\",\"737052031415\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1793929014335_9vfw9z",
+    "identity": {
+      "brand": "Lattafa",
+      "name": "Pride Art of Wood",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "6290360592763",
+      "sku": "6290360592763"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Bergamot",
+        "Pink pepper",
+        "Cedarwood",
+        "Vetiver",
+        "Oakmoss"
+      ],
+      "vibe": "Bright, woody, earthy",
+      "bestFor": "Spring/fall; everyday or work"
+    },
+    "liveNotesSourceUrl": "https://lattafa.com/product/art-of-wood/",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Lattafa\",\"Pride Art of Wood\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"6290360592763\",\"6290360592763\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795142081411_zni366",
+    "identity": {
+      "brand": "Hugo Boss",
+      "name": "Hugo Extreme",
+      "concentration": "Eau de Parfum",
+      "size": "2.5oz",
+      "condition": "New",
+      "barcode": "3616301623380",
+      "sku": "3616301623380"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose HUGO Extreme for men EDP; distinguish the women's fragrance. Confirm.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Hugo Boss\",\"Hugo Extreme\",\"Eau de Parfum\",\"2.5oz\",\"New\",\"3616301623380\",\"3616301623380\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Propose HUGO Extreme for men EDP; distinguish the women's fragrance. Confirm."
+    }
+  },
+  {
+    "productId": "p_1788979298887_bbaahn",
+    "identity": {
+      "brand": "Gucci",
+      "name": "Guilty Pour Homme (M)",
+      "concentration": "Eau de Toilette",
+      "size": "50ml",
+      "condition": "New",
+      "barcode": "737052339207",
+      "sku": "737052339207"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Lemon",
+        "Lavender",
+        "Orange blossom",
+        "Patchouli"
+      ],
+      "vibe": "Fresh, aromatic, woody",
+      "bestFor": "Spring/fall; everyday or dinner"
+    },
+    "liveNotesSourceUrl": "https://www.ulta.com/p/guilty-pour-homme-eau-de-toilette-xlsImpprod3400101",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Gucci\",\"Guilty Pour Homme (M)\",\"Eau de Toilette\",\"50ml\",\"New\",\"737052339207\",\"737052339207\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1793929364458_cpfyok",
+    "identity": {
+      "brand": "Salvatore Ferragamo",
+      "name": "Free Time",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8034097950025",
+      "sku": "8034097950025"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose F by Ferragamo Free Time EDT; confirm F by line on box.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Salvatore Ferragamo\",\"Free Time\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"8034097950025\",\"8034097950025\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Propose F by Ferragamo Free Time EDT; confirm F by line on box."
+    }
+  },
+  {
+    "productId": "p_1795141396816_ed5erl",
+    "identity": {
+      "brand": "Juicy Couture",
+      "name": "Viva La Juicy Rose",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "719346628365",
+      "sku": "719346628365"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Jasmine",
+        "Pink blossoms",
+        "Amber"
+      ],
+      "vibe": "Airy, floral, cheerful",
+      "bestFor": "Spring/summer; daytime or celebrations"
+    },
+    "liveNotesSourceUrl": "https://juicycouture.com/products/juicy-couture-viva-la-juicy-rose-eau-de-parfum-spray-1-7-oz",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Juicy Couture\",\"Viva La Juicy Rose\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"719346628365\",\"719346628365\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795141630090_olc95w",
+    "identity": {
+      "brand": "Carolina Herrera",
+      "name": "Very Good Girl",
+      "concentration": "Eau de Parfum",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "8411061043875",
+      "sku": "8411061043875"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Lychee",
+        "Red currant",
+        "Rose",
+        "Vanilla",
+        "Vetiver"
+      ],
+      "vibe": "Fruity, rosy, playful",
+      "bestFor": "Spring/fall; dates or nights out"
+    },
+    "liveNotesSourceUrl": "https://www.carolinaherrera.com/us/en/p-fragrance/very-good-girl",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 20500,
+      "currency": "USD",
+      "referenceSize": "150 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": "Official brand website",
+      "sourceUrl": "https://www.carolinaherrera.com/us/en/p-fragrance/very-good-girl?sku=000000000065190111",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Carolina Herrera\",\"Very Good Girl\",\"Eau de Parfum\",\"1.7oz\",\"New\",\"8411061043875\",\"8411061043875\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Official sizes 30/50/80/150 mL; no 100 mL. Largest 150 mL regular $205, not sale $164. Do not substitute 80 mL $184."
+    }
+  },
+  {
+    "productId": "p_1793930267060_xrj6a6",
+    "identity": {
+      "brand": "Juicy Couture",
+      "name": "Viva La Juicy Gold (Tester)",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "719346186667",
+      "sku": "719346186667"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose Viva La Juicy Gold Couture EDP; confirm full flanker name.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Juicy Couture\",\"Viva La Juicy Gold (Tester)\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"719346186667\",\"719346186667\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Propose Viva La Juicy Gold Couture EDP; confirm full flanker name."
+    }
+  },
+  {
+    "productId": "p_1795141506008_x5db3k",
+    "identity": {
+      "brand": "Afnan",
+      "name": "9PM",
+      "concentration": "Eau de Parfum",
+      "size": "5.07oz",
+      "condition": "New",
+      "barcode": "6290171075769",
+      "sku": "6290171075769"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Cinnamon",
+        "Vanilla",
+        "Tonka bean"
+      ],
+      "vibe": "Sweet, warm, spicy",
+      "bestFor": "Fall/winter; evenings"
+    },
+    "liveNotesSourceUrl": "https://us.afnan.com/products/9-pm",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 5000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": "Official brand website",
+      "sourceUrl": "https://us.afnan.com/products/9-pm",
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Afnan\",\"9PM\",\"Eau de Parfum\",\"5.07oz\",\"New\",\"6290171075769\",\"6290171075769\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Official variant JSON verifies EDP/100 ML/Pour Homme regular $50 vs sale $34.50; 150 mL regular $60 not used."
+    }
+  },
+  {
+    "productId": "p_1795141334293_5e6xku",
+    "identity": {
+      "brand": "Juicy Couture",
+      "name": "Juicy Couture (Tester)",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "098691038976",
+      "sku": "098691038976"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Watermelon",
+        "Tuberose",
+        "Vanilla",
+        "Creme brulee"
+      ],
+      "vibe": "Fruity, white-floral, sweet",
+      "bestFor": "Spring/fall; everyday"
+    },
+    "liveNotesSourceUrl": "https://www.macys.com/shop/product/juicy-couture-eau-de-parfum-1.7-oz?ID=222373",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Juicy Couture\",\"Juicy Couture (Tester)\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"098691038976\",\"098691038976\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795141230127_exewh5",
+    "identity": {
+      "brand": "Lattafa",
+      "name": "Teriaq",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "6290360595764",
+      "sku": "6290360595764"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Caramel",
+        "Bitter almond",
+        "Honey",
+        "Rhubarb",
+        "Leather"
+      ],
+      "vibe": "Sweet, tangy, leathery",
+      "bestFor": "Fall/winter; evenings"
+    },
+    "liveNotesSourceUrl": "https://lattafa.com/product/teriaq/",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Lattafa\",\"Teriaq\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"6290360595764\",\"6290360595764\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1795140971749_ry1e33",
+    "identity": {
+      "brand": "Salvatore Ferragamo",
+      "name": "Incanto Charm",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8056860211706",
+      "sku": "8056860211706"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "Propose Incanto Charms EDT (plural); confirm exact name on box.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Salvatore Ferragamo\",\"Incanto Charm\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"8056860211706\",\"8056860211706\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Propose Incanto Charms EDT (plural); confirm exact name on box."
+    }
+  },
+  {
+    "productId": "p_1795140993558_66bgd2",
+    "identity": {
+      "brand": "Salvatore Ferragamo",
+      "name": "Incanto Shine",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8056860211744",
+      "sku": "8056860211744"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": "No approved-source scent notes verified in this pass.",
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Salvatore Ferragamo\",\"Incanto Shine\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"8056860211744\",\"8056860211744\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1788591590865_jr8hc4",
+    "identity": {
+      "brand": "Mont Blanc",
+      "name": "Legend Red Set (EDP 100ml + EDP 7.5ml + SG 100ml)",
+      "concentration": "Eau de Parfum",
+      "size": "100ml + 7.5ml + 100ml",
+      "condition": "New",
+      "barcode": "3386460139090",
+      "sku": "3386460139090"
+    },
+    "liveNotes": null,
+    "liveNotesSourceUrl": null,
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Mont Blanc\",\"Legend Red Set (EDP 100ml + EDP 7.5ml + SG 100ml)\",\"Eau de Parfum\",\"100ml + 7.5ml + 100ml\",\"New\",\"3386460139090\",\"3386460139090\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Exact set UPC/contents not verified against an approved full-price retailer. No bottle-only retail substituted."
+    }
+  },
+  {
+    "productId": "p_1795140425726_8qiewe",
+    "identity": {
+      "brand": "Lattafa",
+      "name": "Pride Masa",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "6290360593050",
+      "sku": "6290360593050"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Mango",
+        "Saffron",
+        "Osmanthus",
+        "Suede",
+        "Amber"
+      ],
+      "vibe": "Fruity, textured, warm",
+      "bestFor": "Spring/fall; dinner or evening"
+    },
+    "liveNotesSourceUrl": "https://lattafa.com/product/masa/",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Lattafa\",\"Pride Masa\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"6290360593050\",\"6290360593050\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  },
+  {
+    "productId": "p_1793931826702_u7fkpe",
+    "identity": {
+      "brand": "Lattafa",
+      "name": "Mashrabya",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "6290360598321",
+      "sku": "6290360598321"
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Apple shisha accord",
+        "Cinnamon",
+        "Dates",
+        "Tobacco",
+        "Vanilla"
+      ],
+      "vibe": "Smoky, sweet, spicy",
+      "bestFor": "Fall/winter; evenings"
+    },
+    "liveNotesSourceUrl": "https://lattafa.com/product/mashrabya/",
+    "notesIssue": null,
+    "retailReference": {
+      "status": "not_verified",
+      "priceCents": null,
+      "currency": "USD",
+      "referenceSize": null,
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-20",
+      "identityKey": "[\"Lattafa\",\"Mashrabya\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"6290360598321\",\"6290360598321\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "No exact full-size/set regular USD price verified from an approved source in this expedited pass."
+    }
+  }
+]

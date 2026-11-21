@@ -60,7 +60,7 @@ async function main() {
   assert.equal(missing.products[0].hasLiveNotes, false);
   assert.equal(missing.products[0].hasQuickSellingLine, false);
   assert.equal(missing.products[0].hasRetailReference, true);
-  assert.equal(missing.products[0].retailReferenceVerified, null);
+  assert.equal(missing.products[0].retailReferenceVerified, false);
   failRead = true;
   const failed = await GET(request(token));
   assert.equal(failed.status, 500);

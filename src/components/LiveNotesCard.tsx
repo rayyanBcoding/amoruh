@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { RetailReferenceLine } from "./RetailReferenceLine";
+import type { RetailIdentity } from "@/lib/retail-reference";
 import type { Product, LiveNotes } from "@/lib/types";
 import { buildLiveNotes, getLiveNotesView } from "@/lib/live-notes";
 
@@ -9,7 +11,7 @@ import { buildLiveNotes, getLiveNotesView } from "@/lib/live-notes";
 // (PUT /api/products/[id] with { liveNotes }) — never inventory, price, etc.
 
 type Props = {
-  product: Pick<Product, "id" | "liveNotes" | "sellingKeyNotes" | "sellingScentProfile" | "fragranceNotes" | "topNotes" | "middleNotes" | "baseNotes">;
+  product: Pick<Product, "id" | "liveNotes" | "sellingKeyNotes" | "sellingScentProfile" | "fragranceNotes" | "topNotes" | "middleNotes" | "baseNotes" | "retailReference"> & RetailIdentity;
   /** Large type for the Go Live screen; compact for the inventory page. */
   size?: "live" | "compact";
   onSaved?: (n: LiveNotes) => void;
@@ -121,6 +123,7 @@ export function LiveNotesCard({ product, size = "live", onSaved }: Props) {
       ) : (
         <p className="text-sm text-ld-muted">No LIVE notes yet — tap <span className="font-semibold text-ld-white">Edit notes</span> to add key notes, vibe and best-for.</p>
       )}
+      <RetailReferenceLine key={product.id} product={product} />
     </div>
   );
 }
