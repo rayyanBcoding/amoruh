@@ -4,6 +4,7 @@ import { getProducts } from "@/lib/db";
 import { getAllReceivingEvents } from "@/lib/intake-db";
 import type { ReceivingEvent } from "@/lib/intake-types";
 import { getLiveNotesView } from "@/lib/live-notes";
+import { isVerifiedRetail } from "@/lib/retail-reference";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,8 +31,7 @@ export async function GET(req: NextRequest) {
       .map((p) => {
         const notes = getLiveNotesView(p);
         const receipt = latest.get(p.id);
-        // retailReference is not defined in the current Product model. Report
-        // presence defensively, but never invent verification semantics.
+        // Verification checks source, complete metadata, exact identity and age.
         const reference = (p as unknown as Record<string, unknown>).retailReference;
         return {
           productId: p.id,
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
           liveNotesNeedsReview: notes?.check ?? false,
           hasQuickSellingLine: !!p.sellingQuickLine?.trim(),
           hasRetailReference: reference !== undefined && reference !== null,
-          retailReferenceVerified: reference == null ? false : null,
+          retailReferenceVerified: reference == null ? false : isVerifiedRetail(p),
           latestReceipt: receipt ? {
             receiptId: receipt.id,
             intakeId: receipt.poId,
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       exportedAt: new Date().toISOString(),
       count: products.length,
-      retailReferenceNote: "Retail Reference has no implemented verification model yet; verified is false when absent, null (unknown) if an unrecognized reference exists. Existing retailPrice is not a verified reference.",
+      retailReferenceNote: "Retail verification requires approved source, exact current product identity and a check within 30 days. Existing retailPrice is never treated as a verified reference.",
       giftSetContentsNote: "No structured set contents are stored; check productName or verify manually.",
       products,
     }, { headers: { ...headers, "content-disposition": 'attachment; filename="amoruh-in-stock-catalog.json"' } });
