@@ -1,20 +1,30 @@
 import batch from "./data/intake-live-enrichment.json";
-import type { Product } from "./types";
+import type { Product, LiveNotes } from "./types";
 import { getLiveNotesView, buildLiveNotes } from "./live-notes";
-import { retailIdentity, retailReferenceError, isVerifiedRetail, type RetailReference } from "./retail-reference";
+import { retailIdentity, retailReferenceError, isVerifiedRetail, type RetailReference, type RetailIdentity } from "./retail-reference";
+
+interface EnrichmentRow {
+  productId: string;
+  identity: RetailIdentity;
+  liveNotes: Pick<LiveNotes, "keyNotes" | "vibe" | "bestFor"> | null;
+  liveNotesSourceUrl: string | null;
+  notesIssue: string | null;
+  retailReference: Omit<RetailReference, "status" | "currency"> & { status: string; currency: string };
+}
 
 export interface EnrichmentCounts {
   newLiveNotes: number; verifiedRetailReference: number; notVerifiedRetailReference: number;
   preservedLiveNotes: number; preservedRetailReference: number; skipped: number;
   notesUnresolved: { productId: string; reason: string }[];
 }
-// Fixed allowlist of 56 products from the two newest receipts in the supplied
-// production export. No matching by fuzzy name; replays only fill missing data.
-export function planIntakeEnrichment(current: Product[]) {
+// The default allowlist remains the original two-intake batch. Catalog scope
+// supplies its separately reviewed export allowlist. Replays fill missing data;
+// no fuzzy matching or discovery of unreviewed products at apply time.
+export function planIntakeEnrichment(current: Product[], rows: readonly EnrichmentRow[] = batch) {
   const counts: EnrichmentCounts = { newLiveNotes: 0, verifiedRetailReference: 0, notVerifiedRetailReference: 0, preservedLiveNotes: 0, preservedRetailReference: 0, skipped: 0, notesUnresolved: [] };
   const byId = new Map(current.map((p) => [p.id, p]));
   const changed = new Map<string, Product>();
-  for (const row of batch) { // newest receipts first
+  for (const row of rows) { // fixed exact-identity allowlist, never fuzzy matching
     const p = byId.get(row.productId);
     if (!p || !(p.inventory > 0) || retailIdentity(p) !== retailIdentity(row.identity)) { counts.skipped++; continue; }
     const next = { ...p };
