@@ -64,9 +64,9 @@ async function main() {
   assert.equal(isVerifiedRetail(verified, Date.parse("2027-01-01")), false);
   assert.notEqual(retailReferenceError({ ...verified.retailReference, priceCents: 12.5 }, verified.brand), null);
   const html = renderToStaticMarkup(createElement(RetailReferenceLine, { product: verified }));
-  assert.match(html, /Full-size retail:/);
+  assert.match(html, /Retail:/);
   assert.match(html, /Source:/);
-  assert.match(renderToStaticMarkup(createElement(RetailReferenceLine, { product: { ...verified, name: "Changed identity" } })), /Not verified/);
+  assert.match(renderToStaticMarkup(createElement(RetailReferenceLine, { product: { ...verified, name: "Changed identity" } })), /Retail: Pending/);
   await fake.set("amoruh:products", catalog);
   // Force an inventory change BETWEEN planning and EVAL. CAS must retry with
   // the new inventory and preserve it, not restore the stale value of 5.
