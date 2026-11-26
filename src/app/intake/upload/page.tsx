@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
+import { ProductPicker } from "@/components/intake/ProductPicker";
 import { MatchBadge } from "@/components/intake/IntakeBadges";
 import { CreateProductModal } from "@/components/intake/CreateProductModal";
 import { formatCurrency } from "@/lib/format";
@@ -448,20 +449,8 @@ export default function UploadInvoicePage() {
                           )}
                         </td>
                         <td className="rounded-r-xl px-3 py-3">
-                          <select
-                            value={resolved[i] ?? ""}
-                            onChange={(e) =>
-                              setResolved((prev) => prev.map((v, idx) => (idx === i ? e.target.value || null : v)))
-                            }
-                            className="w-56 rounded-lg border border-ld-border bg-ld-bg px-2 py-1.5 text-xs text-ld-white outline-none focus:border-ld-purple"
-                          >
-                            <option value="">— Unmatched —</option>
-                            {products.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.sku} — {p.brand} {p.name} ({p.size})
-                              </option>
-                            ))}
-                          </select>
+                          <ProductPicker products={products} value={resolved[i]}
+                            onSelect={(id) => setResolved((prev) => prev.map((v, idx) => idx === i ? id : v))} />
                           <div className="mt-1 flex flex-wrap items-center gap-2">
                             <button
                               onClick={() => setModalLineIndex(i)}
