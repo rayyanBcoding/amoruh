@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Nav } from "@/components/Nav";
 import { Button } from "@/components/Button";
 import { ConfirmDangerAction } from "@/components/ConfirmDangerAction";
+import { ProductPicker } from "@/components/intake/ProductPicker";
 import { POStatusBadge, LineStatusBadge, MatchBadge } from "@/components/intake/IntakeBadges";
 import { CreateProductModal } from "@/components/intake/CreateProductModal";
 import { formatCurrency, formatDate } from "@/lib/format";
@@ -393,23 +394,8 @@ export default function PODetailPage() {
                                   return (
                                     <div className="space-y-2 rounded-lg border border-ld-border bg-ld-bg p-3">
                                       <p className="text-[11px] font-bold uppercase tracking-widest text-ld-muted">Change product match</p>
-                                      <select
-                                        defaultValue=""
-                                        onChange={async (e) => {
-                                          if (!e.target.value) return;
-                                          if (await resolveLine(line.id, e.target.value)) setEditingLineId(null);
-                                        }}
-                                        className="w-full rounded-lg border border-ld-border bg-ld-bg-elevated px-2 py-1 text-xs text-ld-white outline-none focus:border-ld-purple"
-                                      >
-                                        <option value="">Choose a different existing product…</option>
-                                        {products
-                                          .filter((p) => p.id !== line.productId)
-                                          .map((p) => (
-                                            <option key={p.id} value={p.id}>
-                                              {p.sku} — {p.brand} {p.name} ({p.size})
-                                            </option>
-                                          ))}
-                                      </select>
+                                      <ProductPicker products={products} excludeId={line.productId} label="Choose a different existing product…"
+                                        onSelect={async (id) => { if (await resolveLine(line.id, id)) setEditingLineId(null); }} />
                                       <div className="flex flex-wrap items-center gap-3">
                                         <button
                                           onClick={() => {
@@ -447,18 +433,7 @@ export default function PODetailPage() {
                                   ) : (
                                     <MatchBadge type="unmatched" />
                                   )}
-                                  <select
-                                    defaultValue=""
-                                    onChange={(e) => resolveLine(line.id, e.target.value || null)}
-                                    className="rounded-lg border border-ld-border bg-ld-bg px-2 py-1 text-xs text-ld-white outline-none focus:border-ld-purple"
-                                  >
-                                    <option value="">Match to product…</option>
-                                    {products.map((p) => (
-                                      <option key={p.id} value={p.id}>
-                                        {p.sku} — {p.brand} {p.name} ({p.size})
-                                      </option>
-                                    ))}
-                                  </select>
+                                  <ProductPicker products={products} onSelect={(id) => { void resolveLine(line.id, id); }} />
                                 </div>
                                 {liveFuzzyByLineId.has(line.id) && (
                                   <button
