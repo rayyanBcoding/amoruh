@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Product } from "@/lib/types";
+import { isProductGender, productGenderLabel } from "@/lib/product-gender";
 import { BottleImage } from "@/components/BottleImage";
 import { useLiveSession } from "@/context/LiveSessionContext";
 import { getLiveNotesView, liveNotesOneLiner } from "@/lib/live-notes";
@@ -51,7 +52,7 @@ export function SearchPanel() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-ld-white">{p.name}</p>
                 <p className="truncate text-xs text-ld-muted">
-                  {p.brand} · {p.inventory} in stock · {p.sku}
+                  {p.brand}{isProductGender(p.gender) && <> · {productGenderLabel(p.gender)}</>} · {p.inventory} in stock · {p.sku}
                 </p>
                 {liveNotesOneLiner(getLiveNotesView(p)) && (
                   <p className="truncate text-xs font-medium text-ld-cyan">{liveNotesOneLiner(getLiveNotesView(p))}</p>
