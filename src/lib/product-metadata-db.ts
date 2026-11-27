@@ -32,3 +32,16 @@ export async function updateCatalogMetadata<T>(plan: (current: Product[]) => { p
   }
   throw new Error("Catalog changed during update; retry safely.");
 }
+
+/** Separate, narrow writer: a gender batch cannot modify notes, prices or stock. */
+export async function updateCatalogGender<T>(plan: (current: Product[]) => { products: Product[]; result: T }): Promise<T> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const current = await getProducts();
+    const { products, result } = plan(current);
+    const strip = (p: Product) => { const { gender: _gender, ...rest } = p; void _gender; return JSON.stringify(rest); };
+    if (current.length !== products.length || current.some((p, i) => strip(p) !== strip(products[i]))) throw new Error("Gender update attempted to change other product data.");
+    if (JSON.stringify(current) === JSON.stringify(products)) return result;
+    if (await redis.eval(METADATA_CAS, [KEYS.products, KEYS.version], [JSON.stringify(current), JSON.stringify(products)]) === "OK") return result;
+  }
+  throw new Error("Catalog changed during update; retry safely.");
+}

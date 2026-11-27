@@ -65,6 +65,8 @@ export interface Product {
   description: string;
   /** e.g. "New", "New in Box", "Tester", "Used - Like New". */
   condition: string;
+  /** Marketed fragrance audience; optional for older products. */
+  gender?: import("./product-gender").ProductGender | null;
   /** Shelf/vault location — internal only, never shown on the TV display. */
   shelf: string;
   inventory: number;

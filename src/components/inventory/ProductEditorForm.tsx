@@ -11,6 +11,7 @@ import { formatCurrency } from "@/lib/format";
 import { displayStatus } from "@/lib/product-status";
 import { getFragranceNotes } from "@/lib/fragrance-notes";
 import { computeWeightedAverageLandedCost } from "@/lib/intake-costing";
+import { PRODUCT_GENDER_LABELS, type ProductGender } from "@/lib/product-gender";
 import { LiveNotesCard } from "@/components/LiveNotesCard";
 
 type FormState = Omit<Product, "fragranceNotes"> & {
@@ -399,6 +400,13 @@ export function ProductEditorForm({
                 onChange={(e) => set("color", e.target.value)}
               />
             </div>
+          </Field>
+          <Field label="Marketed for" error={fieldErrors.gender}>
+            <select className={inputClass(!!fieldErrors.gender)} value={form.gender ?? ""}
+              onChange={(e) => set("gender", (e.target.value || null) as ProductGender | null)}>
+              <option value="">Not set</option>
+              {Object.entries(PRODUCT_GENDER_LABELS).map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
           </Field>
           <Field label="Condition">
             <select
