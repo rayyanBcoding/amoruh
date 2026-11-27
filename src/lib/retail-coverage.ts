@@ -3,7 +3,7 @@ import type { Product, LiveNotes } from "./types";
 import { buildLiveNotes, getLiveNotesView } from "./live-notes";
 import { retailIdentity, retailPriceView, retailReferenceError, type RetailIdentity, type RetailReference } from "./retail-reference";
 
-export const RETAIL_COVERAGE_VERSION = "2026-11-26-v1";
+export const RETAIL_COVERAGE_VERSION = "2026-11-27-v2";
 export interface CoverageRow {
   productId: string; identity: RetailIdentity; retailReference: RetailReference;
   liveNotes: LiveNotes | null; notesIssue: string | null; interpretation: string | null;
