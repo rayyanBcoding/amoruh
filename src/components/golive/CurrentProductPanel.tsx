@@ -7,6 +7,7 @@ import type { CurrentProductFinancialsView } from "@/context/LiveSessionContext"
 import { BottleImage } from "@/components/BottleImage";
 import { AuthenticBadge } from "@/components/Badge";
 import { Button } from "@/components/Button";
+import { isProductGender, productGenderLabel } from "@/lib/product-gender";
 import { formatCurrency } from "@/lib/format";
 import { getFragranceNotes } from "@/lib/fragrance-notes";
 import { useLiveSession } from "@/context/LiveSessionContext";
@@ -112,7 +113,9 @@ export function CurrentProductPanel({
                 <p className="text-sm font-bold uppercase tracking-widest text-ld-cyan">{product.brand}</p>
                 <h2 className="font-display text-3xl font-extrabold leading-tight text-ld-white lg:text-4xl">{product.name}</h2>
                 <p className="mt-1 text-sm text-ld-muted">
-                  {product.size} · {product.concentration || "—"} · SKU {product.sku}
+                  {product.size} · {product.concentration || "—"}
+                  {isProductGender(product.gender) && <span className="ml-2 rounded-full bg-ld-purple/15 px-2 py-0.5 text-xs font-semibold text-ld-purple">{productGenderLabel(product.gender)}</span>}
+                  {" · "}SKU {product.sku}
                 </p>
               </div>
 
