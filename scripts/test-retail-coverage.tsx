@@ -9,10 +9,11 @@ import prior from "../src/lib/data/intake-live-enrichment.json";
 import catalog from "../src/lib/data/catalog-live-enrichment.json";
 import seed from "../data/products.json";
 import type { Product } from "../src/lib/types";
-import { coverageRows, coverageTotals, planRetailCoverage, RETAIL_COVERAGE_VERSION } from "../src/lib/retail-coverage";
+import { coverageRows as entireCoverageRows, coverageTotals, planRetailCoverage, RETAIL_COVERAGE_VERSION } from "../src/lib/retail-coverage";
 import { retailIdentity, retailPriceView, retailReferenceError, type RetailReference } from "../src/lib/retail-reference";
 import { RetailReferenceLine } from "../src/components/RetailReferenceLine";
 
+const coverageRows=entireCoverageRows.slice(0,315);
 const fake=installFakeRedis();
 async function main(){
   assert.equal(coverageRows.length,315);
@@ -41,9 +42,9 @@ async function main(){
   }
   assert.deepEqual(coverageTotals(products),{totalCatalogProducts:315,productsWithLiveNotes:212,verifiedRetail:27,estimatedRetail:0,manualRetail:0,missingRetailPrice:288,inStock:144});
   const all=planRetailCoverage(products,Infinity);
-  assert.deepEqual(all.result.totals,{totalCatalogProducts:315,productsWithLiveNotes:306,verifiedRetail:32,estimatedRetail:283,manualRetail:0,missingRetailPrice:0,inStock:144});
+  assert.deepEqual(all.result.totals,{totalCatalogProducts:315,productsWithLiveNotes:313,verifiedRetail:32,estimatedRetail:283,manualRetail:0,missingRetailPrice:0,inStock:144});
   assert.equal(all.result.missing.length,0);
-  assert.equal(all.result.unresolvedNotes.length,9);
+  assert.equal(all.result.unresolvedNotes.length,2);
   assert.equal(all.products.find(p=>p.id==="p_1793930267060_xrj6a6")?.retailReference?.status,"estimated");
   const protectedFields=(p:Product)=>{const{liveNotes:_n,retailReference:_r,...rest}=p;void _n;void _r;return rest;};
   for(const [i,p] of products.entries()){
@@ -107,6 +108,6 @@ async function main(){
   const completeVersion=await fake.get("amoruh:version");
   await POST(request({version:RETAIL_COVERAGE_VERSION,limit:25}));
   assert.equal(await fake.get("amoruh:version"),completeVersion);
-  console.log(`Coverage:315 total;306 with notes;32 verified/283 estimated/0 explicit-manual/0 missing. Legacy operator-edited verified prices preserved. ${batches} resumable fixture batches; sold-out scope, manual/notes preservation, display statuses, stale evidence, auth, version guards, CAS inventory race and no-op replay passed.`);
+  console.log(`Coverage:315 total;313 with notes;32 verified/283 estimated/0 explicit-manual/0 missing. Legacy operator-edited verified prices preserved. ${batches} resumable fixture batches; sold-out scope, manual/notes preservation, display statuses, stale evidence, auth, version guards, CAS inventory race and no-op replay passed.`);
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

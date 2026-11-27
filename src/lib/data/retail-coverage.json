@@ -4742,9 +4742,22 @@
       "manuallyEdited": false,
       "verificationNotes": "Estimated regular USD retail for Juicy Couture Viva La Juicy Gold (Tester), Eau de Parfum. Named-line price point/brand retail tier, not an exact verified listing. Tester condition is ignored for this normal-bottle reference. Not derived from AMORUH MSRP, auction history, selling prices or costs. Reference size: 100 mL; standard-size assumptions should be corrected manually if needed."
     },
-    "liveNotes": null,
+    "liveNotes": {
+      "keyNotes": [
+        "Wild berries",
+        "Honeysuckle",
+        "Jasmine",
+        "Caramel",
+        "Vanilla"
+      ],
+      "vibe": "Sweet, floral, gourmand",
+      "bestFor": "Fall/winter; dates or evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
     "interpretation": null,
-    "notesIssue": "Exact scent identity/composition needs review; no invented notes."
+    "notesIssue": null
   },
   {
     "productId": "p_1793930341797_rrgwb4",
@@ -7467,9 +7480,20 @@
       "manuallyEdited": false,
       "verificationNotes": "Estimated regular USD retail for Jean Paul Gaultier Scandal, Eau de Parfum Intense. Named-line price point/brand retail tier, not an exact verified listing. Tester condition is ignored for this normal-bottle reference. Not derived from AMORUH MSRP, auction history, selling prices or costs. Reference size: 100 mL; standard-size assumptions should be corrected manually if needed."
     },
-    "liveNotes": null,
+    "liveNotes": {
+      "keyNotes": [
+        "Clary sage",
+        "Vetiver",
+        "Leather"
+      ],
+      "vibe": "Aromatic, woody, leathery",
+      "bestFor": "Fall/winter; evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
     "interpretation": null,
-    "notesIssue": "Exact scent identity/composition needs review; no invented notes."
+    "notesIssue": null
   },
   {
     "productId": "p_1795143449211_yajuqu",
@@ -7653,9 +7677,22 @@
       "manuallyEdited": false,
       "verificationNotes": "Estimated value of this named gift set (Guilty 3PC Set); contents are not independently verified. Uses an estimated named-line bundle price point, not the price of a different set. No assumed accessory list or discount/auction pricing. Catalog set size: 3.0oz."
     },
-    "liveNotes": null,
+    "liveNotes": {
+      "keyNotes": [
+        "Lemon",
+        "Lavender",
+        "Orange blossom",
+        "Cedarwood",
+        "Patchouli"
+      ],
+      "vibe": "Fresh, aromatic, woody",
+      "bestFor": "Spring/fall; everyday or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
     "interpretation": null,
-    "notesIssue": "Exact scent identity/composition needs review; no invented notes."
+    "notesIssue": null
   },
   {
     "productId": "p_1795144039451_hx5ccp",
@@ -7912,9 +7949,22 @@
       "manuallyEdited": false,
       "verificationNotes": "Estimated value of this named gift set (Seductive Red 2PC Set); contents are not independently verified. Uses an estimated named-line bundle price point, not the price of a different set. No assumed accessory list or discount/auction pricing. Catalog set size: 2.5oz."
     },
-    "liveNotes": null,
+    "liveNotes": {
+      "keyNotes": [
+        "Cherry",
+        "Almond",
+        "Pink pepper",
+        "Vanilla",
+        "Sandalwood"
+      ],
+      "vibe": "Sweet, fruity, creamy",
+      "bestFor": "Fall/spring; dates or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
     "interpretation": null,
-    "notesIssue": "Exact scent identity/composition needs review; no invented notes."
+    "notesIssue": null
   },
   {
     "productId": "p_1795144297448_umpdd7",
@@ -10291,9 +10341,22 @@
       "manuallyEdited": false,
       "verificationNotes": "Estimated regular USD retail for Viktor & Rolf Flowerbomb Extreme Intense (W), Eau de Parfum. Named-line price point/brand retail tier, not an exact verified listing. Tester condition is ignored for this normal-bottle reference. Not derived from AMORUH MSRP, auction history, selling prices or costs. Reference size: 100 mL; standard-size assumptions should be corrected manually if needed."
     },
-    "liveNotes": null,
+    "liveNotes": {
+      "keyNotes": [
+        "Raspberry",
+        "Jasmine",
+        "Rose",
+        "Orange blossom",
+        "Vanilla"
+      ],
+      "vibe": "Rich, fruity, floral",
+      "bestFor": "Fall/winter; evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
     "interpretation": null,
-    "notesIssue": "Exact scent identity/composition needs review; no invented notes."
+    "notesIssue": null
   },
   {
     "productId": "p_1788979327081_xd61mt",
@@ -10440,9 +10503,20 @@
       "manuallyEdited": false,
       "verificationNotes": "Estimated regular USD retail for GUCCI GUCCI THE ALCHEMIST'S GARDEN (U) SET EDP 3 X 15ML (A SONG FOR THE ROSE EDP + THE VOICE OF THE SNAKE EDP + FADING AUTUMN EDT), concentration stated in supplier title or ancillary item. Named-line price point/brand retail tier, not an exact verified listing. Tester condition is ignored for this normal-bottle reference. Not derived from AMORUH MSRP, auction history, selling prices or costs. Reference size: 3 × 15 mL (mixed EDP/EDT); standard-size assumptions should be corrected manually if needed."
     },
-    "liveNotes": null,
+    "liveNotes": {
+      "keyNotes": [
+        "Song for the Rose: rose",
+        "Voice of the Snake: oud",
+        "Fading Autumn: cedarwood"
+      ],
+      "vibe": "Mixed floral and woody scents",
+      "bestFor": "All seasons; discovery or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
     "interpretation": "Gucci Alchemist Garden discovery set",
-    "notesIssue": "Exact scent identity/composition needs review; no invented notes."
+    "notesIssue": null
   },
   {
     "productId": "p_1789079696464_g657sy",
@@ -12548,8 +12622,1887 @@
       "manuallyEdited": false,
       "verificationNotes": "Estimated regular USD retail for Mugler A star men, concentration stated in supplier title or ancillary item. Named-line price point/brand retail tier, not an exact verified listing. Tester condition is ignored for this normal-bottle reference. Not derived from AMORUH MSRP, auction history, selling prices or costs. Reference size: 100 mL; standard-size assumptions should be corrected manually if needed."
     },
-    "liveNotes": null,
-    "interpretation": "Mugler A*Men (concentration needs checking)",
-    "notesIssue": "Exact scent identity/composition needs review; no invented notes."
+    "liveNotes": {
+      "keyNotes": [
+        "Coffee",
+        "Patchouli",
+        "Vanilla",
+        "Lavender",
+        "Caramel"
+      ],
+      "vibe": "Bold, sweet, earthy",
+      "bestFor": "Fall/winter; evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "interpretation": "Barcode identifies original A*Men EDT 100 mL. Raw blank concentration and supplier name retained.",
+    "notesIssue": null
+  },
+  {
+    "productId": "p_1793929317707_bvydju",
+    "identity": {
+      "brand": "Carolina Herrera",
+      "name": "Good Girl Blush",
+      "concentration": "Eau de Parfum",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "8411061056769",
+      "sku": "8411061056769"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 22500,
+      "currency": "USD",
+      "referenceSize": "150 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Carolina Herrera\",\"Good Girl Blush\",\"Eau de Parfum\",\"1.7oz\",\"New\",\"8411061056769\",\"8411061056769\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Carolina Herrera Good Girl Blush. Reviewed named-line retail tier, not an exact verified listing. Reference: 150 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Bergamot",
+        "Peony",
+        "Ylang-ylang",
+        "Vanilla"
+      ],
+      "vibe": "Soft, floral, creamy",
+      "bestFor": "Spring/fall; daytime or dates",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1794530920798_h5bjej",
+    "identity": {
+      "brand": "Salvatore Ferragamo",
+      "name": "Incanto Shine",
+      "concentration": "Eau de Toilette",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "8052464891597",
+      "sku": "8052464891597"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 9500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Salvatore Ferragamo\",\"Incanto Shine\",\"Eau de Toilette\",\"1.7oz\",\"New\",\"8052464891597\",\"8052464891597\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Salvatore Ferragamo Incanto Shine. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Pineapple",
+        "Passion fruit",
+        "Freesia",
+        "Peach",
+        "Cedarwood"
+      ],
+      "vibe": "Fruity, floral, bright",
+      "bestFor": "Spring/summer; daytime",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1794531154331_pv5fqi",
+    "identity": {
+      "brand": "Dolce & Gabbana",
+      "name": "Light Blue Summer Vibes",
+      "concentration": "Eau de Toilette",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "8057971183494",
+      "sku": "8057971183494"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 12000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Dolce & Gabbana\",\"Light Blue Summer Vibes\",\"Eau de Toilette\",\"1.7oz\",\"New\",\"8057971183494\",\"8057971183494\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Dolce & Gabbana Light Blue Summer Vibes. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Bergamot",
+        "Peach",
+        "Cedarwood"
+      ],
+      "vibe": "Fresh, fruity, woody",
+      "bestFor": "Summer; daytime",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795744366358_cftx8z",
+    "identity": {
+      "brand": "Dolce & Gabbana",
+      "name": "K 3PC Set",
+      "concentration": "Eau de Parfum",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "8056669924050",
+      "sku": "8056669924050"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 17500,
+      "currency": "USD",
+      "referenceSize": "Estimated 3-piece set; 100 mL fragrance",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Dolce & Gabbana\",\"K 3PC Set\",\"Eau de Parfum\",\"3.3oz\",\"New\",\"8056669924050\",\"8056669924050\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Dolce & Gabbana K 3PC Set. Reviewed named-line retail tier, not an exact verified listing. Reference: Estimated 3-piece set; 100 mL fragrance. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Blood orange",
+        "Juniper",
+        "Fig",
+        "Geranium",
+        "Cedar"
+      ],
+      "vibe": "Fresh, spicy, woody",
+      "bestFor": "Spring/fall; everyday or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795744624968_yzize4",
+    "identity": {
+      "brand": "Ariana Grande",
+      "name": "Thank U Next (Tester)",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "812256024323",
+      "sku": "812256024323"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 7500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Ariana Grande\",\"Thank U Next (Tester)\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"812256024323\",\"812256024323\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Ariana Grande Thank U Next (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Pear",
+        "Raspberry",
+        "Coconut",
+        "Rose",
+        "Macaron"
+      ],
+      "vibe": "Sweet, fruity, creamy",
+      "bestFor": "Spring/summer; casual or dates",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795744705100_n9mu6b",
+    "identity": {
+      "brand": "Azzaro",
+      "name": "Wanted",
+      "concentration": "Eau de Toilette",
+      "size": "1.69oz",
+      "condition": "New",
+      "barcode": "3351500016600",
+      "sku": "3351500016600"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 11000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Azzaro\",\"Wanted\",\"Eau de Toilette\",\"1.69oz\",\"New\",\"3351500016600\",\"3351500016600\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Azzaro Wanted. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Lemon",
+        "Ginger",
+        "Cardamom",
+        "Juniper",
+        "Tonka bean"
+      ],
+      "vibe": "Fresh, spicy, warm",
+      "bestFor": "Spring/fall; day to evening",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795744718865_ipe9ob",
+    "identity": {
+      "brand": "Prada",
+      "name": "Luna Rossa",
+      "concentration": "Eau de Toilette",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "3614273478755",
+      "sku": "3614273478755"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 12500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Prada\",\"Luna Rossa\",\"Eau de Toilette\",\"3.3oz\",\"New\",\"3614273478755\",\"3614273478755\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Prada Luna Rossa. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Lavender",
+        "Bitter orange",
+        "Clary sage",
+        "Spearmint",
+        "Ambroxan"
+      ],
+      "vibe": "Clean, aromatic, fresh",
+      "bestFor": "Spring/summer; daytime or office",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795744750970_ean1sf",
+    "identity": {
+      "brand": "Carolina Herrera",
+      "name": "212 Sexy (Tester)",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8411061088296",
+      "sku": "8411061088296"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 14500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Carolina Herrera\",\"212 Sexy (Tester)\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"8411061088296\",\"8411061088296\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Carolina Herrera 212 Sexy (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Mandarin",
+        "Pink pepper",
+        "Gardenia",
+        "Cotton candy",
+        "Vanilla"
+      ],
+      "vibe": "Sweet, floral, warm",
+      "bestFor": "Fall/winter; dates or evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795744836459_rt0vzl",
+    "identity": {
+      "brand": "Billie Eilish",
+      "name": "Eilish (Tester)",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "608940583630",
+      "sku": "608940583630"
+    },
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 8200,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": "Ulta",
+      "sourceUrl": "https://www.ulta.com/p/eilish-eau-de-parfum-with-vanilla-musk-pimprod2030620",
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Billie Eilish\",\"Eilish (Tester)\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"608940583630\",\"608940583630\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "3.4 oz bottle regular $82; current $57.40 promotion and 5 oz refill excluded."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Sugared petals",
+        "Vanilla",
+        "Cocoa",
+        "Tonka bean",
+        "Musk"
+      ],
+      "vibe": "Sweet, creamy, cozy",
+      "bestFor": "Fall/winter; casual evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795744864401_luil16",
+    "identity": {
+      "brand": "Addison Rae",
+      "name": "Happy AF",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "850042115176",
+      "sku": "850042115176"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 4500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Addison Rae\",\"Happy AF\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"850042115176\",\"850042115176\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Addison Rae Happy AF. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Pink lychee",
+        "Grapefruit",
+        "Peony",
+        "Rose",
+        "Sandalwood"
+      ],
+      "vibe": "Bright, fruity, floral",
+      "bestFor": "Spring/summer; daytime or casual",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795744908250_jh8uge",
+    "identity": {
+      "brand": "Carolina Herrera",
+      "name": "212 VIP (Tester)",
+      "concentration": "Eau de Parfum",
+      "size": "2.7oz",
+      "condition": "New",
+      "barcode": "8411061714799",
+      "sku": "8411061714799"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 14500,
+      "currency": "USD",
+      "referenceSize": "80 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Carolina Herrera\",\"212 VIP (Tester)\",\"Eau de Parfum\",\"2.7oz\",\"New\",\"8411061714799\",\"8411061714799\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Carolina Herrera 212 VIP (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 80 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Passion fruit",
+        "Rum",
+        "Gardenia",
+        "Vanilla",
+        "Musk"
+      ],
+      "vibe": "Tropical, sweet, boozy",
+      "bestFor": "Spring/fall; parties or evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795744918059_9c7pnt",
+    "identity": {
+      "brand": "Carolina Herrera",
+      "name": "212 (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8411061088289",
+      "sku": "8411061088289"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 14500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Carolina Herrera\",\"212 (Tester)\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"8411061088289\",\"8411061088289\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Carolina Herrera 212 (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Orange blossom",
+        "Bergamot",
+        "Gardenia",
+        "Lily",
+        "Sandalwood"
+      ],
+      "vibe": "Fresh, floral, clean",
+      "bestFor": "Spring/summer; daytime or office",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795744937258_awdcmo",
+    "identity": {
+      "brand": "Ralph Lauren",
+      "name": "Polo Blue (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "4.2oz",
+      "condition": "New",
+      "barcode": "3360377031937",
+      "sku": "3360377031937"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 12000,
+      "currency": "USD",
+      "referenceSize": "125 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Ralph Lauren\",\"Polo Blue (Tester)\",\"Eau de Toilette\",\"4.2oz\",\"New\",\"3360377031937\",\"3360377031937\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Ralph Lauren Polo Blue (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 125 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Melon",
+        "Cucumber",
+        "Basil",
+        "Suede",
+        "Musk"
+      ],
+      "vibe": "Fresh, aquatic, easygoing",
+      "bestFor": "Spring/summer; daytime or casual",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795745036330_5k3dtp",
+    "identity": {
+      "brand": "Paco Rabanne",
+      "name": "XS (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3349668111367",
+      "sku": "3349668111367"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 11000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Paco Rabanne\",\"XS (Tester)\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3349668111367\",\"3349668111367\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Paco Rabanne XS (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Bergamot",
+        "Mint",
+        "Juniper",
+        "Coriander",
+        "Sandalwood"
+      ],
+      "vibe": "Fresh, aromatic, woody",
+      "bestFor": "Spring/summer; daytime or office",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795745728891_wsw7uo",
+    "identity": {
+      "brand": "Burberry",
+      "name": "Burberry for Men",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3614226905758",
+      "sku": "3614226905758"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 11200,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Burberry\",\"Burberry for Men\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3614226905758\",\"3614226905758\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Burberry Burberry for Men. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Bergamot",
+        "Lavender",
+        "Mint",
+        "Cedarwood",
+        "Sandalwood"
+      ],
+      "vibe": "Classic, aromatic, woody",
+      "bestFor": "All seasons; daytime or office",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795745883838_pdjyr1",
+    "identity": {
+      "brand": "Moschino",
+      "name": "Toy Boy 3PC Set",
+      "concentration": "Eau de Parfum",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8011003889433",
+      "sku": "8011003889433"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 13500,
+      "currency": "USD",
+      "referenceSize": "Estimated set; 100 mL fragrance",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Moschino\",\"Toy Boy 3PC Set\",\"Eau de Parfum\",\"3.4oz\",\"New\",\"8011003889433\",\"8011003889433\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Moschino Toy Boy 3PC Set. Reviewed named-line retail tier, not an exact verified listing. Reference: Estimated set; 100 mL fragrance. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Pink pepper",
+        "Pear",
+        "Rose",
+        "Vetiver",
+        "Sandalwood"
+      ],
+      "vibe": "Spicy, rosy, woody",
+      "bestFor": "Spring/fall; evenings or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795746019630_5435af",
+    "identity": {
+      "brand": "Azzaro",
+      "name": "Forever Wanted Elixir",
+      "concentration": "Parfum",
+      "size": "1.69oz",
+      "condition": "New",
+      "barcode": "3614274258080",
+      "sku": "3614274258080"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 15500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Azzaro\",\"Forever Wanted Elixir\",\"Parfum\",\"1.69oz\",\"New\",\"3614274258080\",\"3614274258080\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Azzaro Forever Wanted Elixir. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Raspberry",
+        "Cardamom",
+        "Leather",
+        "Vetiver",
+        "Lavandin"
+      ],
+      "vibe": "Fruity, spicy, leathery",
+      "bestFor": "Fall/winter; evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795746083238_y5h7zs",
+    "identity": {
+      "brand": "Azzaro",
+      "name": "The Most Wanted",
+      "concentration": "Parfum",
+      "size": "3.38oz",
+      "condition": "New",
+      "barcode": "3614273638852",
+      "sku": "3614273638852"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 15500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Azzaro\",\"The Most Wanted\",\"Parfum\",\"3.38oz\",\"New\",\"3614273638852\",\"3614273638852\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Azzaro The Most Wanted. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Ginger",
+        "Wood accord",
+        "Bourbon vanilla"
+      ],
+      "vibe": "Warm, spicy, sweet",
+      "bestFor": "Fall/winter; dates or evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795746220339_rq11wv",
+    "identity": {
+      "brand": "Valentino",
+      "name": "Uomo Born In Roma Green Stravaganza",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3614274024807",
+      "sku": "3614274024807"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 14000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Valentino\",\"Uomo Born In Roma Green Stravaganza\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3614274024807\",\"3614274024807\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Valentino Uomo Born In Roma Green Stravaganza. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Calabrian bergamot",
+        "Coffee",
+        "Vetiver"
+      ],
+      "vibe": "Fresh, roasted, woody",
+      "bestFor": "Spring/fall; day to evening",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795746238714_cdi5df",
+    "identity": {
+      "brand": "Valentino",
+      "name": "Donna Born In Roma Coral Fantasy",
+      "concentration": "Eau de Parfum",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "3614273672474",
+      "sku": "3614273672474"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 18000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Valentino\",\"Donna Born In Roma Coral Fantasy\",\"Eau de Parfum\",\"1.7oz\",\"New\",\"3614273672474\",\"3614273672474\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Valentino Donna Born In Roma Coral Fantasy. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Kiwi",
+        "Orange",
+        "Rose",
+        "Jasmine",
+        "Musk"
+      ],
+      "vibe": "Juicy, floral, bright",
+      "bestFor": "Spring/summer; daytime or dates",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795746254880_vhfpr9",
+    "identity": {
+      "brand": "Valentino",
+      "name": "Donna Born In Roma Green Stravaganza",
+      "concentration": "Eau de Parfum",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "3614274024753",
+      "sku": "3614274024753"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 18000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Valentino\",\"Donna Born In Roma Green Stravaganza\",\"Eau de Parfum\",\"1.7oz\",\"New\",\"3614274024753\",\"3614274024753\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Valentino Donna Born In Roma Green Stravaganza. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Lapsang souchong tea",
+        "Jasmine",
+        "Vanilla"
+      ],
+      "vibe": "Green, floral, creamy",
+      "bestFor": "Spring/fall; everyday or dinner",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795746277502_07oxk0",
+    "identity": {
+      "brand": "Givenchy",
+      "name": "Pi",
+      "concentration": "Eau de Toilette",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "3274872495586",
+      "sku": "3274872495586"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 13400,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Givenchy\",\"Pi\",\"Eau de Toilette\",\"3.3oz\",\"New\",\"3274872495586\",\"3274872495586\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Givenchy Pi. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Basil",
+        "Tarragon",
+        "Vanilla",
+        "Tonka bean",
+        "Benzoin"
+      ],
+      "vibe": "Warm, aromatic, sweet",
+      "bestFor": "Fall/winter; evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795746321873_14l0u2",
+    "identity": {
+      "brand": "Mugler",
+      "name": "A*Men Stellar Lumineuse",
+      "concentration": "Eau de Parfum",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "3614274317862",
+      "sku": "3614274317862"
+    },
+    "retailReference": {
+      "status": "verified",
+      "priceCents": 11500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": "Official brand website",
+      "sourceUrl": "https://www.mugler.com/fragrance/mens-fragrances/a-men/a-men-stellar-eau-de-parfum/M020604375.html?dwvar_M020604375_size=100_ml",
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Mugler\",\"A*Men Stellar Lumineuse\",\"Eau de Parfum\",\"3.3oz\",\"New\",\"3614274317862\",\"3614274317862\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Official US 100 mL $115, 50 mL $75. Normal retail bottle."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Lavandin",
+        "Pistachio",
+        "Wood accord"
+      ],
+      "vibe": "Nutty, aromatic, gourmand",
+      "bestFor": "Fall/winter; evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795746475490_u76m8m",
+    "identity": {
+      "brand": "Mugler",
+      "name": "Alien",
+      "concentration": "Eau de Parfum",
+      "size": "1.0oz",
+      "condition": "New",
+      "barcode": "3439600056914",
+      "sku": "3439600056914"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 18500,
+      "currency": "USD",
+      "referenceSize": "90 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Mugler\",\"Alien\",\"Eau de Parfum\",\"1.0oz\",\"New\",\"3439600056914\",\"3439600056914\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Mugler Alien. Reviewed named-line retail tier, not an exact verified listing. Reference: 90 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Jasmine",
+        "Cashmeran",
+        "White amber"
+      ],
+      "vibe": "Rich, floral, ambery",
+      "bestFor": "Fall/winter; evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795746717276_pmdfnl",
+    "identity": {
+      "brand": "Jean Paul Gaultier",
+      "name": "Scandal Intense",
+      "concentration": "Eau de Parfum",
+      "size": "5.1oz",
+      "condition": "New",
+      "barcode": "8435415102735",
+      "sku": "8435415102735"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 16000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Jean Paul Gaultier\",\"Scandal Intense\",\"Eau de Parfum\",\"5.1oz\",\"New\",\"8435415102735\",\"8435415102735\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Jean Paul Gaultier Scandal Intense. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Clary sage",
+        "Vetiver",
+        "Leather"
+      ],
+      "vibe": "Aromatic, woody, leathery",
+      "bestFor": "Fall/winter; evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": "Supplier title Scandal Intense / 150 mL; barcode maps to Pour Homme Intense. Catalog concentration retained; retail remains estimated."
+  },
+  {
+    "productId": "p_1795747055936_diviyv",
+    "identity": {
+      "brand": "Armaf",
+      "name": "Odyssey Mega Perfume Body Spray",
+      "concentration": "",
+      "size": "6.8oz",
+      "condition": "New",
+      "barcode": "6294015190670",
+      "sku": "6294015190670"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 1500,
+      "currency": "USD",
+      "referenceSize": "200 mL body spray",
+      "concentration": "",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Armaf\",\"Odyssey Mega Perfume Body Spray\",\"\",\"6.8oz\",\"New\",\"6294015190670\",\"6294015190670\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Armaf Odyssey Mega Perfume Body Spray. Reviewed named-line retail tier, not an exact verified listing. Reference: 200 mL body spray. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Orange",
+        "Bergamot",
+        "Ginger",
+        "Vetiver",
+        "Tonka bean"
+      ],
+      "vibe": "Fresh, citrusy, woody",
+      "bestFor": "Spring/summer; casual body spray",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747105609_qf8o08",
+    "identity": {
+      "brand": "Guess",
+      "name": "Effect 2PC Set",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "085715330116",
+      "sku": "085715330116"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 8500,
+      "currency": "USD",
+      "referenceSize": "Estimated 2-piece set; 100 mL fragrance",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Guess\",\"Effect 2PC Set\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"085715330116\",\"085715330116\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Guess Effect 2PC Set. Reviewed named-line retail tier, not an exact verified listing. Reference: Estimated 2-piece set; 100 mL fragrance. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Grapefruit",
+        "Pineapple",
+        "Clary sage",
+        "Lavender",
+        "Musk"
+      ],
+      "vibe": "Fresh, fruity, aromatic",
+      "bestFor": "Spring/summer; daytime or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747145837_tkwupa",
+    "identity": {
+      "brand": "Jimmy Choo",
+      "name": "Illicit (Tester)",
+      "concentration": "Eau de Parfum",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "3386460071758",
+      "sku": "3386460071758"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 12000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Jimmy Choo\",\"Illicit (Tester)\",\"Eau de Parfum\",\"3.3oz\",\"New\",\"3386460071758\",\"3386460071758\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Jimmy Choo Illicit (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Ginger",
+        "Bitter orange",
+        "Rose",
+        "Jasmine",
+        "Honey amber"
+      ],
+      "vibe": "Sweet, floral, warm",
+      "bestFor": "Fall/winter; dates or evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747166925_h3fqjk",
+    "identity": {
+      "brand": "Moschino",
+      "name": "I Love Love (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8011003993642",
+      "sku": "8011003993642"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 11000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Moschino\",\"I Love Love (Tester)\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"8011003993642\",\"8011003993642\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Moschino I Love Love (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Grapefruit",
+        "Orange",
+        "Red currant",
+        "Lily of the valley",
+        "Musk"
+      ],
+      "vibe": "Bright, citrusy, playful",
+      "bestFor": "Spring/summer; daytime",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747266298_11cz5h",
+    "identity": {
+      "brand": "Coach",
+      "name": "NYC Dreams Moonlight (Tester)",
+      "concentration": "Eau de Parfum",
+      "size": "3.0oz",
+      "condition": "New",
+      "barcode": "3386460152006",
+      "sku": "3386460152006"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 13200,
+      "currency": "USD",
+      "referenceSize": "90 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Coach\",\"NYC Dreams Moonlight (Tester)\",\"Eau de Parfum\",\"3.0oz\",\"New\",\"3386460152006\",\"3386460152006\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Coach NYC Dreams Moonlight (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 90 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Bergamot",
+        "Floral bouquet",
+        "Tonka bean"
+      ],
+      "vibe": "Soft, floral, ambery",
+      "bestFor": "Spring/fall; daytime or dinner",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747282611_tg9305",
+    "identity": {
+      "brand": "Coach",
+      "name": "NYC Dreams (Tester)",
+      "concentration": "Eau de Parfum",
+      "size": "3.0oz",
+      "condition": "New",
+      "barcode": "3386460113106",
+      "sku": "3386460113106"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 13200,
+      "currency": "USD",
+      "referenceSize": "90 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Coach\",\"NYC Dreams (Tester)\",\"Eau de Parfum\",\"3.0oz\",\"New\",\"3386460113106\",\"3386460113106\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Coach NYC Dreams (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 90 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Pear",
+        "Bitter orange",
+        "Gardenia",
+        "Cactus flower",
+        "Joshua tree wood"
+      ],
+      "vibe": "Fruity, floral, airy",
+      "bestFor": "Spring/summer; daytime",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747542392_i35wip",
+    "identity": {
+      "brand": "Coach",
+      "name": "Coach Man Blue",
+      "concentration": "Eau de Toilette",
+      "size": "1.3oz",
+      "condition": "New",
+      "barcode": "3386460113755",
+      "sku": "3386460113755"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 11600,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Coach\",\"Coach Man Blue\",\"Eau de Toilette\",\"1.3oz\",\"New\",\"3386460113755\",\"3386460113755\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Coach Coach Man Blue. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Lime",
+        "Absinthe",
+        "Ozonic accord",
+        "Cedarwood",
+        "Amber"
+      ],
+      "vibe": "Cool, fresh, woody",
+      "bestFor": "Spring/summer; daytime",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747603699_ewct6l",
+    "identity": {
+      "brand": "Gucci",
+      "name": "Guilty 2PC Set (3.0 EDT SPR, 2.5 DEO)",
+      "concentration": "Eau de Toilette",
+      "size": "3.0oz",
+      "condition": "New",
+      "barcode": "3616305267092",
+      "sku": "3616305267092"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 15000,
+      "currency": "USD",
+      "referenceSize": "Estimated set: EDT 90 mL + deodorant 75 g",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Gucci\",\"Guilty 2PC Set (3.0 EDT SPR, 2.5 DEO)\",\"Eau de Toilette\",\"3.0oz\",\"New\",\"3616305267092\",\"3616305267092\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Gucci Guilty 2PC Set (3.0 EDT SPR, 2.5 DEO). Reviewed named-line retail tier, not an exact verified listing. Reference: Estimated set: EDT 90 mL + deodorant 75 g. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Lemon",
+        "Lavender",
+        "Orange blossom",
+        "Cedarwood",
+        "Patchouli"
+      ],
+      "vibe": "Fresh, aromatic, woody",
+      "bestFor": "Spring/fall; everyday or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747694363_1ffztk",
+    "identity": {
+      "brand": "Juicy Couture",
+      "name": "Viva La Juicy La Fleur",
+      "concentration": "Eau de Toilette",
+      "size": "5.0oz",
+      "condition": "New",
+      "barcode": "719346593946",
+      "sku": "719346593946"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 12000,
+      "currency": "USD",
+      "referenceSize": "150 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Juicy Couture\",\"Viva La Juicy La Fleur\",\"Eau de Toilette\",\"5.0oz\",\"New\",\"719346593946\",\"719346593946\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Juicy Couture Viva La Juicy La Fleur. Reviewed named-line retail tier, not an exact verified listing. Reference: 150 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Red berries",
+        "Mandarin",
+        "Honeysuckle",
+        "Gardenia",
+        "Jasmine"
+      ],
+      "vibe": "Fruity, floral, light",
+      "bestFor": "Spring/summer; daytime",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747722386_4wca38",
+    "identity": {
+      "brand": "Coach",
+      "name": "Pure Platinum Men",
+      "concentration": "Parfum",
+      "size": "1.3oz",
+      "condition": "New",
+      "barcode": "3386460171106",
+      "sku": "3386460171106"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 13500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Coach\",\"Pure Platinum Men\",\"Parfum\",\"1.3oz\",\"New\",\"3386460171106\",\"3386460171106\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Coach Pure Platinum Men. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Lavender",
+        "Mandarin",
+        "Apple",
+        "Rum",
+        "Ambrox"
+      ],
+      "vibe": "Aromatic, warm, woody",
+      "bestFor": "Fall/spring; dinner or evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747747969_4pohl8",
+    "identity": {
+      "brand": "Carolina Herrera",
+      "name": "Bad Boy Cobalt Elixir",
+      "concentration": "Eau de Parfum",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "8411061083765",
+      "sku": "8411061083765"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 17500,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Carolina Herrera\",\"Bad Boy Cobalt Elixir\",\"Eau de Parfum\",\"1.7oz\",\"New\",\"8411061083765\",\"8411061083765\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Carolina Herrera Bad Boy Cobalt Elixir. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Black pepper",
+        "Sage",
+        "Black truffle",
+        "Resinous woods",
+        "Vanilla"
+      ],
+      "vibe": "Spicy, earthy, woody",
+      "bestFor": "Fall/winter; evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747792133_jx4t2u",
+    "identity": {
+      "brand": "Mont Blanc",
+      "name": "Signature Absolu",
+      "concentration": "Eau de Parfum",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "3386460132770",
+      "sku": "3386460132770"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 13000,
+      "currency": "USD",
+      "referenceSize": "90 mL",
+      "concentration": "Eau de Parfum",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Mont Blanc\",\"Signature Absolu\",\"Eau de Parfum\",\"1.7oz\",\"New\",\"3386460132770\",\"3386460132770\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Mont Blanc Signature Absolu. Reviewed named-line retail tier, not an exact verified listing. Reference: 90 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Pear",
+        "Mandarin",
+        "Pink pepper",
+        "Tuberose",
+        "Tonka bean"
+      ],
+      "vibe": "Warm, floral, creamy",
+      "bestFor": "Spring/fall; daytime or dinner",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747860040_ridnpy",
+    "identity": {
+      "brand": "Jean Paul Gaultier",
+      "name": "Mini 4PC Set (Le Male EDT, Scandal EDT, Le Beau EDT, Le Male Elixir)",
+      "concentration": "",
+      "size": "4 x 7ml",
+      "condition": "New",
+      "barcode": "8435415092760",
+      "sku": "8435415092760"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 8000,
+      "currency": "USD",
+      "referenceSize": "Mixed mini set: 4 × 7 mL",
+      "concentration": "",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Jean Paul Gaultier\",\"Mini 4PC Set (Le Male EDT, Scandal EDT, Le Beau EDT, Le Male Elixir)\",\"\",\"4 x 7ml\",\"New\",\"8435415092760\",\"8435415092760\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Jean Paul Gaultier Mini 4PC Set (Le Male EDT, Scandal EDT, Le Beau EDT, Le Male Elixir). Reviewed named-line retail tier, not an exact verified listing. Reference: Mixed mini set: 4 × 7 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Le Male: lavender",
+        "Scandal: caramel",
+        "Le Beau: coconut",
+        "Le Male Elixir: honey"
+      ],
+      "vibe": "Mixed fresh, sweet and warm scents",
+      "bestFor": "All seasons; discovery or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747884935_8azalz",
+    "identity": {
+      "brand": "Marc Jacobs",
+      "name": "Daisy",
+      "concentration": "Eau de Toilette",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "031655513027",
+      "sku": "031655513027"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 13700,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Marc Jacobs\",\"Daisy\",\"Eau de Toilette\",\"1.7oz\",\"New\",\"031655513027\",\"031655513027\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Marc Jacobs Daisy. Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Wild strawberry",
+        "Violet leaf",
+        "Gardenia",
+        "Jasmine",
+        "White woods"
+      ],
+      "vibe": "Fresh, floral, youthful",
+      "bestFor": "Spring/summer; daytime",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747937946_clunx5",
+    "identity": {
+      "brand": "Yves Saint Laurent",
+      "name": "L'Homme 2PC Set (3.3 EDT SPR, 1.7 S/G)",
+      "concentration": "Eau de Toilette",
+      "size": "3.3oz",
+      "condition": "New",
+      "barcode": "3660732601509",
+      "sku": "3660732601509"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 13000,
+      "currency": "USD",
+      "referenceSize": "Estimated set: EDT 100 mL + shower gel 50 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Yves Saint Laurent\",\"L'Homme 2PC Set (3.3 EDT SPR, 1.7 S/G)\",\"Eau de Toilette\",\"3.3oz\",\"New\",\"3660732601509\",\"3660732601509\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Yves Saint Laurent L'Homme 2PC Set (3.3 EDT SPR, 1.7 S/G). Reviewed named-line retail tier, not an exact verified listing. Reference: Estimated set: EDT 100 mL + shower gel 50 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Ginger",
+        "Bergamot",
+        "Violet leaf",
+        "Basil",
+        "Cedarwood"
+      ],
+      "vibe": "Fresh, spicy, woody",
+      "bestFor": "Spring/fall; office or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747952603_opimx7",
+    "identity": {
+      "brand": "Dolce & Gabbana",
+      "name": "Light Blue 2PC Set (1.7 EDT SPR, 1.7 B/C)",
+      "concentration": "Eau de Toilette",
+      "size": "1.7oz",
+      "condition": "New",
+      "barcode": "8057971187423",
+      "sku": "8057971187423"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 11000,
+      "currency": "USD",
+      "referenceSize": "Estimated set: EDT 50 mL + body cream 50 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Dolce & Gabbana\",\"Light Blue 2PC Set (1.7 EDT SPR, 1.7 B/C)\",\"Eau de Toilette\",\"1.7oz\",\"New\",\"8057971187423\",\"8057971187423\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Dolce & Gabbana Light Blue 2PC Set (1.7 EDT SPR, 1.7 B/C). Reviewed named-line retail tier, not an exact verified listing. Reference: Estimated set: EDT 50 mL + body cream 50 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Sicilian lemon",
+        "Apple",
+        "Cedarwood",
+        "Jasmine",
+        "Musk"
+      ],
+      "vibe": "Fresh, citrusy, breezy",
+      "bestFor": "Summer; daytime or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795747980732_9ndxtd",
+    "identity": {
+      "brand": "Mont Blanc",
+      "name": "Individuel (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "2.5oz",
+      "condition": "New",
+      "barcode": "3386460028417",
+      "sku": "3386460028417"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 8500,
+      "currency": "USD",
+      "referenceSize": "75 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Mont Blanc\",\"Individuel (Tester)\",\"Eau de Toilette\",\"2.5oz\",\"New\",\"3386460028417\",\"3386460028417\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Mont Blanc Individuel (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 75 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Cinnamon",
+        "Lavender",
+        "Raspberry",
+        "Vanilla",
+        "Sandalwood"
+      ],
+      "vibe": "Sweet, clean, warm",
+      "bestFor": "Fall/spring; everyday",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795748022824_yidaxd",
+    "identity": {
+      "brand": "Valentino",
+      "name": "Born In Roma Coral Fantasy (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "6294016984537",
+      "sku": "6294016984537"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 14000,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Valentino\",\"Born In Roma Coral Fantasy (Tester)\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"6294016984537\",\"6294016984537\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Valentino Born In Roma Coral Fantasy (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Red apple",
+        "Cardamom",
+        "Lavender",
+        "Clary sage",
+        "Tobacco"
+      ],
+      "vibe": "Fruity, spicy, warm",
+      "bestFor": "Fall/spring; evenings",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": "Notes based on explicit Uomo EDT Coral Fantasy title; unusual barcode remains unchanged. Draft requires identity review."
+  },
+  {
+    "productId": "p_1795748171899_ht14ow",
+    "identity": {
+      "brand": "Versace",
+      "name": "Dylan Blue 3PC Set (3.4 SPR, 5.0 S/G, 5ml Mini Travel)",
+      "concentration": "",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "8011003899999",
+      "sku": "8011003899999"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 14500,
+      "currency": "USD",
+      "referenceSize": "Estimated set: EDT 100 mL + shower gel 150 mL + mini 5 mL",
+      "concentration": "",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Versace\",\"Dylan Blue 3PC Set (3.4 SPR, 5.0 S/G, 5ml Mini Travel)\",\"\",\"3.4oz\",\"New\",\"8011003899999\",\"8011003899999\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Versace Dylan Blue 3PC Set (3.4 SPR, 5.0 S/G, 5ml Mini Travel). Reviewed named-line retail tier, not an exact verified listing. Reference: Estimated set: EDT 100 mL + shower gel 150 mL + mini 5 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Bergamot",
+        "Grapefruit",
+        "Black pepper",
+        "Patchouli",
+        "Incense"
+      ],
+      "vibe": "Fresh, aromatic, woody",
+      "bestFor": "Spring/summer; everyday or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795748410761_7dj64o",
+    "identity": {
+      "brand": "Burberry",
+      "name": "Hero (Tester)",
+      "concentration": "Eau de Toilette",
+      "size": "3.4oz",
+      "condition": "New",
+      "barcode": "3614229380125",
+      "sku": "3614229380125"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 11800,
+      "currency": "USD",
+      "referenceSize": "100 mL",
+      "concentration": "Eau de Toilette",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Burberry\",\"Hero (Tester)\",\"Eau de Toilette\",\"3.4oz\",\"New\",\"3614229380125\",\"3614229380125\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Burberry Hero (Tester). Reviewed named-line retail tier, not an exact verified listing. Reference: 100 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "Bergamot",
+        "Juniper",
+        "Black pepper",
+        "Cedarwood"
+      ],
+      "vibe": "Fresh, spicy, woody",
+      "bestFor": "Spring/fall; daytime",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
+  },
+  {
+    "productId": "p_1795748482833_zpiuu8",
+    "identity": {
+      "brand": "Jimmy Choo",
+      "name": "I Want Choo Mini 3PC Set (IWC, IWC Forever, IWC Le Parfum)",
+      "concentration": "",
+      "size": "3 x 10ml",
+      "condition": "New",
+      "barcode": "3386460159371",
+      "sku": "3386460159371"
+    },
+    "retailReference": {
+      "status": "estimated",
+      "priceCents": 8000,
+      "currency": "USD",
+      "referenceSize": "Mixed travel set: 3 × 10 mL",
+      "concentration": "",
+      "retailer": null,
+      "sourceUrl": null,
+      "checkedAt": "2026-11-26",
+      "identityKey": "[\"Jimmy Choo\",\"I Want Choo Mini 3PC Set (IWC, IWC Forever, IWC Le Parfum)\",\"\",\"3 x 10ml\",\"New\",\"3386460159371\",\"3386460159371\"]",
+      "manuallyEdited": false,
+      "verificationNotes": "Estimated regular USD retail for Jimmy Choo I Want Choo Mini 3PC Set (IWC, IWC Forever, IWC Le Parfum). Reviewed named-line retail tier, not an exact verified listing. Reference: Mixed travel set: 3 × 10 mL. Tester uses normal retail bottle. Set/mini values apply to the named bundle; no assumed contents beyond its title. No AMORUH MSRP, costs, sale/auction history or discounted prices used. Size assumptions need operator review if disputed."
+    },
+    "liveNotes": {
+      "keyNotes": [
+        "I Want Choo: peach",
+        "IWC Forever: cherry",
+        "IWC Le Parfum: jasmine",
+        "Vanilla"
+      ],
+      "vibe": "Mixed fruity, floral and warm scents",
+      "bestFor": "All seasons; travel or gifting",
+      "source": "ai_draft",
+      "check": true,
+      "updatedAt": "2026-11-27T03:00:00.000Z"
+    },
+    "notesIssue": null,
+    "interpretation": null
   }
 ]
