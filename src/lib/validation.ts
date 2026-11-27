@@ -1,3 +1,4 @@
+import { isProductGender } from "./product-gender";
 import type { Product } from "./types";
 import { liveNotesError } from "./live-notes";
 import { retailReferenceError } from "./retail-reference";
@@ -33,6 +34,10 @@ export function validateProductInput(
   opts: { existingProducts: Product[]; excludeId?: string; isCreate: boolean }
 ): void {
   const fields: Record<string, string> = {};
+
+  if (input.gender !== undefined && input.gender !== null && !isProductGender(input.gender)) {
+    fields.gender = "Choose Men, Women or Unisex.";
+  }
 
   if (opts.isCreate) {
     for (const key of REQUIRED_ON_CREATE) {

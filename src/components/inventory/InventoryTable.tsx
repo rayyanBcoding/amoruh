@@ -1,5 +1,6 @@
 "use client";
 
+import { productGenderLabel, type ProductGender } from "@/lib/product-gender";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -101,6 +102,7 @@ export function InventoryTable({ products, initialFilter }: { products: Product[
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("brand");
+  const [audience, setAudience] = useState<ProductGender | "all" | "missing">("all");
   const [filter, setFilter] = useState<FilterKey>(initialFilter ?? "all");
   const [landedCosts, setLandedCosts] = useState<Record<string, LandedCostInfo>>({});
   const [salesSummary, setSalesSummary] = useState<Record<string, SalesSummaryInfo>>({});
@@ -139,9 +141,10 @@ export function InventoryTable({ products, initialFilter }: { products: Product[
         : filter === "low_stock"
           ? rows.filter((r) => r.status !== "archived" && r.product.inventory > 0 && r.product.inventory <= LOW_STOCK_THRESHOLD)
           : rows.filter((r) => r.status === filter);
+    const byAudience = audience === "all" ? base : base.filter(r => audience === "missing" ? !r.product.gender : r.product.gender === audience);
     const searched = !q
-      ? base
-      : base.filter(
+      ? byAudience
+      : byAudience.filter(
           (r) =>
             r.product.name.toLowerCase().includes(q) ||
             r.product.brand.toLowerCase().includes(q) ||
@@ -166,7 +169,7 @@ export function InventoryTable({ products, initialFilter }: { products: Product[
           return 0;
       }
     });
-  }, [rows, query, sortKey, filter]);
+  }, [rows, query, sortKey, filter, audience]);
 
   const columns: { key: SortKey | null; label: string }[] = [
     { key: null, label: "" },
@@ -174,6 +177,7 @@ export function InventoryTable({ products, initialFilter }: { products: Product[
     { key: null, label: "UPC" },
     { key: "brand", label: "Brand" },
     { key: "name", label: "Product" },
+    { key: null, label: "Marketed for" },
     { key: "inventory", label: "Quantity" },
     { key: null, label: "Shelf" },
     { key: "landedCost", label: "Landed Cost" },
@@ -191,6 +195,10 @@ export function InventoryTable({ products, initialFilter }: { products: Product[
           placeholder="Search SKU, UPC, brand, product, shelf, TikTok listing…"
           className="w-full max-w-md rounded-xl border border-ld-border bg-ld-bg-elevated px-4 py-2.5 text-sm text-ld-white placeholder:text-ld-muted/60 outline-none focus:border-ld-purple focus:ring-4 focus:ring-ld-purple/15"
         />
+        <select aria-label="Filter by marketed audience" value={audience} onChange={e=>setAudience(e.target.value as typeof audience)}
+          className="rounded-lg border border-ld-border bg-ld-bg-elevated px-3 py-2 text-sm text-ld-white">
+          <option value="all">All audiences</option><option value="men">Men</option><option value="women">Women</option><option value="unisex">Unisex</option><option value="missing">Not set</option>
+        </select>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1 rounded-xl bg-ld-bg-elevated p-1">
             {FILTERS.map((f) => (
@@ -241,6 +249,7 @@ export function InventoryTable({ products, initialFilter }: { products: Product[
                 <td className="px-3 py-2.5 font-mono text-xs text-ld-muted">{p.barcode}</td>
                 <td className="px-3 py-2.5 font-medium text-ld-white">{p.brand}</td>
                 <td className="px-3 py-2.5 text-ld-white">{p.name}</td>
+                <td className="px-3 py-2.5 text-xs text-ld-muted">{productGenderLabel(p.gender)}</td>
                 <td className="px-3 py-2.5">
                   <QuickInventory product={p} />
                 </td>

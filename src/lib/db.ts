@@ -87,6 +87,7 @@ export async function createProduct(input: Partial<Product>): Promise<Product> {
     longevity: input.longevity?.trim() || "",
     description: input.description?.trim() || "",
     condition: input.condition?.trim() || "New",
+    ...(input.gender !== undefined ? { gender: input.gender } : {}),
     shelf: input.shelf?.trim() || "",
     inventory: Math.max(0, Math.round(numberOrZero(input.inventory))),
     authentic: input.authentic ?? true,

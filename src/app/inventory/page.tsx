@@ -41,6 +41,7 @@ export default function InventoryPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Link href="/internal/catalog-gender" className="text-sm font-bold text-ld-purple hover:underline">Fill audience labels</Link>
             {snapshot?.currentProduct && (
               <Link href={`/inventory/${snapshot.currentProduct.id}`}>
                 <Button variant="outline" size="md">
